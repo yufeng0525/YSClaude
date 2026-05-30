@@ -13,7 +13,7 @@ import { playTTS, stopTTS } from '../src/services/tts';
 import { streamChat } from '../src/services/api';
 import { Diary } from '../src/types';
 import { getFavoriteDiaries } from '../src/db/operations';
-import { formatFullTime, formatTimeMarker } from '../src/utils/time';
+import { formatFullTime } from '../src/utils/time';
 
 const TABS = ['API 配置', '对话设置', 'TTS 配置', 'Tool 设置', '日记'] as const;
 
@@ -752,6 +752,11 @@ function DiaryTab() {
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
 
+  // 新建日记 Modal state
+  const [creating, setCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createContent, setCreateContent] = useState('');
+
   useEffect(() => {
     loadDiaries();
   }, []);
@@ -805,7 +810,7 @@ function DiaryTab() {
     const memoryMessages: { role: string; content: string }[] = [];
     if (favorites.length > 0) {
       const memoryContent = favorites
-        .map((d) => `【${formatTimeMarker(d.createdAt)}】${d.title}\n${d.content}`)
+        .map((d) => `${d.title}\n${d.content}`)
         .join('\n\n---\n\n');
       memoryMessages.push({ role: 'system', content: `以下是你的近期日记：\n\n${memoryContent}` });
     }
@@ -862,6 +867,25 @@ function DiaryTab() {
     setFromStr('');
     setToStr('');
     Alert.alert('已保存', '日记已保存');
+  }
+
+  function handleOpenCreate() {
+    setCreateTitle('');
+    setCreateContent('');
+    setCreating(true);
+  }
+
+  async function handleSaveCreate() {
+    const content = createContent.trim();
+    const title = createTitle.trim();
+    if (!content && !title) {
+      Alert.alert('提示', '请输入日记内容');
+      return;
+    }
+    await addDiary(title || `日记 ${formatFullTime(Date.now())}`, content);
+    setCreating(false);
+    setCreateTitle('');
+    setCreateContent('');
   }
 
   function handleOpenEdit(d: Diary) {
@@ -936,7 +960,12 @@ function DiaryTab() {
       )}
 
       {/* 我的日记 */}
-      <Text style={styles.sectionTitle}>我的日记</Text>
+      <View style={styles.diaryHeaderRow}>
+        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>我的日记</Text>
+        <Pressable style={styles.diaryAddButton} onPress={handleOpenCreate}>
+          <Text style={styles.diaryAddText}>+ 新建</Text>
+        </Pressable>
+      </View>
       {diaries.length === 0 ? (
         <Text style={styles.hint}>暂无日记</Text>
       ) : (
@@ -994,6 +1023,38 @@ function DiaryTab() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* 新建日记 Modal */}
+      <Modal visible={creating} transparent animationType="fade">
+        <Pressable style={styles.overlay} onPress={() => setCreating(false)}>
+          <View style={styles.modal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>新建日记</Text>
+            <TextInput
+              style={styles.summaryTitleInput}
+              value={createTitle}
+              onChangeText={setCreateTitle}
+              placeholder="日记标题（留空自动生成）"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <TextInput
+              style={styles.summaryContentInput}
+              value={createContent}
+              onChangeText={setCreateContent}
+              multiline
+              placeholder="日记内容"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <View style={styles.modalButtons}>
+              <Pressable style={styles.modalCancel} onPress={() => setCreating(false)}>
+                <Text style={styles.modalCancelText}>取消</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirm} onPress={handleSaveCreate}>
+                <Text style={styles.modalConfirmText}>保存</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -1031,6 +1092,14 @@ const styles = StyleSheet.create({
     fontSize: 13, fontWeight: '600', color: colors.textSecondary,
     marginBottom: 10, marginTop: 8, textTransform: 'uppercase', letterSpacing: 0.5,
   },
+  diaryHeaderRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 10, marginTop: 8,
+  },
+  diaryAddButton: {
+    backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6,
+  },
+  diaryAddText: { color: '#FFFFFF', fontSize: 13, fontWeight: '500' },
   configList: { marginBottom: 16 },
   configChip: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.surface, marginRight: 8,
