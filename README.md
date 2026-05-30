@@ -25,9 +25,10 @@
 - 多 API 配置管理（命名保存、同名覆盖、拉取模型列表、测试连接）
 - 多模型随时切换
 - TTS 语音播放（MiniMax 语音合成，支持自定义 Voice ID）
-- System Prompt 自定义
+- System Prompt 自定义（自动在最前注入当前时间）
 - 消息隐藏（节省 token）
 - AI 输出长度限制
+- 时间戳分隔（相邻消息间隔 ≥ 30 分钟时，聊天页插入居中小字时间，并同步告知 AI）
 
 ### 扩展（规划中）
 - MCP Tool 调用
@@ -80,10 +81,13 @@ src/
 ├── components/
 │   ├── ChatBubble.tsx      # 消息气泡 + 操作图标
 │   ├── ChatInput.tsx       # 输入框 + 工具栏
-│   └── ModelSelector.tsx   # 模型切换弹窗
+│   ├── ModelSelector.tsx   # 模型切换弹窗
+│   └── TimeDivider.tsx     # 消息间居中时间分隔（间隔 >30min 时显示）
 ├── services/
 │   ├── api.ts              # 流式 API 调用（SSE）
 │   └── tts.ts              # MiniMax TTS 语音合成
+├── utils/
+│   └── time.ts             # 时间格式化 + 消息间隔时间戳阈值
 ├── stores/
 │   ├── chat.ts             # 对话状态 + 持久化
 │   └── settings.ts         # 配置状态（zustand persist + sqlite）
@@ -108,8 +112,9 @@ src/
 | P1 | SQLite 持久化 + 历史管理 + 多配置 | ✅ |
 | P2 | TTS 语音合成 + System Prompt + 对话设置 | ✅ |
 | P3 | MCP Tool 框架 | - |
-| P4 | Memory Vault + Tavily 搜索 | - |
+| P4 | Memory Vault + Tavily 搜索 | ✅ |
 | P5 | EAS Build 打包 APK | - |
+| P6 | 时间感知（system 注入当前时间 + 消息时间戳分隔） | ✅ |
 
 ## UI 设计
 

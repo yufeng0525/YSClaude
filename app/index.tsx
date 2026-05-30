@@ -9,7 +9,9 @@ import { useChatStore } from '../src/stores/chat';
 import { ChatBubble } from '../src/components/ChatBubble';
 import { ChatInput } from '../src/components/ChatInput';
 import { ModelSelector } from '../src/components/ModelSelector';
+import { TimeDivider } from '../src/components/TimeDivider';
 import { Message } from '../src/types';
+import { TIME_GAP_THRESHOLD_MS } from '../src/utils/time';
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -55,15 +57,24 @@ export default function ChatScreen() {
         ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id}
-        renderItem={({ item, index }) => (
-          <ChatBubble
-            message={item}
-            isLastAssistant={
-              item.role === 'assistant' &&
-              index === messages.length - 1
-            }
-          />
-        )}
+        renderItem={({ item, index }) => {
+          // 与上一条消息间隔超过阈值时，在该消息上方插入居中时间分隔
+          const prev = index > 0 ? messages[index - 1] : null;
+          const showDivider =
+            !prev || item.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
+          return (
+            <>
+              {showDivider && <TimeDivider timestamp={item.createdAt} />}
+              <ChatBubble
+                message={item}
+                isLastAssistant={
+                  item.role === 'assistant' &&
+                  index === messages.length - 1
+                }
+              />
+            </>
+          );
+        }}
         style={styles.messageList}
         contentContainerStyle={styles.messageContent}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}

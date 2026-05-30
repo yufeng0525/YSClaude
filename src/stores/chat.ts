@@ -4,6 +4,7 @@ import { randomUUID } from 'expo-crypto';
 import { streamChat, chatCompletion } from '../services/api';
 import { useSettingsStore } from './settings';
 import { getToolDefinitions, executeTool } from '../services/tools';
+import { formatCurrentTime, formatTimeMarker, TIME_GAP_THRESHOLD_MS } from '../utils/time';
 import {
   createConversation,
   updateConversation,
@@ -148,7 +149,9 @@ async function streamAssistantResponse(
   await insertMessage(conversationId, assistantMessage);
 
   const allMessages = get().messages;
-  const apiMessages = allMessages
+  // 先按 role 过滤并去掉刚创建的空 assistant 占位，再按隐藏区间过滤，
+  // 全程保留 createdAt 以便推导相邻消息的时间间隔。
+  const filtered = allMessages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .slice(0, -1)
     .filter((_, index) => {
@@ -156,8 +159,21 @@ async function streamAssistantResponse(
       return !settings.hiddenRanges.some(
         (r) => msgNum >= r.from && msgNum <= r.to
       );
-    })
-    .map((m) => ({ role: m.role, content: m.content }));
+    });
+
+  // 相邻消息间隔超过阈值时，在该消息 content 前插入一行独立时间标记。
+  // 第一条消息始终带标记，作为对话起点的时间锚点。
+  const apiMessages = filtered.map((m, index) => {
+    const prev = index > 0 ? filtered[index - 1] : null;
+    const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
+    const content = needMarker
+      ? `[时间 ${formatTimeMarker(m.createdAt)}]\n${m.content}`
+      : m.content;
+    return { role: m.role, content };
+  });
+
+  // 当前时间注入到 system prompt 的最前面（所有 prompt 之前）
+  const systemPromptWithTime = `当前时间：${formatCurrentTime()}\n\n${settings.systemPrompt}`;
 
   abortController = new AbortController();
 
@@ -186,7 +202,7 @@ async function streamAssistantResponse(
   try {
     const finalContent = await runToolLoop(
       { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model },
-      settings.systemPrompt,
+      systemPromptWithTime,
       apiMessages,
       settings.maxOutputTokens || undefined
     );
@@ -200,7 +216,7 @@ async function streamAssistantResponse(
           apiKey: config.apiKey,
           model: config.model,
           messages: [
-            { role: 'system', content: settings.systemPrompt },
+            { role: 'system', content: systemPromptWithTime },
             ...apiMessages,
           ],
           maxTokens: settings.maxOutputTokens || undefined,
