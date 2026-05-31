@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { Message, Conversation, HiddenRange } from '../types';
 import { randomUUID } from 'expo-crypto';
 import { streamChat, chatCompletion } from '../services/api';
@@ -35,6 +35,7 @@ interface ChatState {
   setError: (error: string | null) => void;
   editMessage: (id: string, content: string) => Promise<void>;
   removeMessage: (id: string) => Promise<void>;
+  removeToolInvocation: (messageId: string, invocationIndex: number) => Promise<void>;
   regenerate: () => Promise<void>;
   addHiddenRange: (range: HiddenRange) => Promise<void>;
   removeHiddenRange: (index: number) => Promise<void>;
@@ -183,9 +184,13 @@ async function streamAssistantResponse(
   const apiMessages = filtered.map((m, index) => {
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
+    let msgContent = m.content;
+    if (settings.stripThinking) {
+      msgContent = msgContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
+    }
     const content = needMarker
-      ? `[时间 ${formatTimeMarker(m.createdAt)}]\n${m.content}`
-      : m.content;
+      ? `[时间 ${formatTimeMarker(m.createdAt)}]\n${msgContent}`
+      : msgContent;
     return { role: m.role, content };
   });
 
@@ -443,6 +448,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       messages: state.messages.filter((m) => m.id !== id),
     }));
+  },
+
+  removeToolInvocation: async (messageId: string, invocationIndex: number) => {
+    const { messages } = get();
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg || !msg.toolInvocations) return;
+    const updated = msg.toolInvocations.filter((_, i) => i !== invocationIndex);
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, toolInvocations: updated.length > 0 ? updated : undefined } : m
+      ),
+    }));
+    await updateMessageToolInvocations(messageId, updated.length > 0 ? updated : undefined);
   },
 
   regenerate: async () => {

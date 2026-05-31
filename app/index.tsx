@@ -20,6 +20,7 @@ export default function ChatScreen() {
   const keyboardHeight = useKeyboardHeight();
   const { messages, hiddenRanges, isStreaming, error, addUserMessage, triggerResponse, stopStreaming } = useChatStore();
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [dismissedDividers, setDismissedDividers] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList<Message>>(null);
 
   useEffect(() => {
@@ -92,16 +93,20 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item, index }) => {
-          // 与上一条消息间隔超过阈值时，在该消息上方插入居中时间分隔
           const prev = index > 0 ? messages[index - 1] : null;
           const showDivider =
-            !prev || item.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
-          // 该消息对应的楼层号若落在隐藏区间内，则在界面上做淡化区分
+            (!prev || item.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS) &&
+            !dismissedDividers.has(item.id);
           const floor = floorMap.get(item.id);
           const isHidden = floor !== undefined && hiddenFloorSet.has(floor);
           return (
             <>
-              {showDivider && <TimeDivider timestamp={item.createdAt} />}
+              {showDivider && (
+                <TimeDivider
+                  timestamp={item.createdAt}
+                  onDelete={() => setDismissedDividers((prev) => new Set(prev).add(item.id))}
+                />
+              )}
               <ChatBubble
                 message={item}
                 isHidden={isHidden}

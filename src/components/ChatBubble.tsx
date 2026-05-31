@@ -95,7 +95,7 @@ function splitThinking(raw: string): { thinking: string; body: string } {
 
 export function ChatBubble({ message, isLastAssistant, isHidden }: Props) {
   const isUser = message.role === 'user';
-  const { messages, editMessage, removeMessage, regenerate } = useChatStore();
+  const { messages, editMessage, removeMessage, removeToolInvocation, regenerate } = useChatStore();
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editText, setEditText] = useState('');
   // 当前编辑目标消息的 id
@@ -263,21 +263,31 @@ export function ChatBubble({ message, isLastAssistant, isHidden }: Props) {
       {message.toolInvocations && message.toolInvocations.length > 0 && (
         <View style={styles.toolList}>
           {message.toolInvocations.map((inv, i) => (
-            <View key={i} style={styles.toolRow}>
-              <Image
-                source={require('../../assets/clock.png')}
-                style={styles.toolIconLeft}
-                resizeMode="contain"
-              />
-              <Text style={styles.toolText} numberOfLines={1}>
-                {formatToolInvocation(inv.name, inv.args)}
-              </Text>
-              <Image
-                source={require('../../assets/rightarrow.png')}
-                style={styles.toolIconRight}
-                resizeMode="contain"
-              />
-            </View>
+            <Pressable
+              key={i}
+              onLongPress={() => {
+                Alert.alert('删除', '确定删除该工具调用记录？', [
+                  { text: '取消', style: 'cancel' },
+                  { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, i) },
+                ]);
+              }}
+            >
+              <View style={styles.toolRow}>
+                <Image
+                  source={require('../../assets/clock.png')}
+                  style={styles.toolIconLeft}
+                  resizeMode="contain"
+                />
+                <Text style={styles.toolText} numberOfLines={1}>
+                  {formatToolInvocation(inv.name, inv.args)}
+                </Text>
+                <Image
+                  source={require('../../assets/rightarrow.png')}
+                  style={styles.toolIconRight}
+                  resizeMode="contain"
+                />
+              </View>
+            </Pressable>
           ))}
         </View>
       )}

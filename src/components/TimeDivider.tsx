@@ -1,19 +1,26 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { colors } from '../theme/colors';
 import { formatSmartTime } from '../utils/time';
 
 interface Props {
   timestamp: number;
+  onDelete?: () => void;
 }
 
-// 聊天列表中的时间分隔：小字、居中。
-// 当相邻两条消息间隔超过阈值时渲染。
-export function TimeDivider({ timestamp }: Props) {
+export function TimeDivider({ timestamp, onDelete }: Props) {
+  const handleLongPress = () => {
+    if (!onDelete) return;
+    Alert.alert('删除', '确定删除该时间标记？', [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: onDelete },
+    ]);
+  };
+
   return (
-    <View style={styles.row}>
+    <Pressable onLongPress={handleLongPress} style={styles.row}>
       <Text style={styles.text}>{formatSmartTime(timestamp)}</Text>
-    </View>
+    </Pressable>
   );
 }
 

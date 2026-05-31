@@ -281,7 +281,7 @@ function APIConfigTab() {
 /* ==================== 对话设置 Tab ==================== */
 
 function ChatSettingsTab() {
-  const { maxOutputTokens, systemPrompt, setSystemPrompt, setMaxOutputTokens } = useSettingsStore();
+  const { maxOutputTokens, systemPrompt, stripThinking, setSystemPrompt, setMaxOutputTokens, setStripThinking } = useSettingsStore();
   // 隐藏楼层现在按对话独立存储，数据源改为 chat store
   const { messages, conversationId, hiddenRanges, addHiddenRange, removeHiddenRange } = useChatStore();
   const [fromStr, setFromStr] = useState('');
@@ -449,6 +449,18 @@ function ChatSettingsTab() {
         <Pressable style={styles.fetchButton} onPress={handleSaveTokens}>
           <Text style={styles.fetchButtonText}>保存</Text>
         </Pressable>
+      </View>
+
+      {/* 不发送思维链 */}
+      <Text style={styles.sectionTitle}>思维链</Text>
+      <Text style={styles.hint}>开启后，AI 历史消息中的思维链内容不会发送给 AI，但仍会正常存储和显示，可节省 token</Text>
+      <View style={styles.switchRow}>
+        <Text style={styles.label}>不发送思维链</Text>
+        <Switch
+          value={stripThinking}
+          onValueChange={setStripThinking}
+          trackColor={{ true: colors.primary }}
+        />
       </View>
     </ScrollView>
   );
