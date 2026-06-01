@@ -34,6 +34,13 @@ const TOOL_LABELS: Record<string, string> = {
   search_memory_vault: '搜索记忆库',
   query_diary: '查询日记',
   web_search: '联网搜索',
+  read_web_page: '读取网页',
+  webview_open: '打开网页',
+  webview_observe: '观察网页',
+  webview_tap: '点击网页',
+  webview_click_element: '点击元素',
+  webview_click_selector: '点击选择器',
+  webview_wait: '等待网页',
 };
 
 // 把一次工具调用格式化成「动作描述 + 参数」的单行文字。
@@ -43,7 +50,10 @@ function formatToolInvocation(name: string, rawArgs: string): string {
   let detail = '';
   try {
     const args = JSON.parse(rawArgs || '{}');
-    detail = args.query ?? args.date ?? '';
+    detail = args.query ?? args.date ?? args.url ?? args.ms ?? args.index ?? args.selector ?? '';
+    if (!detail && args.x != null && args.y != null) {
+      detail = `${args.x}, ${args.y}`;
+    }
     if (detail && typeof detail !== 'string') detail = String(detail);
   } catch {
     detail = '';

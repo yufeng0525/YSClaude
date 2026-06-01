@@ -13,6 +13,7 @@
 | API 格式 | OpenAI 兼容 (`/v1/chat/completions`) |
 | Markdown | @ronradtke/react-native-markdown-display |
 | TTS | MiniMax T2A (expo-audio + expo-file-system) |
+| WebView | react-native-webview |
 | 打包 | EAS Build → APK |
 
 ## 功能
@@ -26,6 +27,7 @@
 - 多模型随时切换
 - TTS 语音播放（MiniMax 语音合成，支持自定义 Voice ID）
 - System Prompt 自定义（自动在最前注入当前时间）
+- 空输入触发回复：输入框为空时也可点击发送键直接请求 AI 回复
 - 消息隐藏（节省 token）
   - 按对话独立保存，切换对话自动加载各自的隐藏范围
   - 重叠或相邻范围自动合并（如 1-6 与 3-7 合并为 1-7）
@@ -57,7 +59,15 @@
   - 日记查询（按日期）
   - 日记上传：将本地日记单条上传到云端记忆库（管理接口，需管理员 Token）
   - Tavily 联网搜索
+  - 网页读取：用户发送链接后，AI 可调用 `read_web_page` 抓取标题、正文和摘要；可选配置 JS 渲染读取服务兜底
+  - 网页交互：AI 可在 App 内打开可见 WebView 面板，并通过 `webview_open` / `webview_observe` / `webview_click_element` / `webview_click_selector` / `webview_tap` / `webview_wait` 进行简单网页操作
+  - 流式 Tool 调用：启用工具后仍使用流式输出；模型需要工具时暂停执行工具，再继续流式回复
   - 工具调用可视化：AI 调用工具时在回复上方逐行展示「调用了什么工具 + 参数」（clock 图标 + 描述 + 箭头），随消息持久化
+- WebView 网页面板
+  - AI 打开网页时，用户端同步显示可见窗口
+  - 顶部标题栏可拖动，右下角可缩放窗口大小
+  - 同一链接重复打开时优先复用当前页面状态，不强制刷新
+  - 普通 DOM 点击优先使用元素编号 / selector，坐标点击主要用于 canvas 或无标准控件的页面
 - 思维链展示：AI 输出中 `<thinking></thinking>` 包裹的内容自动折叠为「Thought process」胶囊，单击展开查看
 
 ### 未来规划
@@ -93,6 +103,22 @@
 
 > 注意：云端日记以日期为主键（一个日期对应一篇），同一天重复上传可能覆盖。
 
+## Tool 设置
+
+在设置 > Tool 设置中可分别开启以下工具能力：
+
+- **记忆库 Memory Vault** — 连接自建记忆库，供 AI 搜索记忆和查询日记
+- **联网搜索 Web Search** — 配置 Tavily API Key 后，AI 可搜索实时信息
+- **网页读取 Web Page Reader** — 开启后，用户发送 `http/https` 链接时，AI 可调用 `read_web_page` 读取网页正文
+  - 静态网页会直接抓取 HTML 并提取正文
+  - 动态网页可选配置 Playwright 等后端渲染读取服务地址
+- **网页交互 Web Interaction** — 开启后，用户发送链接时，AI 可在 App 内打开可见 WebView 窗口并进行简单操作
+  - 支持打开、观察、点击元素、点击 selector、坐标点击、等待
+  - 适合简单网页交互和轻量前端小游戏
+  - 每轮最大操作次数可配置，防止无限循环
+
+网页交互窗口会出现在 App 内，用户可拖动标题栏改变位置，也可拖动右下角调整大小。窗口关闭前会保留当前页面状态，后续 AI 可继续观察和操作。
+
 ## 运行
 
 ```bash
@@ -124,11 +150,13 @@ src/
 │   ├── ChatBubble.tsx      # 消息气泡 + 操作图标 + 工具调用行 + 思维链折叠
 │   ├── ChatInput.tsx       # 输入框 + 工具栏
 │   ├── ModelSelector.tsx   # 模型切换弹窗
-│   └── TimeDivider.tsx     # 消息间居中时间分隔（间隔 >30min 时显示）
+│   ├── TimeDivider.tsx     # 消息间居中时间分隔（间隔 >30min 时显示）
+│   └── WebViewPanel.tsx    # AI 网页交互面板（可拖动、可缩放）
 ├── services/
-│   ├── api.ts              # 流式 API 调用（SSE）
+│   ├── api.ts              # 流式 API 调用（SSE + stream tool_calls）
 │   ├── tts.ts              # MiniMax TTS 语音合成
-│   └── tools.ts            # MCP 工具（记忆库搜索 / 日记查询 / 日记上传 / 联网搜索）
+│   ├── tools.ts            # 工具定义与执行（记忆库 / 搜索 / 网页读取 / 网页交互）
+│   └── webviewController.ts # Tool 与 WebViewPanel 的控制桥
 ├── utils/
 │   ├── time.ts             # 时间格式化 + 消息间隔时间戳阈值
 │   └── ranges.ts           # 隐藏楼层范围合并（重叠/相邻自动合并）

@@ -10,6 +10,7 @@ import {
   startAppStateListener,
   ensurePermission,
 } from '../src/services/notifications';
+import { WebViewPanel } from '../src/components/WebViewPanel';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -64,6 +65,7 @@ export default function RootLayout() {
           options={{ animation: 'slide_from_right' }}
         />
       </Stack>
+      <WebViewPanel />
     </>
   );
 }

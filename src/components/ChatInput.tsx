@@ -69,7 +69,9 @@ export function ChatInput({ onSend, onTriggerResponse, disabled, isStreaming, on
       setText('');
       setPendingImage(null);
     }
-    await onTriggerResponse();
+    if (!disabled) {
+      await onTriggerResponse();
+    }
   };
 
   const handleSendSticker = async (token: string) => {

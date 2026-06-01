@@ -2,7 +2,7 @@
 import { Message, Conversation, HiddenRange } from '../types';
 import { randomUUID } from 'expo-crypto';
 import { File } from 'expo-file-system';
-import { streamChat, chatCompletion } from '../services/api';
+import { streamChat, streamChatCompletion } from '../services/api';
 import { notifyReplyReady } from '../services/notifications';
 import { useSettingsStore } from './settings';
 import { getToolDefinitions, executeTool } from '../services/tools';
@@ -15,6 +15,7 @@ import {
   insertMessage,
   updateMessageContent,
   updateMessageToolInvocations,
+  deleteConversation,
   deleteMessage,
   getMessagesByConversation,
   getHiddenRanges,
@@ -77,29 +78,74 @@ function buildVisionContent(text: string, dataUrl: string): any[] {
   return parts;
 }
 
+const HTTP_URL_RE = /https?:\/\/[^\s<>"'`，。！？、）)\]}]+/i;
+
+function contentContainsHttpUrl(content: string | any[]): boolean {
+  if (typeof content === 'string') {
+    return HTTP_URL_RE.test(content);
+  }
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((part) => {
+    if (typeof part === 'string') return HTTP_URL_RE.test(part);
+    if (part && typeof part.text === 'string') return HTTP_URL_RE.test(part.text);
+    return false;
+  });
+}
+
+function messagesContainHttpUrl(messages: { role: string; content: string | any[] }[]): boolean {
+  return messages.some((message) => contentContainsHttpUrl(message.content));
+}
+
+function isAbortError(err: any): boolean {
+  const name = String(err?.name || '').toLowerCase();
+  const message = String(err?.message || '').toLowerCase();
+  return (
+    name === 'aborterror' ||
+    message.includes('abort') ||
+    message.includes('cancel')
+  );
+}
+
 /**
  * Tool Use 循环。
- * 返回最终的 assistant 文本内容；若没有启用任何工具则返回 null（调用方走流式路径）。
+ * 返回是否已由工具流式路径处理；若没有启用任何工具则返回 false（调用方走普通流式路径）。
  */
 async function runToolLoop(
   config: { baseUrl: string; apiKey: string; model: string },
   systemPrompt: string,
   apiMessages: { role: string; content: string | any[] }[],
   maxTokens: number | undefined,
+  onToken: (token: string) => void,
   // 每发生一次工具调用就回调一次，用于实时把记录推到 UI
-  onToolInvocation?: (inv: { name: string; args: string }) => void
-): Promise<string | null> {
+  onToolInvocation?: (inv: { name: string; args: string }) => void,
+  signal?: AbortSignal
+): Promise<boolean> {
   const settings = useSettingsStore.getState();
   const memoryEnabled = settings.memoryVaultConfig.enabled && !!settings.memoryVaultConfig.baseUrl;
   const webEnabled = settings.webSearchConfig.enabled && !!settings.webSearchConfig.tavilyApiKey;
+  const webPageReaderEnabled =
+    !!settings.webPageReaderConfig?.enabled && messagesContainHttpUrl(apiMessages);
+  const webInteractionEnabled =
+    !!settings.webInteractionConfig?.enabled && messagesContainHttpUrl(apiMessages);
 
-  const tools = getToolDefinitions({ memoryVault: memoryEnabled, webSearch: webEnabled });
+  const tools = getToolDefinitions({
+    memoryVault: memoryEnabled,
+    webSearch: webEnabled,
+    webPageReader: webPageReaderEnabled,
+    webInteraction: webInteractionEnabled,
+  });
   if (tools.length === 0) {
-    return null; // 无工具 → 走原有流式路径
+    return false; // 无工具 → 走原有流式路径
   }
 
-  // 每轮最大工具调用次数（记忆库配置；联网搜索复用同一上限）
-  const maxToolCalls = Math.max(1, settings.memoryVaultConfig.maxToolCalls || 3);
+  // 每轮最大工具调用次数。网页交互通常需要多步，启用时使用更高上限。
+  const maxToolCalls = Math.max(
+    1,
+    settings.memoryVaultConfig.maxToolCalls || 3,
+    webInteractionEnabled ? settings.webInteractionConfig?.maxToolCalls || 8 : 0
+  );
 
   // 构建对话消息（单个 system 消息 + 对话历史）
   const messages: any[] = [
@@ -110,26 +156,20 @@ async function runToolLoop(
   let toolCallCount = 0;
 
   while (true) {
-    const resp = await chatCompletion({
+    const message = await streamChatCompletion({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model: config.model,
       messages,
       maxTokens,
       tools,
-    });
+    }, onToken, signal);
 
-    const choice = resp.choices?.[0];
-    if (!choice) {
-      return '';
-    }
-
-    const message = choice.message;
     const toolCalls = message.tool_calls;
 
-    // 没有工具调用，或已达上限 → 返回最终内容
+    // 没有工具调用，或已达上限 → 当前内容已经通过 onToken 流式写入 UI
     if (!toolCalls || toolCalls.length === 0 || toolCallCount >= maxToolCalls) {
-      return message.content || '';
+      return true;
     }
 
     // 将 assistant 的 tool_calls 消息追加到上下文
@@ -153,6 +193,8 @@ async function runToolLoop(
       const result = await executeTool(tc.function.name, args, {
         memoryVaultConfig: settings.memoryVaultConfig,
         webSearchConfig: settings.webSearchConfig,
+        webPageReaderConfig: settings.webPageReaderConfig,
+        webInteractionConfig: settings.webInteractionConfig,
       });
       messages.push({
         role: 'tool',
@@ -296,17 +338,17 @@ async function streamAssistantResponse(
   ];
 
   try {
-    const finalContent = await runToolLoop(
+    const handledByToolLoop = await runToolLoop(
       { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model },
       fullSystemPrompt,
       apiMessages,
       settings.maxOutputTokens || undefined,
-      appendToolInvocation
+      onToken,
+      appendToolInvocation,
+      abortController.signal
     );
 
-    if (finalContent !== null) {
-      setAssistantContent(finalContent);
-    } else {
+    if (!handledByToolLoop) {
       await streamChat(
         {
           baseUrl: config.baseUrl,
@@ -329,14 +371,37 @@ async function streamAssistantResponse(
 
     await updateConversation(conversationId, { updatedAt: Date.now() });
   } catch (err: any) {
-    if (err.name !== 'AbortError') {
+    if (isAbortError(err)) {
+      set({ error: null });
+      const finalMessages = get().messages;
+      const lastMsg = finalMessages[finalMessages.length - 1];
+      const isEmptyAssistant =
+        lastMsg?.id === assistantMessage.id &&
+        lastMsg.role === 'assistant' &&
+        !lastMsg.content &&
+        (!lastMsg.toolInvocations || lastMsg.toolInvocations.length === 0);
+
+      if (isEmptyAssistant) {
+        await deleteMessage(lastMsg.id);
+        const remainingMessages = finalMessages.filter((m) => m.id !== lastMsg.id);
+        set({ messages: remainingMessages });
+
+        if (remainingMessages.length === 0) {
+          await deleteConversation(conversationId);
+          set({ conversationId: null, hiddenRanges: [] });
+        }
+      } else if (lastMsg?.id === assistantMessage.id && lastMsg.role === 'assistant') {
+        await updateMessageContent(lastMsg.id, lastMsg.content);
+        await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
+      }
+    } else {
       set({ error: err.message || '请求失败' });
-    }
-    const finalMessages = get().messages;
-    const lastMsg = finalMessages[finalMessages.length - 1];
-    if (lastMsg && lastMsg.role === 'assistant') {
-      await updateMessageContent(lastMsg.id, lastMsg.content);
-      await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
+      const finalMessages = get().messages;
+      const lastMsg = finalMessages[finalMessages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') {
+        await updateMessageContent(lastMsg.id, lastMsg.content);
+        await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
+      }
     }
   } finally {
     set({ isStreaming: false });
@@ -408,15 +473,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // 仅触发 AI 回复（针对当前历史消息），不新增用户消息。
   triggerResponse: async () => {
-    const { conversationId, messages, isStreaming } = get();
-    if (isStreaming || !conversationId || messages.length === 0) return;
-
-    // 防止重复：如果最后一条已经是空的 assistant 消息，不重复创建
-    const last = messages[messages.length - 1];
-    if (last.role === 'assistant' && last.content === '') return;
+    let { conversationId, messages, isStreaming } = get();
+    if (isStreaming) return;
 
     const settings = useSettingsStore.getState();
     if (!settings._hydrated) return;
+    const config = settings.apiConfigs[settings.activeConfigIndex];
+
+    if (!config || !config.baseUrl || !config.apiKey) {
+      set({ error: '请先在设置中配置 API' });
+      return;
+    }
+
+    if (!conversationId) {
+      conversationId = randomUUID();
+      const now = Date.now();
+      const conv: Conversation = {
+        id: conversationId,
+        title: '新对话',
+        systemPrompt: settings.systemPrompt,
+        model: config.model,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await createConversation(conv);
+      set({ conversationId });
+      messages = get().messages;
+    }
+
+    // 防止重复：如果最后一条已经是空的 assistant 消息，不重复创建
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant' && last.content === '') return;
 
     set({ isStreaming: true, error: null });
     await streamAssistantResponse(get, set, conversationId);

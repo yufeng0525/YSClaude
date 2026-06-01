@@ -595,7 +595,16 @@ function TTSConfigTab() {
 /* ==================== Tool 设置 Tab ==================== */
 
 function ToolConfigTab() {
-  const { memoryVaultConfig, webSearchConfig, setMemoryVaultConfig, setWebSearchConfig } = useSettingsStore();
+  const {
+    memoryVaultConfig,
+    webSearchConfig,
+    webPageReaderConfig,
+    webInteractionConfig,
+    setMemoryVaultConfig,
+    setWebSearchConfig,
+    setWebPageReaderConfig,
+    setWebInteractionConfig,
+  } = useSettingsStore();
 
   // 记忆库本地 state
   const [mvEnabled, setMvEnabled] = useState(memoryVaultConfig.enabled);
@@ -610,6 +619,14 @@ function ToolConfigTab() {
   const [wsEnabled, setWsEnabled] = useState(webSearchConfig.enabled);
   const [wsApiKey, setWsApiKey] = useState(webSearchConfig.tavilyApiKey);
   const [wsMaxResults, setWsMaxResults] = useState(String(webSearchConfig.maxResults));
+
+  // 网页读取本地 state
+  const [wprEnabled, setWprEnabled] = useState(!!webPageReaderConfig?.enabled);
+  const [wprRenderServiceUrl, setWprRenderServiceUrl] = useState(webPageReaderConfig?.renderServiceUrl || '');
+
+  // 网页交互本地 state
+  const [wiEnabled, setWiEnabled] = useState(!!webInteractionConfig?.enabled);
+  const [wiMaxCalls, setWiMaxCalls] = useState(String(webInteractionConfig?.maxToolCalls || 8));
 
   function handleSaveMemory() {
     const topK = parseInt(mvTopK, 10);
@@ -660,6 +677,28 @@ function ToolConfigTab() {
       maxResults: isNaN(maxResults) || maxResults <= 0 ? 5 : maxResults,
     });
     Alert.alert('已保存', '联网搜索配置已保存');
+  }
+
+  function handleSaveWebPageReader() {
+    const trimmedUrl = wprRenderServiceUrl.trim();
+    if (trimmedUrl && !/^https?:\/\//i.test(trimmedUrl)) {
+      Alert.alert('提示', '渲染读取服务地址必须以 http:// 或 https:// 开头');
+      return;
+    }
+    setWebPageReaderConfig({
+      enabled: wprEnabled,
+      renderServiceUrl: trimmedUrl,
+    });
+    Alert.alert('已保存', wprEnabled ? '网页读取配置已保存' : '网页读取已关闭');
+  }
+
+  function handleSaveWebInteraction() {
+    const maxToolCalls = parseInt(wiMaxCalls, 10);
+    setWebInteractionConfig({
+      enabled: wiEnabled,
+      maxToolCalls: isNaN(maxToolCalls) || maxToolCalls <= 0 ? 8 : maxToolCalls,
+    });
+    Alert.alert('已保存', wiEnabled ? '网页交互配置已保存' : '网页交互已关闭');
   }
 
   return (
@@ -746,6 +785,57 @@ function ToolConfigTab() {
 
       <View style={styles.actions}>
         <Pressable style={styles.saveButton} onPress={handleSaveWebSearch}>
+          <Text style={styles.saveButtonText}>保存配置</Text>
+        </Pressable>
+      </View>
+
+      {/* ===== 网页读取 Web Page Reader ===== */}
+      <Text style={styles.sectionTitle}>网页读取 Web Page Reader</Text>
+      <Text style={styles.hint}>开启后，AI 收到链接时可调用 read_web_page 抓取页面正文；如页面依赖 JS 渲染，可配置 Playwright 后端服务作为兜底</Text>
+
+      <View style={styles.switchRow}>
+        <Text style={styles.label}>启用网页读取</Text>
+        <Switch
+          value={wprEnabled}
+          onValueChange={setWprEnabled}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>渲染读取服务地址（可选）</Text>
+        <TextInput style={styles.input} value={wprRenderServiceUrl} onChangeText={setWprRenderServiceUrl}
+          placeholder="http://localhost:8787/read" placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none" />
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable style={styles.saveButton} onPress={handleSaveWebPageReader}>
+          <Text style={styles.saveButtonText}>保存配置</Text>
+        </Pressable>
+      </View>
+
+      {/* ===== 网页交互 Web Interaction ===== */}
+      <Text style={styles.sectionTitle}>网页交互 Web Interaction</Text>
+      <Text style={styles.hint}>开启后，AI 可在用户端显示网页面板，并进行打开、观察、点击和等待等简单操作</Text>
+
+      <View style={styles.switchRow}>
+        <Text style={styles.label}>启用网页交互</Text>
+        <Switch
+          value={wiEnabled}
+          onValueChange={setWiEnabled}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>最大操作次数（每轮）</Text>
+        <TextInput style={styles.input} value={wiMaxCalls} onChangeText={setWiMaxCalls}
+          keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} />
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable style={styles.saveButton} onPress={handleSaveWebInteraction}>
           <Text style={styles.saveButtonText}>保存配置</Text>
         </Pressable>
       </View>

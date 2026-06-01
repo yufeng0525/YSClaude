@@ -35,6 +35,16 @@ export interface WebSearchConfig {
   maxResults: number;
 }
 
+export interface WebPageReaderConfig {
+  enabled: boolean;
+  renderServiceUrl: string;
+}
+
+export interface WebInteractionConfig {
+  enabled: boolean;
+  maxToolCalls: number;
+}
+
 interface SettingsState {
   _hydrated: boolean;
   apiConfigs: NamedAPIConfig[];
@@ -46,6 +56,8 @@ interface SettingsState {
   ttsConfig: TTSConfig;
   memoryVaultConfig: MemoryVaultConfig;
   webSearchConfig: WebSearchConfig;
+  webPageReaderConfig: WebPageReaderConfig;
+  webInteractionConfig: WebInteractionConfig;
 
   setActiveConfig: (index: number) => void;
   saveAPIConfig: (config: NamedAPIConfig) => void;
@@ -57,6 +69,8 @@ interface SettingsState {
   setTTSConfig: (config: Partial<TTSConfig>) => void;
   setMemoryVaultConfig: (config: Partial<MemoryVaultConfig>) => void;
   setWebSearchConfig: (config: Partial<WebSearchConfig>) => void;
+  setWebPageReaderConfig: (config: Partial<WebPageReaderConfig>) => void;
+  setWebInteractionConfig: (config: Partial<WebInteractionConfig>) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -93,6 +107,14 @@ export const useSettingsStore = create<SettingsState>()(
         tavilyApiKey: '',
         maxResults: 5,
       },
+      webPageReaderConfig: {
+        enabled: false,
+        renderServiceUrl: '',
+      },
+      webInteractionConfig: {
+        enabled: false,
+        maxToolCalls: 8,
+      },
 
       setActiveConfig: (index) => set({ activeConfigIndex: index }),
 
@@ -127,6 +149,10 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ memoryVaultConfig: { ...state.memoryVaultConfig, ...config } })),
       setWebSearchConfig: (config) =>
         set((state) => ({ webSearchConfig: { ...state.webSearchConfig, ...config } })),
+      setWebPageReaderConfig: (config) =>
+        set((state) => ({ webPageReaderConfig: { ...state.webPageReaderConfig, ...config } })),
+      setWebInteractionConfig: (config) =>
+        set((state) => ({ webInteractionConfig: { ...state.webInteractionConfig, ...config } })),
     }),
     {
       name: 'ysclaude-settings',
@@ -141,6 +167,8 @@ export const useSettingsStore = create<SettingsState>()(
         ttsConfig: state.ttsConfig,
         memoryVaultConfig: state.memoryVaultConfig,
         webSearchConfig: state.webSearchConfig,
+        webPageReaderConfig: state.webPageReaderConfig,
+        webInteractionConfig: state.webInteractionConfig,
       }),
       onRehydrateStorage: () => () => {
         useSettingsStore.setState({ _hydrated: true });
