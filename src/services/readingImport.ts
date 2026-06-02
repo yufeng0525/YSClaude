@@ -1,8 +1,8 @@
-import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { unzipSync } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
 import { ReadingBookFormat, ReadingChapter } from '../types';
+import { pickAndroidReadingBookFile } from './androidFilePicker';
 
 export interface ParsedReadingBook {
   title: string;
@@ -16,6 +16,13 @@ export interface ParsedReadingBook {
 
 type ZipEntries = Record<string, Uint8Array>;
 
+export interface PickedReadingBookFile {
+  file: File;
+  name: string;
+  uri: string;
+  mimeType?: string;
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -26,19 +33,41 @@ const xmlParser = new XMLParser({
   trimValues: true,
 });
 
-export async function pickReadingBookDocument(): Promise<DocumentPicker.DocumentPickerAsset | null> {
-  const result = await DocumentPicker.getDocumentAsync({
-    type: '*/*',
-    copyToCacheDirectory: true,
-    multiple: false,
+export async function pickReadingBookDocument(): Promise<PickedReadingBookFile | null> {
+  const androidFile = await pickAndroidReadingBookFile();
+  if (androidFile) {
+    const file = new File(androidFile.uri);
+    return {
+      file,
+      name: androidFile.name,
+      uri: androidFile.uri,
+      mimeType: androidFile.mimeType,
+    };
+  }
+
+  const result = await File.pickFileAsync({
+    mimeTypes: [
+      'text/plain',
+      'application/epub+zip',
+      'application/zip',
+      'application/octet-stream',
+      '*/*',
+    ],
+    multipleFiles: false,
   });
 
   if (result.canceled) return null;
-  return result.assets[0] || null;
+  const file = result.result;
+  return {
+    file,
+    name: file.name,
+    uri: file.uri,
+    mimeType: file.type,
+  };
 }
 
 export async function parseReadingBookAsset(
-  asset: DocumentPicker.DocumentPickerAsset,
+  asset: PickedReadingBookFile,
   bookId: string
 ): Promise<ParsedReadingBook> {
   const format = getFormat(asset.name, asset.mimeType);
@@ -46,10 +75,10 @@ export async function parseReadingBookAsset(
     throw new Error('仅支持 txt 和 epub 文件');
   }
 
-  const fileUri = await copyImportedFile(asset.uri, bookId, asset.name);
+  const fileUri = await copyImportedFile(asset.file, bookId, asset.name);
 
   if (format === 'txt') {
-    const text = await readTextFile(asset.uri);
+    const text = await readTextFile(asset.file);
     const cleanText = normalizeBookText(text);
     return {
       title: titleFromFilename(asset.name),
@@ -62,7 +91,7 @@ export async function parseReadingBookAsset(
   }
 
   return {
-    ...(await parseEpub(asset.uri, bookId)),
+    ...(await parseEpub(asset.file, bookId)),
     fileUri,
   };
 }
@@ -74,31 +103,31 @@ function getFormat(name: string, mimeType?: string): ReadingBookFormat | null {
   return null;
 }
 
-async function copyImportedFile(uri: string, bookId: string, name: string): Promise<string | undefined> {
+async function copyImportedFile(file: File, bookId: string, name: string): Promise<string | undefined> {
   try {
     const dir = new Directory(Paths.document, 'reading-books');
     dir.create({ intermediates: true, idempotent: true });
     const ext = extensionFromName(name);
     const destination = new File(dir, `${bookId}${ext}`);
-    await new File(uri).copy(destination, { overwrite: true });
+    await file.copy(destination, { overwrite: true });
     return destination.uri;
   } catch (error) {
     console.warn('[reading] copy imported file failed', error);
-    return uri;
+    return file.uri;
   }
 }
 
-async function readTextFile(uri: string): Promise<string> {
+async function readTextFile(file: File): Promise<string> {
   try {
-    return await new File(uri).text();
+    return await file.text();
   } catch {
-    const bytes = await new File(uri).bytes();
+    const bytes = await file.bytes();
     return new TextDecoder('utf-8').decode(bytes);
   }
 }
 
-async function parseEpub(uri: string, bookId: string): Promise<ParsedReadingBook> {
-  const bytes = await new File(uri).bytes();
+async function parseEpub(file: File, bookId: string): Promise<ParsedReadingBook> {
+  const bytes = await file.bytes();
   const zip = unzipSync(bytes);
   const containerXml = readZipText(zip, 'META-INF/container.xml');
   if (!containerXml) throw new Error('无法读取 EPUB 容器信息');
@@ -124,7 +153,7 @@ async function parseEpub(uri: string, bookId: string): Promise<ParsedReadingBook
     if (id) manifest.set(id, item);
   }
 
-  const title = pickText(metadata.title) || titleFromFilename(uri);
+  const title = pickText(metadata.title) || titleFromFilename(file.name);
   const author = pickText(metadata.creator);
   const coverUri = await extractEpubCover(zip, manifestItems, metadata, basePath, bookId);
 

@@ -12,7 +12,7 @@
 | Markdown | @ronradtke/react-native-markdown-display |
 | TTS | MiniMax T2A (expo-audio + expo-file-system) |
 | WebView | react-native-webview |
-| 文件导入 | expo-document-picker / expo-file-system |
+| 文件导入 | Android ACTION_GET_CONTENT 来源选择器 / expo-file-system |
 | EPUB 解析 | fflate / fast-xml-parser |
 | 设备能力 | expo-device / expo-battery / expo-calendar |
 | 打包 | EAS Build → APK |
@@ -56,10 +56,13 @@
   - SQLite 持久化存储
 - AI 共读
   - 顶栏 reading 图标进入共读书架，支持导入 `txt` / `epub`
+  - Android 导入使用系统级 `ACTION_GET_CONTENT` 来源选择器，可从系统文件管理器、MT 管理器、QQ 等已注册文件提供服务的应用选择文件
   - EPUB 会解析书名、作者、章节正文，并尽量提取封面；TXT 会按文件名生成书名
   - 书籍、阅读位置和每本书的共读消息均通过 SQLite 持久化
   - 长按书籍可编辑书名、作者和封面；删除书籍会同步删除该书共读记录
-  - 阅读页底部提供独立共读面板，发送问题时会自动附带当前位置前方的原文片段
+  - 阅读页提供独立浮动共读面板，可拖动、右下角缩放，也可折叠为 reading 图标悬浮球
+  - 回车键只发送用户消息，点击 `AI` 按钮单独请求回复；长按共读消息可编辑或删除
+  - 请求回复时会附带 system prompt、书名、作者、当前位置前方原文片段、最近共读对话和用户新输入
   - 共读可使用独立 OpenAI 兼容 API 配置，也可一键复制普通对话 API 配置
 
 ### 扩展
@@ -149,7 +152,11 @@
 
 ## AI 共读配置
 
-在顶栏点击 reading 图标进入 AI 共读。书架页可以导入 `txt` / `epub`，也可以长按书籍编辑元数据和封面。阅读页会保存阅读进度，并在向 AI 提问时把当前位置前方的一段原文作为上下文。
+在顶栏点击 reading 图标进入 AI 共读。书架页可以导入 `txt` / `epub`，Android 会弹出系统级文件来源选择器，让用户从系统文件管理器、MT 管理器、QQ 等应用中选择文件；也可以长按书籍编辑元数据和封面。阅读页会保存阅读进度，并在请求 AI 回复时把当前位置前方的一段原文作为上下文。
+
+共读对话完全独立于普通聊天。阅读页的对话面板悬浮在正文上方，支持拖动、缩放和折叠为 reading 图标悬浮球；用户回车只发送自己的消息，点击 `AI` 按钮才会调用共读 API 获取回复。每条共读消息可以长按编辑或删除。
+
+每次 AI 请求会组装：`system prompt + 书名 + 作者 + 当前阅读位置向前截取的 N 字原文 + 最近 M 条共读对话 + 用户新输入`。原文字数和对话条数都从当前阅读位置或最新消息向前计数。
 
 共读设置支持：
 
@@ -201,8 +208,9 @@ src/
 │   └── WebViewPanel.tsx    # AI 网页交互面板（可拖动、可缩放）
 ├── services/
 │   ├── api.ts              # 流式 API 调用（SSE + stream tool_calls）
+│   ├── androidFilePicker.ts # Android 系统级文件来源选择桥
 │   ├── nativeTools.ts      # 设备信息 / 电池 / 应用使用统计 / 日历工具实现
-│   ├── readingImport.ts    # txt / epub 导入、正文/章节/封面解析
+│   ├── readingImport.ts    # txt / epub 导入、SAF 来源选择、正文/章节/封面解析
 │   ├── tts.ts              # MiniMax TTS 语音合成
 │   ├── tools.ts            # 工具定义与执行（记忆库 / 搜索 / 网页读取 / 网页交互 / 设备原生）
 │   ├── toolModules/        # 工具模块拆分实现
