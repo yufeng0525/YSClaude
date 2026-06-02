@@ -70,6 +70,7 @@ export interface ReadingConfig {
 
 export interface FloatingBallConfig {
   enabled: boolean;
+  ttsEnabled: boolean;
 }
 
 interface SettingsState {
@@ -172,6 +173,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
       floatingBallConfig: {
         enabled: false,
+        ttsEnabled: false,
       },
 
       setActiveConfig: (index) => set({ activeConfigIndex: index }),

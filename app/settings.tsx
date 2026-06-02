@@ -99,7 +99,7 @@ export default function SettingsScreen() {
 /* ==================== 悬浮球 Tab ==================== */
 
 function FloatingBallTab({ showToast }: { showToast: ToastFn }) {
-  const { floatingBallConfig, setFloatingBallConfig } = useSettingsStore();
+  const { floatingBallConfig, setFloatingBallConfig, ttsConfig } = useSettingsStore();
   const [busy, setBusy] = useState(false);
 
   async function handleToggle(value: boolean) {
@@ -138,6 +138,16 @@ function FloatingBallTab({ showToast }: { showToast: ToastFn }) {
     }
   }
 
+  function handleTTSToggle(value: boolean) {
+    if (value && (!ttsConfig.groupId.trim() || !ttsConfig.apiKey.trim() || !ttsConfig.voiceId.trim())) {
+      setFloatingBallConfig({ ttsEnabled: false });
+      Alert.alert('需要 TTS 配置', '请先在 TTS 配置中填写 Group ID、API Key 和 Voice ID。');
+      return;
+    }
+    setFloatingBallConfig({ ttsEnabled: value });
+    showToast(value ? '悬浮球 TTS 已开启' : '悬浮球 TTS 已关闭');
+  }
+
   return (
     <ScrollView style={styles.content}>
       <View style={styles.switchRow}>
@@ -146,6 +156,19 @@ function FloatingBallTab({ showToast }: { showToast: ToastFn }) {
           value={floatingBallConfig.enabled}
           onValueChange={handleToggle}
           disabled={busy}
+          trackColor={{ false: colors.border, true: colors.primary }}
+          thumbColor="#FFFFFF"
+        />
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.nativeToolText}>
+          <Text style={styles.label}>悬浮球 TTS</Text>
+          <Text style={styles.hint}>使用 TTS 配置中的 MiniMax 语音参数朗读悬浮球气泡文字</Text>
+        </View>
+        <Switch
+          value={!!floatingBallConfig.ttsEnabled}
+          onValueChange={handleTTSToggle}
           trackColor={{ false: colors.border, true: colors.primary }}
           thumbColor="#FFFFFF"
         />
@@ -381,7 +404,14 @@ function APIConfigTab({ showToast }: { showToast: ToastFn }) {
 function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
   const { maxOutputTokens, systemPrompt, stripThinking, setSystemPrompt, setMaxOutputTokens, setStripThinking } = useSettingsStore();
   // 隐藏楼层现在按对话独立存储，数据源改为 chat store
-  const { messages, conversationId, hiddenRanges, addHiddenRange, removeHiddenRange } = useChatStore();
+  const {
+    messages,
+    conversationId,
+    hiddenRanges,
+    addHiddenRange,
+    restoreHiddenRange,
+    removeHiddenRange,
+  } = useChatStore();
   const [fromStr, setFromStr] = useState('');
   const [toStr, setToStr] = useState('');
   const [tokensStr, setTokensStr] = useState(maxOutputTokens ? String(maxOutputTokens) : '');
@@ -391,13 +421,30 @@ function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
   const floorMessages = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
 
   function handleAddRange() {
+    const range = parseInputRange();
+    if (!range) return;
+    addHiddenRange(range);
+    clearRangeInputs();
+  }
+
+  function handleRestoreRange() {
+    const range = parseInputRange();
+    if (!range) return;
+    restoreHiddenRange(range);
+    clearRangeInputs();
+  }
+
+  function parseInputRange() {
     const from = parseInt(fromStr, 10);
     const to = parseInt(toStr, 10);
     if (isNaN(from) || isNaN(to) || from < 1 || to < from) {
       Alert.alert('提示', '请输入有效的范围（起始 ≤ 结束，且 ≥ 1）');
-      return;
+      return null;
     }
-    addHiddenRange({ from, to });
+    return { from, to };
+  }
+
+  function clearRangeInputs() {
     setFromStr('');
     setToStr('');
   }
@@ -469,7 +516,7 @@ function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
 
       {/* 隐藏消息 */}
       <Text style={styles.sectionTitle}>隐藏消息</Text>
-      <Text style={styles.hint}>隐藏的消息不会发送给 AI，可用于节省 token。隐藏范围按对话独立保存，重叠或相邻的范围会自动合并。</Text>
+      <Text style={styles.hint}>隐藏的消息不会发送给 AI，可用于节省 token。隐藏范围按对话独立保存，可添加隐藏，也可按范围恢复。</Text>
 
       {!conversationId ? (
         <Text style={styles.hint}>请先打开一个对话后再设置隐藏范围。</Text>
@@ -498,6 +545,9 @@ function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
             <Text style={styles.rangeLabel}>条</Text>
             <Pressable style={styles.rangeAddButton} onPress={handleAddRange}>
               <Text style={styles.rangeAddText}>添加</Text>
+            </Pressable>
+            <Pressable style={styles.rangeRestoreButton} onPress={handleRestoreRange}>
+              <Text style={styles.rangeRestoreText}>恢复</Text>
             </Pressable>
           </View>
 
@@ -1718,7 +1768,7 @@ const styles = StyleSheet.create({
   rangeText: { fontSize: 14, color: colors.text },
   rangeDelete: { fontSize: 20, color: colors.danger, paddingHorizontal: 8 },
   rangeInputRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20,
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 20,
   },
   rangeLabel: { fontSize: 14, color: colors.text },
   rangeInput: {
@@ -1730,6 +1780,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
   },
   rangeAddText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500' },
+  rangeRestoreButton: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  rangeRestoreText: { color: colors.primary, fontSize: 14, fontWeight: '500' },
   previewBox: {
     backgroundColor: colors.surface, borderRadius: 10, padding: 12, marginBottom: 20,
   },

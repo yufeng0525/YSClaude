@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, TextInput, Pressable, Text, StyleSheet, Image, Modal, ScrollView, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -14,7 +14,6 @@ interface Props {
   onEnableWebCruise?: () => void | Promise<void>;
   disabled?: boolean;
   isStreaming?: boolean;
-  webCruisePending?: boolean;
   onStop?: () => void;
   onModelPress?: () => void;
 }
@@ -25,14 +24,15 @@ export function ChatInput({
   onEnableWebCruise,
   disabled,
   isStreaming,
-  webCruisePending,
   onStop,
   onModelPress,
 }: Props) {
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const responseTouchStartedRef = useRef(false);
   const insets = useSafeAreaInsets();
   const { apiConfigs, activeConfigIndex } = useSettingsStore();
   const current = apiConfigs[activeConfigIndex];
@@ -77,20 +77,25 @@ export function ChatInput({
     setText(next);
   };
 
-  const handleStopOrSend = async () => {
+  const handleGetResponsePressIn = async () => {
+    responseTouchStartedRef.current = true;
     if (isStreaming) {
       onStop?.();
       return;
     }
-    const trimmed = text.trim();
-    if (trimmed || pendingImage) {
-      await onSend(trimmed, pendingImage || undefined);
-      setText('');
-      setPendingImage(null);
+    await onTriggerResponse();
+  };
+
+  const handleGetResponsePress = async () => {
+    if (responseTouchStartedRef.current) {
+      responseTouchStartedRef.current = false;
+      return;
     }
-    if (!disabled) {
-      await onTriggerResponse();
+    if (isStreaming) {
+      onStop?.();
+      return;
     }
+    await onTriggerResponse();
   };
 
   const handleSendSticker = async (token: string) => {
@@ -101,10 +106,11 @@ export function ChatInput({
     await onSend(token);
   };
 
-  const getSendIcon = () => {
+  const getResponseIcon = () => {
     if (isStreaming) return require('../../assets/stopsend.png');
-    if (text.trim() || pendingImage || webCruisePending) return require('../../assets/send2.png');
-    return require('../../assets/send1.png');
+    return isInputFocused
+      ? require('../../assets/getresponse2.png')
+      : require('../../assets/getresponse1.png');
   };
 
   return (
@@ -129,6 +135,8 @@ export function ChatInput({
           multiline
           maxLength={10000}
           editable={!disabled}
+          onFocus={() => setIsInputFocused(true)}
+          onBlur={() => setIsInputFocused(false)}
         />
         <View style={styles.toolbar}>
           <Pressable style={styles.optionsButton} onPress={() => setOptionsMenuVisible(true)}>
@@ -143,8 +151,12 @@ export function ChatInput({
             <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)}>
               <Image source={require('../../assets/sticker.png')} style={styles.stickerButtonImage} resizeMode="contain" />
             </Pressable>
-            <Pressable style={styles.sendButton} onPress={handleStopOrSend}>
-              <Image source={getSendIcon()} style={styles.sendImage} resizeMode="contain" />
+            <Pressable
+              style={styles.sendButton}
+              onPressIn={() => void handleGetResponsePressIn()}
+              onPress={() => void handleGetResponsePress()}
+            >
+              <Image source={getResponseIcon()} style={styles.sendImage} resizeMode="contain" />
             </Pressable>
           </View>
         </View>

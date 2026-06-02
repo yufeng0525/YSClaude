@@ -9,7 +9,7 @@ import { getToolDefinitions, executeTool } from '../services/tools';
 import { observeActiveWebView } from '../services/webviewController';
 import { formatWebViewObservation } from '../services/toolModules/webView';
 import { formatCurrentTime, formatTimeMarker, TIME_GAP_THRESHOLD_MS } from '../utils/time';
-import { mergeRanges } from '../utils/ranges';
+import { mergeRanges, subtractRange } from '../utils/ranges';
 import { buildStickerSystemInstruction } from '../utils/stickers';
 import {
   WEB_CRUISE_NOTICE_TEXT,
@@ -28,6 +28,7 @@ import {
   getHiddenRanges,
   updateHiddenRanges,
   getFavoriteDiaries,
+  getAllConversations,
 } from '../db/operations';
 
 interface ChatState {
@@ -38,9 +39,10 @@ interface ChatState {
   error: string | null;
 
   sendMessage: (content: string, imageUri?: string) => Promise<void>;
-  addUserMessage: (content: string, imageUri?: string) => Promise<void>;
+  addUserMessage: (content: string, imageUri?: string) => Promise<Message | null>;
   enableWebCruise: () => Promise<void>;
   triggerResponse: () => Promise<void>;
+  markMessagesForAutoHideAfterResponse: (ids: string[]) => void;
   stopStreaming: () => void;
   newConversation: () => void;
   loadConversation: (id: string) => Promise<void>;
@@ -50,11 +52,13 @@ interface ChatState {
   removeToolInvocation: (messageId: string, invocationIndex: number) => Promise<void>;
   regenerate: () => Promise<void>;
   addHiddenRange: (range: HiddenRange) => Promise<void>;
+  restoreHiddenRange: (range: HiddenRange) => Promise<void>;
   removeHiddenRange: (index: number) => Promise<void>;
   setHiddenRanges: (ranges: HiddenRange[]) => Promise<void>;
 }
 
 let abortController: AbortController | null = null;
+const autoHideAfterResponseIds = new Set<string>();
 
 async function readImageAsDataUrl(uri: string): Promise<string | null> {
   try {
@@ -84,6 +88,75 @@ function buildVisionContent(text: string, dataUrl: string): any[] {
     image_url: { url: dataUrl },
   });
   return parts;
+}
+
+function rangesForMessageIds(messages: Message[], ids: Set<string>): HiddenRange[] {
+  return messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((message, index) => ({ message, floor: index + 1 }))
+    .filter(({ message }) => ids.has(message.id))
+    .map(({ floor }) => ({ from: floor, to: floor }));
+}
+
+function floorForMessageId(messages: Message[], id: string): number | null {
+  let floor = 0;
+  for (const message of messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    floor += 1;
+    if (message.id === id) return floor;
+  }
+  return null;
+}
+
+function shiftHiddenRangesAfterDeletedFloor(
+  ranges: HiddenRange[],
+  deletedFloor: number
+): HiddenRange[] {
+  const next: HiddenRange[] = [];
+
+  for (const range of ranges) {
+    if (deletedFloor < range.from) {
+      next.push({ from: range.from - 1, to: range.to - 1 });
+      continue;
+    }
+
+    if (deletedFloor > range.to) {
+      next.push({ ...range });
+      continue;
+    }
+
+    if (range.from <= deletedFloor - 1) {
+      next.push({ from: range.from, to: deletedFloor - 1 });
+    }
+    if (deletedFloor + 1 <= range.to) {
+      next.push({ from: deletedFloor, to: range.to - 1 });
+    }
+  }
+
+  return mergeRanges(next.filter((range) => range.from <= range.to));
+}
+
+async function hideAutoHideMessagesAfterResponse(
+  get: () => ChatState,
+  set: (partial: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) => void,
+  conversationId: string,
+  historyMessages: Message[]
+): Promise<void> {
+  if (autoHideAfterResponseIds.size === 0) return;
+
+  const ranges = rangesForMessageIds(historyMessages, autoHideAfterResponseIds);
+  if (ranges.length === 0) return;
+
+  const hiddenIds = new Set(
+    historyMessages
+      .filter((message) => autoHideAfterResponseIds.has(message.id))
+      .map((message) => message.id)
+  );
+  hiddenIds.forEach((id) => autoHideAfterResponseIds.delete(id));
+
+  const merged = mergeRanges([...get().hiddenRanges, ...ranges]);
+  set({ hiddenRanges: merged });
+  await updateHiddenRanges(conversationId, merged);
 }
 
 const HTTP_URL_RE = /https?:\/\/[^\s<>"'`，。！？、）)\]}]+/i;
@@ -295,6 +368,7 @@ async function streamAssistantResponse(
     return;
   }
 
+  const transientResponseMessageIds: string[] = [];
   const attachedWebViewContext = await collectAttachedWebViewContext();
   if (attachedWebViewContext) {
     const systemMessage: Message = {
@@ -309,6 +383,7 @@ async function streamAssistantResponse(
     }));
 
     await insertMessage(conversationId, systemMessage);
+    transientResponseMessageIds.push(systemMessage.id);
   }
 
   const assistantMessage: Message = {
@@ -323,6 +398,7 @@ async function streamAssistantResponse(
   }));
 
   await insertMessage(conversationId, assistantMessage);
+  transientResponseMessageIds.push(assistantMessage.id);
 
   const allMessages = get().messages;
   const historyMessages = allMessages.slice(0, -1);
@@ -439,6 +515,32 @@ async function streamAssistantResponse(
     });
   };
 
+  const deleteTransientResponseMessages = async (): Promise<Message[]> => {
+    const transientIds = new Set(transientResponseMessageIds);
+    const currentMessages = get().messages;
+    const messagesToDelete = currentMessages.filter((message) => transientIds.has(message.id));
+
+    for (const message of messagesToDelete) {
+      await deleteMessage(message.id);
+    }
+
+    const remainingMessages = currentMessages.filter((message) => !transientIds.has(message.id));
+    set({ messages: remainingMessages });
+
+    if (remainingMessages.length === 0) {
+      await deleteConversation(conversationId);
+      set({ conversationId: null, hiddenRanges: [] });
+    }
+
+    return remainingMessages;
+  };
+
+  const isEmptyAssistantMessage = (message: Message | undefined): boolean =>
+    message?.id === assistantMessage.id &&
+    message.role === 'assistant' &&
+    !message.content.trim() &&
+    (!message.toolInvocations || message.toolInvocations.length === 0);
+
   // 流式路径要发送的完整消息：单个 system 消息（含身份设定 + 收藏日记）+ 对话历史。
   const outgoingMessages = [
     { role: 'system', content: fullSystemPrompt },
@@ -446,6 +548,7 @@ async function streamAssistantResponse(
   ];
 
   try {
+    let requestStarted = false;
     const handledByToolLoop = await runToolLoop(
       { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model },
       fullSystemPrompt,
@@ -456,6 +559,7 @@ async function streamAssistantResponse(
       abortController.signal,
       { webCruiseEnabled: !!pendingWebCruise }
     );
+    requestStarted = true;
 
     if (!handledByToolLoop) {
       await streamChat(
@@ -473,44 +577,32 @@ async function streamAssistantResponse(
 
     const finalMessages = get().messages;
     const lastMsg = finalMessages[finalMessages.length - 1];
-    if (lastMsg && lastMsg.role === 'assistant') {
+    if (isEmptyAssistantMessage(lastMsg)) {
+      await deleteTransientResponseMessages();
+    } else if (lastMsg && lastMsg.role === 'assistant') {
       await updateMessageContent(lastMsg.id, lastMsg.content);
       await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
     }
 
     await updateConversation(conversationId, { updatedAt: Date.now() });
+    if (requestStarted) {
+      await hideAutoHideMessagesAfterResponse(get, set, conversationId, historyMessages);
+    }
   } catch (err: any) {
     if (isAbortError(err)) {
       set({ error: null });
       const finalMessages = get().messages;
       const lastMsg = finalMessages[finalMessages.length - 1];
-      const isEmptyAssistant =
-        lastMsg?.id === assistantMessage.id &&
-        lastMsg.role === 'assistant' &&
-        !lastMsg.content &&
-        (!lastMsg.toolInvocations || lastMsg.toolInvocations.length === 0);
 
-      if (isEmptyAssistant) {
-        await deleteMessage(lastMsg.id);
-        const remainingMessages = finalMessages.filter((m) => m.id !== lastMsg.id);
-        set({ messages: remainingMessages });
-
-        if (remainingMessages.length === 0) {
-          await deleteConversation(conversationId);
-          set({ conversationId: null, hiddenRanges: [] });
-        }
+      if (isEmptyAssistantMessage(lastMsg)) {
+        await deleteTransientResponseMessages();
       } else if (lastMsg?.id === assistantMessage.id && lastMsg.role === 'assistant') {
         await updateMessageContent(lastMsg.id, lastMsg.content);
         await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
       }
     } else {
       set({ error: err.message || '请求失败' });
-      const finalMessages = get().messages;
-      const lastMsg = finalMessages[finalMessages.length - 1];
-      if (lastMsg && lastMsg.role === 'assistant') {
-        await updateMessageContent(lastMsg.id, lastMsg.content);
-        await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
-      }
+      await deleteTransientResponseMessages();
     }
   } finally {
     set({ isStreaming: false });
@@ -536,16 +628,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // 仅把用户消息加入列表并持久化，不触发 AI 回复。
   addUserMessage: async (content: string, imageUri?: string) => {
     const { isStreaming } = get();
-    if (isStreaming) return;
+    if (isStreaming) return null;
 
     let { conversationId } = get();
     const settings = useSettingsStore.getState();
-    if (!settings._hydrated) return;
+    if (!settings._hydrated) return null;
     const config = settings.apiConfigs[settings.activeConfigIndex];
 
     if (!config || !config.baseUrl || !config.apiKey) {
       set({ error: '请先在设置中配置 API' });
-      return;
+      return null;
     }
 
     if (!conversationId) {
@@ -578,6 +670,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     await insertMessage(conversationId, userMessage);
     await updateConversation(conversationId, { updatedAt: Date.now() });
+    return userMessage;
   },
 
   // 插入一条可见系统消息，等待用户下一次点击发送时触发巡游。
@@ -663,15 +756,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await streamAssistantResponse(get, set, conversationId);
   },
 
+  markMessagesForAutoHideAfterResponse: (ids: string[]) => {
+    ids.forEach((id) => autoHideAfterResponseIds.add(id));
+  },
+
   // 一体化发送：加用户消息 + 触发 AI 回复（向后兼容）。
   sendMessage: async (content: string, imageUri?: string) => {
     const { isStreaming } = get();
     if (isStreaming) return;
-    await get().addUserMessage(content, imageUri);
+    const previousConversationId = get().conversationId;
+    const previousConversation = previousConversationId
+      ? (await getAllConversations()).find((conversation) => conversation.id === previousConversationId)
+      : null;
+    const beforeMessageIds = new Set(get().messages.map((message) => message.id));
+    const userMessage = await get().addUserMessage(content, imageUri);
     // addUserMessage 可能因为缺少配置而设置 error 并提前返回，
     // 此时不应继续触发回复。
     if (get().error) return;
     await get().triggerResponse();
+    if (!get().error || !userMessage) return;
+
+    const failedConversationId = get().conversationId;
+    const currentMessages = get().messages;
+    const messagesToRemove = currentMessages.filter((message) => !beforeMessageIds.has(message.id));
+    for (const message of messagesToRemove) {
+      await deleteMessage(message.id);
+    }
+
+    const remainingMessages = currentMessages.filter((message) => beforeMessageIds.has(message.id));
+    set({ messages: remainingMessages });
+
+    if (!previousConversationId && failedConversationId && remainingMessages.length === 0) {
+      await deleteConversation(failedConversationId);
+      set({ conversationId: null, hiddenRanges: [] });
+    } else if (previousConversation) {
+      await updateConversation(previousConversation.id, { updatedAt: previousConversation.updatedAt });
+    }
   },
 
   stopStreaming: () => {
@@ -698,6 +818,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const merged = mergeRanges([...hiddenRanges, range]);
     set({ hiddenRanges: merged });
     await updateHiddenRanges(conversationId, merged);
+  },
+
+  // 隐藏楼层：从已有隐藏范围中扣除一段，使该段恢复发送给 AI。
+  restoreHiddenRange: async (range: HiddenRange) => {
+    const { conversationId, hiddenRanges } = get();
+    if (!conversationId) return;
+    const next = subtractRange(hiddenRanges, range);
+    set({ hiddenRanges: next });
+    await updateHiddenRanges(conversationId, next);
   },
 
   // 隐藏楼层：按索引删除某条范围 → 落库。
@@ -728,9 +857,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   removeMessage: async (id: string) => {
+    const { conversationId, hiddenRanges, messages } = get();
+    const deletedFloor = floorForMessageId(messages, id);
+    const nextHiddenRanges =
+      deletedFloor === null
+        ? hiddenRanges
+        : shiftHiddenRangesAfterDeletedFloor(hiddenRanges, deletedFloor);
+
     await deleteMessage(id);
+    if (conversationId && deletedFloor !== null) {
+      await updateHiddenRanges(conversationId, nextHiddenRanges);
+    }
+
+    const nextMessages = messages.filter((m) => m.id !== id);
+    if (conversationId && nextMessages.length === 0) {
+      await deleteConversation(conversationId);
+      set({ conversationId: null, messages: [], hiddenRanges: [], error: null });
+      return;
+    }
+
     set((state) => ({
       messages: state.messages.filter((m) => m.id !== id),
+      hiddenRanges: nextHiddenRanges,
     }));
   },
 

@@ -27,3 +27,24 @@ export function mergeRanges(ranges: HiddenRange[]): HiddenRange[] {
 
   return merged;
 }
+
+export function subtractRange(ranges: HiddenRange[], removal: HiddenRange): HiddenRange[] {
+  const next: HiddenRange[] = [];
+
+  for (const range of ranges) {
+    if (removal.to < range.from || removal.from > range.to) {
+      next.push({ ...range });
+      continue;
+    }
+
+    if (removal.from > range.from) {
+      next.push({ from: range.from, to: removal.from - 1 });
+    }
+
+    if (removal.to < range.to) {
+      next.push({ from: removal.to + 1, to: range.to });
+    }
+  }
+
+  return mergeRanges(next.filter((range) => range.from <= range.to));
+}

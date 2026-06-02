@@ -12,7 +12,12 @@ import {
 } from '../src/services/notifications';
 import { WebViewPanel } from '../src/components/WebViewPanel';
 import { useSettingsStore } from '../src/stores/settings';
-import { hideFloatingBall, showFloatingBall } from '../src/services/floatingBall';
+import {
+  addFloatingBallToolActionListener,
+  hideFloatingBall,
+  showFloatingBall,
+} from '../src/services/floatingBall';
+import { handleFloatingBallToolAction } from '../src/services/floatingToolActions';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -42,6 +47,13 @@ export default function RootLayout() {
       hideFloatingBall().catch(() => undefined);
     }
   }, [settingsHydrated, floatingBallEnabled]);
+
+  useEffect(() => {
+    const sub = addFloatingBallToolActionListener((action) => {
+      handleFloatingBallToolAction(action).catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     // 设置通知 handler 和 Android 通知渠道
