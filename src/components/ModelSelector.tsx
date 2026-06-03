@@ -1,14 +1,20 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, Pressable, Modal, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
+
 import { fonts } from '../theme/fonts';
 import { useSettingsStore } from '../stores/settings';
 
+
+let colors = lightColors;
 interface Props {
   onClose: () => void;
 }
 
 export function ModelSelector({ onClose }: Props) {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const { apiConfigs, activeConfigIndex, setActiveConfig } = useSettingsStore();
 
   return (
@@ -42,7 +48,7 @@ export function ModelSelector({ onClose }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
@@ -85,3 +91,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+let styles = createStyles(colors);

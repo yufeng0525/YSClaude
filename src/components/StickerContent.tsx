@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import { colors } from '../theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
+
 import { fonts } from '../theme/fonts';
 import { splitStickerContent } from '../utils/stickers';
 
+
+let colors = lightColors;
 interface Props {
   content: string;
   variant: 'user' | 'assistant';
@@ -13,6 +16,9 @@ interface Props {
 }
 
 export function StickerContent({ content, variant, markdownStyle, markdownRules }: Props) {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const isUser = variant === 'user';
   const chunks = splitStickerContent(content, isUser ? 'user' : 'assistant');
 
@@ -51,7 +57,7 @@ export function StickerContent({ content, variant, markdownStyle, markdownRules 
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     gap: 6,
   },
@@ -78,3 +84,5 @@ const styles = StyleSheet.create({
     height: 104,
   },
 });
+
+let styles = createStyles(colors);

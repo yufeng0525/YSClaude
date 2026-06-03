@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { Message } from '../types';
-import { colors } from '../theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
@@ -11,6 +11,8 @@ import { getToolLabel } from '../services/tools';
 import { StickerContent } from './StickerContent';
 import { hasStickerToken, isStickerOnlyContent } from '../utils/stickers';
 
+
+let colors = lightColors;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const IMAGE_MAX_WIDTH = SCREEN_WIDTH * 0.65;
 
@@ -132,6 +134,11 @@ export const ChatBubble = React.memo(function ChatBubble({
   showFloorNumber,
   onBubblePress,
 }: Props) {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+  thinkingMarkdownStyles = useMemo(() => createThinkingMarkdownStyles(colors), [colors]);
+  markdownStyles = useMemo(() => createMarkdownStyles(colors), [colors]);
+
   const isUser = message.role === 'user';
   const stickerCatalog = isUser ? 'user' : 'assistant';
   const messageHasSticker = hasStickerToken(message.content, stickerCatalog);
@@ -418,7 +425,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   );
 });
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   userRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -605,7 +612,7 @@ const styles = StyleSheet.create({
   thinkingPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.inputBackground,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 16,
@@ -688,7 +695,7 @@ const styles = StyleSheet.create({
   modalConfirmText: { fontSize: 15, color: '#FFFFFF', fontWeight: '500' },
 });
 
-const thinkingMarkdownStyles = StyleSheet.create({
+const createThinkingMarkdownStyles = (colors: ThemeColors) => StyleSheet.create({
   body: { width: '100%', fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
   code_inline: {
     backgroundColor: colors.surface, color: colors.primary,
@@ -705,7 +712,7 @@ const thinkingMarkdownStyles = StyleSheet.create({
   td: { minWidth: 112, flexShrink: 0, paddingVertical: 7, paddingHorizontal: 9 },
 });
 
-const markdownStyles = StyleSheet.create({
+const createMarkdownStyles = (colors: ThemeColors) => StyleSheet.create({
   body: { width: '100%', fontSize: 16, color: colors.text, lineHeight: 24, fontFamily: fonts.serifBold },
   code_inline: {
     backgroundColor: colors.surface, color: colors.primary,
@@ -729,3 +736,7 @@ const markdownStyles = StyleSheet.create({
   th: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.surface },
   td: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10 },
 });
+
+let styles = createStyles(colors);
+let thinkingMarkdownStyles = createThinkingMarkdownStyles(colors);
+let markdownStyles = createMarkdownStyles(colors);

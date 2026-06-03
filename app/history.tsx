@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, Alert, TextInput, Modal, ActivityIndicator } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { colors } from '../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
+
 import { fonts } from '../src/theme/fonts';
 import { Conversation } from '../src/types';
 import {
@@ -13,9 +14,14 @@ import {
 } from '../src/db/operations';
 import { useChatStore } from '../src/stores/chat';
 
+
+let colors = lightColors;
 type SearchScope = 'current' | 'global';
 
 export default function HistoryScreen() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [editingConv, setEditingConv] = useState<Conversation | null>(null);
@@ -275,7 +281,7 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: 'row',
@@ -487,3 +493,5 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+
+let styles = createStyles(colors);

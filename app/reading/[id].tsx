@@ -19,7 +19,8 @@ import {
 } from 'react-native';
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { colors } from '../../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
+
 import { fonts } from '../../src/theme/fonts';
 import { ReadingBook, ReadingMessage } from '../../src/types';
 import {
@@ -34,6 +35,8 @@ import { streamChat } from '../../src/services/api';
 import { notifyReplyReady } from '../../src/services/notifications';
 import { useSettingsStore } from '../../src/stores/settings';
 
+
+let colors = lightColors;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PANEL_MIN_WIDTH = 260;
 const PANEL_MIN_HEIGHT = 220;
@@ -58,6 +61,9 @@ const INITIAL_PANEL_FRAME: PanelFrame = {
 };
 
 export default function ReadingBookScreen() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const readingConfig = useSettingsStore((state) => state.readingConfig);
@@ -576,7 +582,7 @@ function clampBallFrame(frame: PanelFrame): PanelFrame {
   };
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: {
     flex: 1,
@@ -600,7 +606,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700', color: colors.text, maxWidth: '90%' },
   subtitle: { marginTop: 2, fontSize: 12, color: colors.textTertiary, maxWidth: '90%' },
   errorBanner: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: colors.dangerSurface,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginHorizontal: 16,
@@ -786,3 +792,5 @@ const styles = StyleSheet.create({
   modalConfirm: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, backgroundColor: colors.primary },
   modalConfirmText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 });
+
+let styles = createStyles(colors);

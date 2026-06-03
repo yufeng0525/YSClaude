@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -15,7 +15,8 @@ import { WebView } from 'react-native-webview';
 import type { WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { randomUUID } from 'expo-crypto';
-import { colors } from '../theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
+
 import { sqliteStorage } from '../db/kv-storage';
 import {
   registerWebViewHost,
@@ -24,6 +25,8 @@ import {
   WebViewTapResult,
 } from '../services/webviewController';
 
+
+let colors = lightColors;
 type PendingRequest = {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
@@ -457,6 +460,9 @@ async function saveWebBookmarks(bookmarks: WebBookmark[]): Promise<void> {
 }
 
 export function WebViewPanel() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
   const pendingRequests = useRef<Record<string, PendingRequest>>({});
@@ -1361,12 +1367,12 @@ export function WebViewPanel() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   panel: {
     position: 'absolute',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
     shadowColor: '#000000',
@@ -1434,7 +1440,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -1470,7 +1476,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -1522,7 +1528,7 @@ const styles = StyleSheet.create({
   },
   bookmarkPanel: {
     maxHeight: 220,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -1572,11 +1578,11 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
   },
   homeView: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
   },
   homeContent: {
     padding: 18,
@@ -1630,7 +1636,7 @@ const styles = StyleSheet.create({
     lineHeight: 34,
     borderRadius: 17,
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.inputBackground,
     color: colors.text,
     fontSize: 16,
     fontWeight: '700',
@@ -1660,7 +1666,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 24,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.inputBackground,
     borderWidth: 1,
     borderColor: colors.border,
     shadowColor: '#000000',
@@ -1700,3 +1706,5 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+
+let styles = createStyles(colors);

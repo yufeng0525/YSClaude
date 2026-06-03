@@ -15,13 +15,19 @@ const WEBVIEW_OPEN_TOOL: ToolDefinition = {
   function: {
     name: 'webview_open',
     description:
-      '在用户端打开一个可见网页面板，并返回打开后的页面观察结果。用于查看网页或进行简单前端小游戏交互。仅打开用户提供的 http/https 链接；如果页面已经打开，优先继续观察而不是重复打开。',
+      '在用户端打开一个可见网页面板，并返回打开后的页面观察结果。用于查看网页或进行简单前端小游戏交互。可根据对话需要自主打开 http/https 网页；如果页面已经打开，优先继续观察而不是重复打开。',
     parameters: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
           description: '要打开的网页 URL，必须是 http 或 https 链接',
+        },
+        userAgent: {
+          type: 'string',
+          enum: ['mobile', 'desktop'],
+          description:
+            '打开网页时使用的 UA。mobile 使用默认移动端 UA；desktop 使用桌面端 UA。遇到移动端内容不完整、引导下载 App 或需要查看完整网页内容时优先选择 desktop。',
         },
       },
       required: ['url'],
@@ -148,6 +154,7 @@ export const webViewTool: ToolModule = {
       case 'webview_open':
         return await executeWebViewOpen(
           args.url,
+          args.userAgent,
           context.webInteractionConfig,
           !!context.webCruiseEnabled
         );
@@ -169,17 +176,20 @@ export const webViewTool: ToolModule = {
 
 async function executeWebViewOpen(
   rawUrl: unknown,
+  rawUserAgent: unknown,
   config: WebInteractionConfig,
-  useDesktopUserAgent = false
+  defaultDesktopUserAgent = false
 ): Promise<string> {
   ensureWebInteractionEnabled(config);
   const url = validateWebPageUrl(rawUrl);
+  const userAgent = normalizeWebViewUserAgent(rawUserAgent, defaultDesktopUserAgent);
   const observation = await openWebView(
     url,
-    useDesktopUserAgent ? { userAgent: 'desktop' } : undefined
+    userAgent === 'desktop' ? { userAgent: 'desktop' } : { userAgent: 'mobile' }
   );
   return [
     `已在用户端打开网页：${observation.url || url}`,
+    `UA: ${userAgent === 'desktop' ? '桌面端' : '移动端'}`,
     '',
     formatWebViewObservation(observation),
     '',
@@ -260,6 +270,19 @@ function normalizeWaitMs(raw: unknown): number {
   const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : 1000;
   if (!Number.isFinite(value)) return 1000;
   return Math.min(Math.max(Math.floor(value), 200), 10000);
+}
+
+function normalizeWebViewUserAgent(raw: unknown, defaultDesktopUserAgent: boolean): 'mobile' | 'desktop' {
+  if (raw === undefined || raw === null || raw === '') {
+    return defaultDesktopUserAgent ? 'desktop' : 'mobile';
+  }
+  if (typeof raw !== 'string') {
+    throw new Error('缺少有效的 UA 类型，请使用 mobile 或 desktop');
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'mobile') return 'mobile';
+  if (value === 'desktop') return 'desktop';
+  throw new Error('UA 类型只支持 mobile 或 desktop');
 }
 
 function normalizeElementIndex(raw: unknown): number {

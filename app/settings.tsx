@@ -4,7 +4,8 @@ import {
   ActivityIndicator, Alert, Modal, FlatList, Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors } from '../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
+
 import { fonts } from '../src/theme/fonts';
 import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig } from '../src/stores/settings';
 import { useChatStore } from '../src/stores/chat';
@@ -28,10 +29,15 @@ import {
   showFloatingBall,
 } from '../src/services/floatingBall';
 
+
+let colors = lightColors;
 const TABS = ['API 配置', '对话设置', 'TTS 配置', 'Tool 设置', '日记', '悬浮球'] as const;
 type ToastFn = (message: string) => void;
 
 export default function SettingsScreen() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1620,7 +1626,7 @@ function DiaryTab({ showToast }: { showToast: ToastFn }) {
 
 /* ==================== Styles ==================== */
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   toast: {
     position: 'absolute',
@@ -1891,3 +1897,5 @@ const styles = StyleSheet.create({
   modalConfirm: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.primary },
   modalConfirmText: { fontSize: 15, color: '#FFFFFF', fontWeight: '500' },
 });
+
+let styles = createStyles(colors);

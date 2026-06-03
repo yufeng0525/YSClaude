@@ -266,7 +266,7 @@ async function runToolLoop(
     !!settings.webPageReaderConfig?.enabled && messagesContainHttpUrl(apiMessages);
   const webInteractionEnabled =
     webCruiseEnabled ||
-    (!!settings.webInteractionConfig?.enabled && messagesContainHttpUrl(apiMessages));
+    !!settings.webInteractionConfig?.enabled;
 
   const tools = getToolDefinitions({
     memoryVault: memoryEnabled,

@@ -2,9 +2,10 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { colors } from '../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
+
 import {
   initNotifications,
   startAppStateListener,
@@ -19,9 +20,15 @@ import {
 } from '../src/services/floatingBall';
 import { handleFloatingBallToolAction } from '../src/services/floatingToolActions';
 
+
+let colors = lightColors;
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+  const statusBarStyle = colors.background === '#12100D' ? 'light' : 'dark';
+
   const [fontsLoaded] = useFonts({
     'Sohne': require('../assets/Sohne-Buch.otf'),
     'Sohne-Bold': require('../assets/Sohne-Halbfett.otf'),
@@ -75,7 +82,7 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style={statusBarStyle} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen
@@ -104,7 +111,7 @@ export default function RootLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   loading: {
     flex: 1,
     justifyContent: 'center',
@@ -112,3 +119,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
 });
+
+let styles = createStyles(colors);

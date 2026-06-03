@@ -23,7 +23,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { colors } from '../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
+
 import { fonts } from '../src/theme/fonts';
 import { useChatStore } from '../src/stores/chat';
 import { ChatBubble } from '../src/components/ChatBubble';
@@ -39,6 +40,8 @@ import {
   getFirstMessageInDateRange,
 } from '../src/db/operations';
 
+
+let colors = lightColors;
 const INPUT_BAR_FALLBACK_HEIGHT = 128;
 const MESSAGE_BOTTOM_GAP = 16;
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -93,6 +96,11 @@ function buildCalendarCells(month: Date): Array<Date | null> {
 }
 
 export default function ChatScreen() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+  const isDarkTheme = colors.background === '#12100D';
+  const headerImageTintStyle = isDarkTheme ? styles.invertedImageIcon : undefined;
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
@@ -522,18 +530,18 @@ export default function ChatScreen() {
             </View>
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/reading')}>
-            <Image source={require('../assets/reading.png')} style={styles.readingIcon} resizeMode="contain" />
+            <Image source={require('../assets/reading.png')} style={[styles.readingIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
           <Pressable style={styles.headerButton} onPress={showWebViewPanel}>
-            <Image source={require('../assets/web.png')} style={styles.webIcon} resizeMode="contain" />
+            <Image source={require('../assets/web.png')} style={[styles.webIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
         </View>
         <View style={styles.headerRightGroup}>
           <Pressable style={styles.headerButton} onPress={openCalendar} disabled={!conversationId}>
-            <Image source={require('../assets/calendar.png')} style={styles.calendarIcon} resizeMode="contain" />
+            <Image source={require('../assets/calendar.png')} style={[styles.calendarIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/settings')}>
-            <Image source={require('../assets/setting.png')} style={styles.settingIcon} resizeMode="contain" />
+            <Image source={require('../assets/setting.png')} style={[styles.settingIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
         </View>
       </View>
@@ -698,7 +706,7 @@ function EmptyState() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -758,8 +766,11 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
   },
+  invertedImageIcon: {
+    tintColor: colors.text,
+  },
   errorBanner: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: colors.dangerSurface,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginHorizontal: 16,
@@ -984,3 +995,5 @@ const styles = StyleSheet.create({
     fontFamily: fonts.serifBold,
   },
 });
+
+let styles = createStyles(colors);

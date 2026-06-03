@@ -1,4 +1,6 @@
-export const colors = {
+import { useColorScheme, type ColorSchemeName } from 'react-native';
+
+export const lightColors = {
   background: '#faf9f5',
   surface: '#F0EBE4',
   surfaceHover: '#f1eee7',
@@ -15,7 +17,43 @@ export const colors = {
   inputBackground: '#FFFFFF',
   inputBorder: '#f8f8f6',
   danger: '#DC2626',
+  dangerSurface: '#FEF2F2',
   success: '#16A34A',
   iconGray: '#8B8B8B',
   disclaimer: '#787773',
 };
+
+export const darkColors = {
+  background: '#12100D',
+  surface: '#211C17',
+  surfaceHover: '#2B241D',
+  border: '#3A3027',
+  text: '#F7F2EA',
+  textSecondary: '#C9BFB2',
+  textTertiary: '#8F8478',
+  primary: '#D97706',
+  primaryLight: '#3A2511',
+  userBubble: '#2B241D',
+  assistantBubble: 'transparent',
+  codeBlock: '#1B1713',
+  codeText: '#D8CEC0',
+  inputBackground: '#1A1612',
+  inputBorder: '#332A22',
+  danger: '#F87171',
+  dangerSurface: '#351818',
+  success: '#4ADE80',
+  iconGray: '#A69A8E',
+  disclaimer: '#9B9084',
+};
+
+export type ThemeColors = typeof lightColors;
+
+export function getThemeColors(colorScheme: ColorSchemeName | null | undefined): ThemeColors {
+  return colorScheme === 'dark' ? darkColors : lightColors;
+}
+
+export function useThemeColors(): ThemeColors {
+  return getThemeColors(useColorScheme());
+}
+
+export const colors = lightColors;

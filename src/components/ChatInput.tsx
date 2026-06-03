@@ -1,11 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, TextInput, Pressable, Text, StyleSheet, Image, Modal, ScrollView, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { colors } from '../theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
+
 import { useSettingsStore } from '../stores/settings';
 import { USER_STICKERS } from '../utils/stickers';
 
+
+let colors = lightColors;
 const STICKER_PANEL_HEIGHT = Math.min(420, Dimensions.get('window').height * 0.48);
 
 interface Props {
@@ -27,11 +30,16 @@ export function ChatInput({
   onStop,
   onModelPress,
 }: Props) {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+  const isDarkTheme = colors.background === '#12100D';
+
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const shouldInvertResponseIcon = isDarkTheme && (isStreaming || !isInputFocused);
   const responseTouchStartedRef = useRef(false);
   const insets = useSafeAreaInsets();
   const { apiConfigs, activeConfigIndex } = useSettingsStore();
@@ -156,7 +164,11 @@ export function ChatInput({
               onPressIn={() => void handleGetResponsePressIn()}
               onPress={() => void handleGetResponsePress()}
             >
-              <Image source={getResponseIcon()} style={styles.sendImage} resizeMode="contain" />
+              <Image
+                source={getResponseIcon()}
+                style={[styles.sendImage, shouldInvertResponseIcon && styles.invertedImageIcon]}
+                resizeMode="contain"
+              />
             </Pressable>
           </View>
         </View>
@@ -204,7 +216,7 @@ export function ChatInput({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   wrapper: {
     paddingHorizontal: 12,
     paddingBottom: 12,
@@ -309,6 +321,9 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
   },
+  invertedImageIcon: {
+    tintColor: colors.text,
+  },
   stickerOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -388,3 +403,5 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
 });
+
+let styles = createStyles(colors);

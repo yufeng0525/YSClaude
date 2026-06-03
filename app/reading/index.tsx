@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { colors } from '../../src/theme/colors';
+import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
+
 import { fonts } from '../../src/theme/fonts';
 import { ReadingBook } from '../../src/types';
 import {
@@ -27,10 +28,15 @@ import {
 import { parseReadingBookAsset, pickReadingBookDocument } from '../../src/services/readingImport';
 import { useSettingsStore } from '../../src/stores/settings';
 
+
+let colors = lightColors;
 const TABS = ['书架', '设置'] as const;
 type ToastFn = (message: string) => void;
 
 export default function ReadingScreen() {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -454,7 +460,7 @@ function ReadingSettingsTab({ showToast }: { showToast: ToastFn }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: 'row',
@@ -606,3 +612,5 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
 });
+
+let styles = createStyles(colors);

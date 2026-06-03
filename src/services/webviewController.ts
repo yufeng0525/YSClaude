@@ -28,7 +28,7 @@ export interface WebViewTapResult {
 }
 
 export interface WebViewOpenOptions {
-  userAgent?: 'desktop';
+  userAgent?: 'mobile' | 'desktop';
 }
 
 export interface WebViewHostActions {
