@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useRef } from 'react';
+import type { RefObject } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
+import { BlurView } from 'expo-blur';
 import { Message } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
@@ -10,11 +12,27 @@ import { playTTS, stopTTS } from '../services/tts';
 import { getToolLabel } from '../services/tools';
 import { StickerContent } from './StickerContent';
 import { hasStickerToken, isStickerOnlyContent } from '../utils/stickers';
+import { formatSmartTime } from '../utils/time';
 
 
 let colors = lightColors;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const IMAGE_MAX_WIDTH = SCREEN_WIDTH * 0.65;
+const MESSAGE_AVATAR_SIZE = 36;
+
+function numberOrDefault(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value as number));
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return hex;
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
 
 const markdownRules = {
   table: (node: any, children: React.ReactNode, _parent: any, styles: any) => (
@@ -42,6 +60,7 @@ const chatIcons = [
 
 interface Props {
   message: Message;
+  blurTarget?: RefObject<View | null>;
   previousUserMessage?: Message | null;
   isLastAssistant?: boolean;
   isHidden?: boolean;
@@ -127,6 +146,7 @@ function splitThinking(raw: string): { thinking: string; body: string } {
 
 export const ChatBubble = React.memo(function ChatBubble({
   message,
+  blurTarget,
   previousUserMessage,
   isLastAssistant,
   isHidden,
@@ -137,9 +157,41 @@ export const ChatBubble = React.memo(function ChatBubble({
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
   thinkingMarkdownStyles = useMemo(() => createThinkingMarkdownStyles(colors), [colors]);
-  markdownStyles = useMemo(() => createMarkdownStyles(colors), [colors]);
+  const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
+  const userBubbleColor = appearanceConfig?.userBubbleColor || colors.userBubble;
+  const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
+  const userBubbleRadius = numberOrDefault(appearanceConfig?.userBubbleRadius, 20, 0, 36);
+  const userBubbleBlurIntensity = numberOrDefault(appearanceConfig?.userBubbleBlurIntensity, 0, 0, 100);
+  const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
+  const assistantFooterColor = appearanceConfig?.assistantFooterColor || colors.textTertiary;
+  const userFontSize = numberOrDefault(appearanceConfig?.userFontSize, 16, 12, 24);
+  const assistantFontSize = numberOrDefault(appearanceConfig?.assistantFontSize, 16, 12, 24);
+  const userTextColor = appearanceConfig?.userTextColor || colors.text;
+  const assistantTextColor = appearanceConfig?.assistantTextColor || colors.text;
+  const assistantTextStrokeColor = appearanceConfig?.assistantTextStrokeColor || colors.background;
+  const assistantTextStrokeWidth = numberOrDefault(appearanceConfig?.assistantTextStrokeWidth, 0, 0, 8);
+  const userTextStyle = useMemo(
+    () => ({
+      color: userTextColor,
+      fontSize: userFontSize,
+      lineHeight: Math.round(userFontSize * 1.38),
+    }),
+    [userFontSize, userTextColor]
+  );
+  markdownStyles = useMemo(
+    () => createMarkdownStyles(colors, assistantFontSize, assistantTextColor, assistantTextStrokeColor, assistantTextStrokeWidth),
+    [assistantFontSize, assistantTextColor, assistantTextStrokeColor, assistantTextStrokeWidth, colors]
+  );
 
   const isUser = message.role === 'user';
+  const messageAvatarsVisible = !!appearanceConfig?.messageAvatarsVisible;
+  const messageMetaVisible = appearanceConfig?.messageMetaVisible ?? true;
+  const messageAvatarRadius = numberOrDefault(appearanceConfig?.messageAvatarRadius, 18, 0, 20);
+  const userDisplayName = (appearanceConfig?.userDisplayName || 'You').trim() || 'You';
+  const assistantDisplayName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
+  const avatarImageUri = isUser ? appearanceConfig?.userAvatarImageUri : appearanceConfig?.assistantAvatarImageUri;
+  const avatarName = isUser ? userDisplayName : assistantDisplayName;
+  const avatarFallback = isUser ? 'U' : 'AI';
   const stickerCatalog = isUser ? 'user' : 'assistant';
   const messageHasSticker = hasStickerToken(message.content, stickerCatalog);
   const messageIsStickerOnly = isStickerOnlyContent(message.content, stickerCatalog);
@@ -157,7 +209,46 @@ export const ChatBubble = React.memo(function ChatBubble({
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, width: 0 });
   const [expandedTools, setExpandedTools] = useState<Record<number, boolean>>({});
   const bubbleRef = useRef<View>(null);
-  const floorLabel = showFloorNumber && floorNumber !== undefined ? `#${floorNumber}` : null;
+  const floorText = floorNumber !== undefined ? `#${floorNumber}` : null;
+  const avatarMetaText = [floorText, formatSmartTime(message.createdAt)].filter(Boolean).join(' · ');
+  const floorLabel = !messageAvatarsVisible && showFloorNumber && floorText ? floorText : null;
+  const avatarNode = messageAvatarsVisible ? (
+    avatarImageUri ? (
+      <Image
+        source={{ uri: avatarImageUri }}
+        style={[
+          styles.messageAvatarImage,
+          { borderRadius: messageAvatarRadius },
+        ]}
+        resizeMode="cover"
+      />
+    ) : (
+      <View
+        style={[
+          styles.messageAvatarFallback,
+          { borderRadius: messageAvatarRadius },
+        ]}
+      >
+        <Text style={styles.messageAvatarFallbackText}>{avatarFallback}</Text>
+      </View>
+    )
+  ) : null;
+  const avatarHeader = messageAvatarsVisible ? (
+    <View
+      style={[
+        styles.messageAvatarHeader,
+        isUser ? styles.messageAvatarHeaderUser : styles.messageAvatarHeaderAssistant,
+      ]}
+    >
+      {!isUser && avatarNode}
+      {isUser && messageMetaVisible && <Text style={styles.messageAvatarMeta}>{avatarMetaText}</Text>}
+      <Text style={styles.messageAvatarName} numberOfLines={1}>
+        {avatarName}
+      </Text>
+      {!isUser && messageMetaVisible && <Text style={styles.messageAvatarMeta}>{avatarMetaText}</Text>}
+      {isUser && avatarNode}
+    </View>
+  ) : null;
 
   if (message.role === 'system') {
     return (
@@ -229,10 +320,26 @@ export const ChatBubble = React.memo(function ChatBubble({
     const MENU_HEIGHT = 44;
     const menuLeft = Math.max(8, menuAnchor.x + menuAnchor.width - MENU_WIDTH);
     const menuTop = Math.max(8, menuAnchor.y - MENU_HEIGHT - 8);
+    const shouldBlurUserBubble = !messageIsStickerOnly && userBubbleBlurIntensity > 0;
+    const userBubbleBaseStyle = [
+      styles.userBubble,
+      {
+        backgroundColor: userBubbleTransparent
+          ? 'transparent'
+          : shouldBlurUserBubble
+            ? withAlpha(userBubbleColor, 0.22)
+            : userBubbleColor,
+        borderRadius: userBubbleRadius,
+      },
+      shouldBlurUserBubble && styles.userBubbleGlass,
+      messageHasSticker && styles.userBubbleWithSticker,
+      messageIsStickerOnly && styles.userStickerOnlyBubble,
+    ];
 
     return (
       <View style={[styles.userRow, isHidden && styles.hiddenRow]}>
         <View style={styles.userColumn}>
+          {avatarHeader}
           {floorLabel && <Text style={styles.floorLabelRight}>{floorLabel}</Text>}
           {isHidden && <Text style={styles.hiddenLabelRight}>已隐藏</Text>}
           {message.imageUri && (
@@ -253,13 +360,19 @@ export const ChatBubble = React.memo(function ChatBubble({
               ref={bubbleRef}
               onPress={onBubblePress}
               onLongPress={handleUserLongPress}
-              style={[
-                styles.userBubble,
-                messageHasSticker && styles.userBubbleWithSticker,
-                messageIsStickerOnly && styles.userStickerOnlyBubble,
-              ]}
+              style={userBubbleBaseStyle}
             >
-              <StickerContent content={message.content} variant="user" />
+              {shouldBlurUserBubble && (
+                <BlurView
+                  blurTarget={blurTarget}
+                  blurMethod="dimezisBlurView"
+                  blurReductionFactor={1}
+                  intensity={userBubbleBlurIntensity}
+                  tint={userBubbleTransparent ? 'default' : colors.background === '#12100D' ? 'dark' : 'light'}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+              <StickerContent content={message.content} variant="user" userTextStyle={userTextStyle} />
             </Pressable>
           )}
           {message.content.length === 0 && !message.imageUri && (
@@ -267,9 +380,19 @@ export const ChatBubble = React.memo(function ChatBubble({
               ref={bubbleRef}
               onPress={onBubblePress}
               onLongPress={handleUserLongPress}
-              style={styles.userBubble}
+              style={userBubbleBaseStyle}
             >
-              <Text style={styles.userText}>{message.content}</Text>
+              {shouldBlurUserBubble && (
+                <BlurView
+                  blurTarget={blurTarget}
+                  blurMethod="dimezisBlurView"
+                  blurReductionFactor={1}
+                  intensity={userBubbleBlurIntensity}
+                  tint={userBubbleTransparent ? 'default' : colors.background === '#12100D' ? 'dark' : 'light'}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+              <Text style={[styles.userText, userTextStyle]}>{message.content}</Text>
             </Pressable>
           )}
         </View>
@@ -353,6 +476,7 @@ export const ChatBubble = React.memo(function ChatBubble({
 
   return (
     <View style={[styles.assistantRow, isHidden && styles.hiddenBubble]}>
+      {avatarHeader}
       {floorLabel && <Text style={styles.floorLabelLeft}>{floorLabel}</Text>}
       {isHidden && <Text style={styles.hiddenLabelLeft}>已隐藏</Text>}
       {/* 工具调用记录：显示在 AI 回复文字上方，每次调用一行 */}
@@ -407,16 +531,18 @@ export const ChatBubble = React.memo(function ChatBubble({
           <View style={styles.actions}>
             {chatIcons.map((icon, i) => (
               <Pressable key={i} style={styles.actionButton} onPress={() => handleAction(i)}>
-                <Image source={icon} style={styles.actionImage} resizeMode="contain" />
+                <Image source={icon} style={[styles.actionImage, { tintColor: assistantFooterColor }]} resizeMode="contain" />
               </Pressable>
             ))}
           </View>
-          <View style={styles.logoRow}>
-            <Image source={require('../../assets/claudelogo.png')} style={styles.logoImage} resizeMode="contain" />
-            <Text style={styles.disclaimerText}>
-              Claude is AI and can make mistakes.{'\n'}Please double-check responses.
-            </Text>
-          </View>
+          {!assistantFooterHidden && (
+            <View style={styles.logoRow}>
+              <Image source={require('../../assets/claudelogo.png')} style={styles.logoImage} resizeMode="contain" />
+              <Text style={[styles.disclaimerText, { color: assistantFooterColor }]}>
+                Claude is AI and can make mistakes.{'\n'}Please double-check responses.
+              </Text>
+            </View>
+          )}
         </>
       )}
 
@@ -436,6 +562,54 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   userColumn: {
     alignItems: 'flex-end',
     maxWidth: '75%',
+  },
+  messageAvatarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+    maxWidth: '100%',
+  },
+  messageAvatarHeaderUser: {
+    alignSelf: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  messageAvatarHeaderAssistant: {
+    alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  messageAvatarImage: {
+    width: MESSAGE_AVATAR_SIZE,
+    height: MESSAGE_AVATAR_SIZE,
+    backgroundColor: colors.surface,
+  },
+  messageAvatarFallback: {
+    width: MESSAGE_AVATAR_SIZE,
+    height: MESSAGE_AVATAR_SIZE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  messageAvatarFallbackText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  messageAvatarName: {
+    flexShrink: 1,
+    maxWidth: 160,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  messageAvatarMeta: {
+    flexShrink: 0,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+    fontFamily: fonts.mono,
   },
   // 已隐藏楼层：整体降低透明度作区分
   hiddenRow: {
@@ -509,6 +683,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderRadius: 20,
     paddingVertical: 12,
     paddingHorizontal: 16,
+  },
+  userBubbleGlass: {
+    overflow: 'hidden',
   },
   userBubbleWithSticker: {
     paddingVertical: 8,
@@ -712,30 +889,46 @@ const createThinkingMarkdownStyles = (colors: ThemeColors) => StyleSheet.create(
   td: { minWidth: 112, flexShrink: 0, paddingVertical: 7, paddingHorizontal: 9 },
 });
 
-const createMarkdownStyles = (colors: ThemeColors) => StyleSheet.create({
-  body: { width: '100%', fontSize: 16, color: colors.text, lineHeight: 24, fontFamily: fonts.serifBold },
+const createMarkdownStyles = (
+  colors: ThemeColors,
+  fontSize = 16,
+  textColor = colors.text,
+  strokeColor = colors.background,
+  strokeWidth = 0
+) => {
+  const strokeStyle = strokeWidth > 0
+    ? {
+        textShadowColor: strokeColor,
+        textShadowRadius: strokeWidth,
+        textShadowOffset: { width: 0, height: 0 },
+      }
+    : {};
+
+  return StyleSheet.create({
+  body: { width: '100%', fontSize, color: textColor, lineHeight: Math.round(fontSize * 1.5), fontFamily: fonts.serifBold, ...strokeStyle },
   code_inline: {
     backgroundColor: colors.surface, color: colors.primary,
     paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, fontSize: 14, fontFamily: 'monospace',
   },
   fence: { backgroundColor: colors.codeBlock, borderRadius: 10, padding: 14, marginVertical: 10 },
   code_block: { color: colors.codeText, fontSize: 13, fontFamily: 'monospace' },
-  heading1: { fontSize: 22, fontFamily: fonts.serifBold, marginVertical: 8, color: colors.text },
-  heading2: { fontSize: 18, fontFamily: fonts.serifBold, marginVertical: 6, color: colors.text },
-  heading3: { fontSize: 16, fontFamily: fonts.serifBold, marginVertical: 4, color: colors.text },
-  strong: { fontFamily: fonts.serifBold },
+  heading1: { fontSize: 22, fontFamily: fonts.serifBold, marginVertical: 8, color: textColor, ...strokeStyle },
+  heading2: { fontSize: 18, fontFamily: fonts.serifBold, marginVertical: 6, color: textColor, ...strokeStyle },
+  heading3: { fontSize: 16, fontFamily: fonts.serifBold, marginVertical: 4, color: textColor, ...strokeStyle },
+  strong: { fontFamily: fonts.serifBold, ...strokeStyle },
   blockquote: {
     borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 12, marginVertical: 8, opacity: 0.8,
   },
-  list_item: { marginVertical: 2 },
+  list_item: { marginVertical: 2, ...strokeStyle },
   link: { color: colors.primary },
   markdownTableScroll: { width: '100%', maxWidth: '100%', marginVertical: 10 },
   markdownTableScrollContent: { flexGrow: 0 },
   table: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden' },
   tr: { flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border },
-  th: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.surface },
-  td: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10 },
-});
+  th: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.surface, color: textColor, ...strokeStyle },
+  td: { minWidth: 128, flexShrink: 0, paddingVertical: 8, paddingHorizontal: 10, color: textColor, ...strokeStyle },
+  });
+};
 
 let styles = createStyles(colors);
 let thinkingMarkdownStyles = createThinkingMarkdownStyles(colors);

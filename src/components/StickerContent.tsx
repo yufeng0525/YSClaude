@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import type { StyleProp, TextStyle } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
@@ -11,11 +12,12 @@ let colors = lightColors;
 interface Props {
   content: string;
   variant: 'user' | 'assistant';
+  userTextStyle?: StyleProp<TextStyle>;
   markdownStyle?: any;
   markdownRules?: any;
 }
 
-export function StickerContent({ content, variant, markdownStyle, markdownRules }: Props) {
+export function StickerContent({ content, variant, userTextStyle, markdownStyle, markdownRules }: Props) {
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -41,7 +43,7 @@ export function StickerContent({ content, variant, markdownStyle, markdownRules 
 
         if (isUser) {
           return (
-            <Text key={`text-${index}`} style={styles.userText}>
+            <Text key={`text-${index}`} style={[styles.userText, userTextStyle]}>
               {chunk.text}
             </Text>
           );

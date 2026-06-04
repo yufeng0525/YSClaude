@@ -3,6 +3,54 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { sqliteStorage } from '../db/kv-storage';
 import { APIConfig } from '../types';
 import { DEFAULT_HOTBOARD_PLATFORM_TYPES } from '../utils/hotboardPlatforms';
+import type { TopBarIconKey } from '../utils/topBarIconTypes';
+
+export type ChatInputIconKey =
+  | 'options'
+  | 'sticker'
+  | 'sendIdle'
+  | 'sendFocused'
+  | 'stop';
+
+export type ChatInputAppearanceStyle = 'default' | 'glass';
+
+export interface AppearanceThemeSnapshot {
+  topBarIconUris: Partial<Record<TopBarIconKey, string>>;
+  topBarIconsHidden?: boolean;
+  topBarFadeHidden?: boolean;
+  chatBackgroundImageUri?: string;
+  userBubbleColor?: string;
+  userBubbleTransparent?: boolean;
+  userBubbleRadius?: number;
+  userBubbleBlurIntensity?: number;
+  messageAvatarsVisible?: boolean;
+  messageMetaVisible?: boolean;
+  userAvatarImageUri?: string;
+  assistantAvatarImageUri?: string;
+  messageAvatarRadius?: number;
+  userDisplayName?: string;
+  assistantDisplayName?: string;
+  assistantFooterHidden?: boolean;
+  assistantFooterColor?: string;
+  userTextColor?: string;
+  assistantTextColor?: string;
+  assistantTextStrokeColor?: string;
+  assistantTextStrokeWidth?: number;
+  userFontSize?: number;
+  assistantFontSize?: number;
+  inputBackgroundImageUri?: string;
+  inputBackgroundTransparent?: boolean;
+  inputStyle?: ChatInputAppearanceStyle;
+  inputBlurIntensity?: number;
+  inputIconUris?: Partial<Record<ChatInputIconKey, string>>;
+}
+
+export interface AppearanceTheme {
+  id: string;
+  name: string;
+  updatedAt: number;
+  config: AppearanceThemeSnapshot;
+}
 
 export interface NamedAPIConfig extends APIConfig {
   name: string;
@@ -82,6 +130,73 @@ export interface PromptCacheConfig {
   enabled: boolean;
 }
 
+export interface AppearanceConfig extends AppearanceThemeSnapshot {
+  appearanceThemes?: AppearanceTheme[];
+  activeAppearanceThemeId?: string;
+}
+
+const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
+  topBarIconUris: {},
+  topBarIconsHidden: false,
+  messageAvatarsVisible: false,
+  messageMetaVisible: true,
+  messageAvatarRadius: 18,
+  userDisplayName: 'You',
+  assistantDisplayName: 'Claude',
+  inputIconUris: {},
+  inputStyle: 'default',
+  inputBlurIntensity: 72,
+  appearanceThemes: [],
+};
+
+function createDefaultAppearanceConfig(): AppearanceConfig {
+  return {
+    ...DEFAULT_APPEARANCE_CONFIG,
+    topBarIconUris: {},
+    inputIconUris: {},
+    appearanceThemes: [],
+    activeAppearanceThemeId: undefined,
+  };
+}
+
+function createId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSnapshot {
+  const source = config || DEFAULT_APPEARANCE_CONFIG;
+  return {
+    topBarIconUris: { ...(source.topBarIconUris || {}) },
+    topBarIconsHidden: source.topBarIconsHidden,
+    topBarFadeHidden: source.topBarFadeHidden,
+    chatBackgroundImageUri: source.chatBackgroundImageUri,
+    userBubbleColor: source.userBubbleColor,
+    userBubbleTransparent: source.userBubbleTransparent,
+    userBubbleRadius: source.userBubbleRadius,
+    userBubbleBlurIntensity: source.userBubbleBlurIntensity,
+    messageAvatarsVisible: source.messageAvatarsVisible,
+    messageMetaVisible: source.messageMetaVisible,
+    userAvatarImageUri: source.userAvatarImageUri,
+    assistantAvatarImageUri: source.assistantAvatarImageUri,
+    messageAvatarRadius: source.messageAvatarRadius,
+    userDisplayName: source.userDisplayName,
+    assistantDisplayName: source.assistantDisplayName,
+    assistantFooterHidden: source.assistantFooterHidden,
+    assistantFooterColor: source.assistantFooterColor,
+    userTextColor: source.userTextColor,
+    assistantTextColor: source.assistantTextColor,
+    assistantTextStrokeColor: source.assistantTextStrokeColor,
+    assistantTextStrokeWidth: source.assistantTextStrokeWidth,
+    userFontSize: source.userFontSize,
+    assistantFontSize: source.assistantFontSize,
+    inputBackgroundImageUri: source.inputBackgroundImageUri,
+    inputBackgroundTransparent: source.inputBackgroundTransparent,
+    inputStyle: source.inputStyle,
+    inputBlurIntensity: source.inputBlurIntensity,
+    inputIconUris: { ...(source.inputIconUris || {}) },
+  };
+}
+
 interface SettingsState {
   _hydrated: boolean;
   apiConfigs: NamedAPIConfig[];
@@ -101,6 +216,7 @@ interface SettingsState {
   floatingBallConfig: FloatingBallConfig;
   periodConfig: PeriodConfig;
   promptCacheConfig: PromptCacheConfig;
+  appearanceConfig: AppearanceConfig;
 
   setActiveConfig: (index: number) => void;
   saveAPIConfig: (config: NamedAPIConfig) => void;
@@ -120,6 +236,18 @@ interface SettingsState {
   setFloatingBallConfig: (config: Partial<FloatingBallConfig>) => void;
   setPeriodConfig: (config: Partial<PeriodConfig>) => void;
   setPromptCacheConfig: (config: Partial<PromptCacheConfig>) => void;
+  setAppearanceConfig: (config: Partial<AppearanceConfig>) => void;
+  setTopBarIconUri: (key: TopBarIconKey, uri: string) => void;
+  clearTopBarIconUri: (key: TopBarIconKey) => void;
+  resetTopBarIcons: () => void;
+  setChatInputIconUri: (key: ChatInputIconKey, uri: string) => void;
+  clearChatInputIconUri: (key: ChatInputIconKey) => void;
+  resetChatInputIcons: () => void;
+  saveAppearanceTheme: (name: string) => string;
+  updateAppearanceTheme: (id: string) => void;
+  applyAppearanceTheme: (id: string) => void;
+  removeAppearanceTheme: (id: string) => void;
+  resetAppearanceConfig: () => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -196,6 +324,7 @@ export const useSettingsStore = create<SettingsState>()(
       promptCacheConfig: {
         enabled: false,
       },
+      appearanceConfig: DEFAULT_APPEARANCE_CONFIG,
 
       setActiveConfig: (index) => set({ activeConfigIndex: index }),
 
@@ -246,6 +375,145 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ periodConfig: { ...state.periodConfig, ...config } })),
       setPromptCacheConfig: (config) =>
         set((state) => ({ promptCacheConfig: { ...(state.promptCacheConfig || { enabled: false }), ...config } })),
+      setAppearanceConfig: (config) =>
+        set((state) => ({
+          appearanceConfig: {
+            ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+            ...config,
+            topBarIconUris: {
+              ...(state.appearanceConfig?.topBarIconUris || {}),
+              ...(config.topBarIconUris || {}),
+            },
+            inputIconUris: {
+              ...(state.appearanceConfig?.inputIconUris || {}),
+              ...(config.inputIconUris || {}),
+            },
+          },
+        })),
+      setTopBarIconUri: (key, uri) =>
+        set((state) => ({
+          appearanceConfig: {
+            ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+            topBarIconUris: {
+              ...(state.appearanceConfig?.topBarIconUris || {}),
+              [key]: uri,
+            },
+          },
+        })),
+      clearTopBarIconUri: (key) =>
+        set((state) => {
+          const nextUris = { ...(state.appearanceConfig?.topBarIconUris || {}) };
+          delete nextUris[key];
+          return {
+            appearanceConfig: {
+              ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+              topBarIconUris: nextUris,
+            },
+          };
+        }),
+      resetTopBarIcons: () =>
+        set((state) => ({
+          appearanceConfig: {
+            ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+            topBarIconUris: {},
+          },
+        })),
+      setChatInputIconUri: (key, uri) =>
+        set((state) => ({
+          appearanceConfig: {
+            ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+            inputIconUris: {
+              ...(state.appearanceConfig?.inputIconUris || {}),
+              [key]: uri,
+            },
+          },
+        })),
+      clearChatInputIconUri: (key) =>
+        set((state) => {
+          const nextUris = { ...(state.appearanceConfig?.inputIconUris || {}) };
+          delete nextUris[key];
+          return {
+            appearanceConfig: {
+              ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+              inputIconUris: nextUris,
+            },
+          };
+        }),
+      resetChatInputIcons: () =>
+        set((state) => ({
+          appearanceConfig: {
+            ...(state.appearanceConfig || { topBarIconUris: {}, inputIconUris: {}, inputStyle: 'default' }),
+            inputIconUris: {},
+          },
+        })),
+      saveAppearanceTheme: (name) => {
+        const id = createId('appearance-theme');
+        set((state) => {
+          const current = state.appearanceConfig || DEFAULT_APPEARANCE_CONFIG;
+          const themes = current.appearanceThemes || [];
+          const theme: AppearanceTheme = {
+            id,
+            name: name.trim(),
+            updatedAt: Date.now(),
+            config: snapshotAppearanceConfig(current),
+          };
+          return {
+            appearanceConfig: {
+              ...current,
+              appearanceThemes: [theme, ...themes],
+              activeAppearanceThemeId: id,
+            },
+          };
+        });
+        return id;
+      },
+      updateAppearanceTheme: (id) =>
+        set((state) => {
+          const current = state.appearanceConfig || DEFAULT_APPEARANCE_CONFIG;
+          const themes = current.appearanceThemes || [];
+          return {
+            appearanceConfig: {
+              ...current,
+              appearanceThemes: themes.map((theme) =>
+                theme.id === id
+                  ? { ...theme, updatedAt: Date.now(), config: snapshotAppearanceConfig(current) }
+                  : theme
+              ),
+              activeAppearanceThemeId: id,
+            },
+          };
+        }),
+      applyAppearanceTheme: (id) =>
+        set((state) => {
+          const current = state.appearanceConfig || DEFAULT_APPEARANCE_CONFIG;
+          const themes = current.appearanceThemes || [];
+          const theme = themes.find((item) => item.id === id);
+          if (!theme) return { appearanceConfig: current };
+          return {
+            appearanceConfig: {
+              ...DEFAULT_APPEARANCE_CONFIG,
+              ...theme.config,
+              topBarIconUris: { ...(theme.config.topBarIconUris || {}) },
+              inputIconUris: { ...(theme.config.inputIconUris || {}) },
+              appearanceThemes: themes,
+              activeAppearanceThemeId: id,
+            },
+          };
+        }),
+      removeAppearanceTheme: (id) =>
+        set((state) => {
+          const current = state.appearanceConfig || DEFAULT_APPEARANCE_CONFIG;
+          const nextThemes = (current.appearanceThemes || []).filter((theme) => theme.id !== id);
+          return {
+            appearanceConfig: {
+              ...current,
+              appearanceThemes: nextThemes,
+              activeAppearanceThemeId:
+                current.activeAppearanceThemeId === id ? undefined : current.activeAppearanceThemeId,
+            },
+          };
+        }),
+      resetAppearanceConfig: () => set({ appearanceConfig: createDefaultAppearanceConfig() }),
     }),
     {
       name: 'ysclaude-settings',
@@ -268,6 +536,7 @@ export const useSettingsStore = create<SettingsState>()(
         floatingBallConfig: state.floatingBallConfig,
         periodConfig: state.periodConfig,
         promptCacheConfig: state.promptCacheConfig,
+        appearanceConfig: state.appearanceConfig,
       }),
       onRehydrateStorage: () => () => {
         useSettingsStore.setState({ _hydrated: true });

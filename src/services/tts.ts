@@ -1,18 +1,18 @@
-import { createAudioPlayer } from 'expo-audio';
+import { createAudioPlayer, type AudioStatus } from 'expo-audio';
 import { File, Paths } from 'expo-file-system';
 import { TTSConfig } from '../stores/settings';
 
 let currentPlayer: ReturnType<typeof createAudioPlayer> | null = null;
+let currentSubscription: { remove: () => void } | null = null;
+let currentWaitResolve: (() => void) | null = null;
 
-export async function playTTS(text: string, config: TTSConfig): Promise<void> {
+async function createTTSPlayer(text: string, config: TTSConfig): Promise<ReturnType<typeof createAudioPlayer>> {
   if (!config.apiKey || !config.groupId) {
     throw new Error('请先配置 MiniMax Group ID 和 API Key');
   }
   if (!config.voiceId) {
     throw new Error('请先配置 Voice ID');
   }
-
-  await stopTTS();
 
   const url = `https://api.minimax.chat/v1/t2a_v2?GroupId=${encodeURIComponent(config.groupId)}`;
   const response = await fetch(url, {
@@ -63,11 +63,55 @@ export async function playTTS(text: string, config: TTSConfig): Promise<void> {
   await writer.write(audioBytes);
   await writer.close();
 
-  currentPlayer = createAudioPlayer(file.uri);
+  return createAudioPlayer(file.uri);
+}
+
+export async function playTTS(text: string, config: TTSConfig): Promise<void> {
+  await stopTTS();
+  currentPlayer = await createTTSPlayer(text, config);
   currentPlayer.play();
 }
 
+export async function playTTSAndWait(text: string, config: TTSConfig): Promise<void> {
+  await stopTTS();
+  currentPlayer = await createTTSPlayer(text, config);
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      currentSubscription?.remove();
+      currentSubscription = null;
+      currentWaitResolve = null;
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    currentWaitResolve = () => finish();
+    currentSubscription = currentPlayer?.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+      if (status.error) {
+        finish(new Error(status.error));
+        return;
+      }
+      if (status.didJustFinish) {
+        finish();
+      }
+    }) ?? null;
+    currentPlayer?.play();
+  });
+
+  await stopTTS();
+}
+
 export async function stopTTS(): Promise<void> {
+  currentSubscription?.remove();
+  currentSubscription = null;
+  currentWaitResolve?.();
+  currentWaitResolve = null;
   if (currentPlayer) {
     currentPlayer.pause();
     currentPlayer.release();

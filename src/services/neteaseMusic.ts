@@ -38,6 +38,16 @@ interface NeteaseSong {
   al?: { name?: string; picUrl?: string };
 }
 
+interface NeteaseSearchSong {
+  id: number;
+  name: string;
+  duration?: number;
+  artists?: Array<{ name: string }>;
+  album?: { name?: string; picUrl?: string };
+  ar?: Array<{ name: string }>;
+  al?: { name?: string; picUrl?: string };
+}
+
 interface NeteaseSongUrl {
   id: number;
   url?: string | null;
@@ -188,6 +198,55 @@ export async function importNeteasePlaylist(
     tracks,
     playableCount: tracks.length,
     skippedCount: Math.max(0, songs.length - tracks.length),
+  };
+}
+
+function getSearchSongArtists(song: NeteaseSearchSong): string {
+  const artists = song.ar ?? song.artists ?? [];
+  return artists.map((artist) => artist.name).filter(Boolean).join(' / ') || '未知歌手';
+}
+
+function getSearchSongAlbum(song: NeteaseSearchSong): { name?: string; picUrl?: string } | undefined {
+  return song.al ?? song.album;
+}
+
+export async function searchNeteaseTrack(
+  baseUrl: string,
+  cookie: string,
+  query: string
+): Promise<MusicTrack | null> {
+  const text = query.trim();
+  if (!text) return null;
+
+  const result = await fetchJson<{ result?: { songs?: NeteaseSearchSong[] } }>(baseUrl, '/search', {
+    keywords: text,
+    type: 1,
+    limit: 5,
+    cookie,
+  });
+  const songs = result.result?.songs ?? [];
+  if (songs.length === 0) return null;
+
+  const urls = await getSongUrls(baseUrl, cookie, songs.map((song) => song.id));
+  const song = songs.find((item) => {
+    const url = urls.get(item.id);
+    return !!url?.url && !url.freeTrialInfo;
+  });
+  if (!song) return null;
+
+  const urlData = urls.get(song.id);
+  const album = getSearchSongAlbum(song);
+  return {
+    id: `radio-netease-${song.id}`,
+    title: song.name,
+    artist: getSearchSongArtists(song),
+    album: album?.name,
+    artworkUrl: album?.picUrl,
+    sourceUrl: urlData?.url ?? undefined,
+    durationMs: urlData?.time ?? song.duration,
+    lyrics: await getLyrics(baseUrl, cookie, song.id),
+    source: 'radio',
+    availability: 'playable',
   };
 }
 

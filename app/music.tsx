@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 import { fonts } from '../src/theme/fonts';
 import { LyricLine, MusicTrack, PlayOrder, useMusicStore } from '../src/stores/music';
+import { useRadioStore } from '../src/stores/radio';
 
 let colors = lightColors;
 
@@ -36,6 +37,13 @@ function formatTime(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+function trackSourceLabel(track: MusicTrack): string {
+  if (track.source === 'radio') return 'AI 电台';
+  if (track.source === 'netease') return '网易云歌单';
+  if (track.source === 'local') return '本地音乐';
+  return '示例歌单';
+}
+
 export default function MusicScreen() {
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
@@ -44,6 +52,15 @@ export default function MusicScreen() {
   const lyricListRef = useRef<FlatList<LyricLine>>(null);
   const [progressWidth, setProgressWidth] = useState(1);
   const [queueVisible, setQueueVisible] = useState(false);
+  const {
+    loading: radioLoading,
+    active: radioActive,
+    ending: radioEnding,
+    title: radioTitle,
+    status: radioStatus,
+    start: startRadio,
+    end: endRadio,
+  } = useRadioStore();
 
   const {
     tracks,
@@ -170,6 +187,24 @@ export default function MusicScreen() {
         <Text style={styles.manageText}>歌单管理</Text>
       </Pressable>
 
+      <View style={styles.radioPanel}>
+        <View style={styles.radioTextBlock}>
+          <Text style={styles.radioTitle} numberOfLines={1}>{radioTitle}</Text>
+          <Text style={styles.radioStatus} numberOfLines={2}>{radioStatus}</Text>
+        </View>
+        <Pressable
+          style={[styles.radioButton, (radioLoading || radioEnding) && styles.radioButtonDisabled]}
+          onPress={radioActive ? endRadio : startRadio}
+          disabled={radioLoading || radioEnding}
+        >
+          {radioLoading || radioEnding ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.radioButtonText}>{radioActive ? '结束' : '开台'}</Text>
+          )}
+        </Pressable>
+      </View>
+
       <Pressable
         style={[styles.desktopLyricToggle, desktopLyricsEnabled && styles.desktopLyricToggleActive]}
         onPress={() => setDesktopLyricsEnabled(!desktopLyricsEnabled)}
@@ -213,7 +248,7 @@ export default function MusicScreen() {
           <Text style={styles.trackTitle} numberOfLines={2}>{track.title}</Text>
           <Text style={styles.trackArtist} numberOfLines={1}>{track.artist}</Text>
           <Text style={styles.trackMeta} numberOfLines={1}>
-            {track.source === 'netease' ? '网易云歌单' : '示例歌单'}
+            {trackSourceLabel(track)}
           </Text>
         </View>
       </View>
@@ -412,6 +447,48 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   manageText: {
     fontSize: 13,
     color: colors.text,
+  },
+  radioPanel: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 10,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+  },
+  radioTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  radioTitle: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: colors.text,
+  },
+  radioStatus: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+  },
+  radioButton: {
+    width: 58,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+  },
+  radioButtonDisabled: {
+    opacity: 0.72,
+  },
+  radioButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: '#FFFFFF',
   },
   desktopLyricToggle: {
     alignSelf: 'center',

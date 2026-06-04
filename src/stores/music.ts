@@ -28,7 +28,7 @@ export interface MusicTrack {
   sourceUrl?: string;
   durationMs?: number;
   lyrics: LyricLine[];
-  source?: 'netease' | 'demo' | 'local';
+  source?: 'netease' | 'demo' | 'local' | 'radio';
   availability?: 'playable' | 'unresolved' | 'vip_required' | 'copyright_blocked';
 }
 
@@ -41,6 +41,8 @@ interface MusicState {
   isMinimized: boolean;
   isPlaying: boolean;
   isBuffering: boolean;
+  autoAdvanceEnabled: boolean;
+  lastFinishedTrackId: string | null;
   desktopLyricsEnabled: boolean;
   desktopLyricBackgroundUri: string;
   currentTimeMs: number;
@@ -59,6 +61,7 @@ interface MusicState {
   playTrackAt: (index: number) => Promise<void>;
   seekTo: (timeMs: number) => Promise<void>;
   setOrder: (order: PlayOrder) => void;
+  setAutoAdvanceEnabled: (enabled: boolean) => void;
   setDesktopLyricsEnabled: (enabled: boolean) => void;
   setDesktopLyricBackgroundUri: (uri: string) => void;
   replaceTracks: (tracks: MusicTrack[]) => void;
@@ -207,7 +210,10 @@ async function loadTrack(index: number, shouldPlay: boolean): Promise<void> {
 
     if (status.didJustFinish && currentTrack && finishingTrackId !== currentTrack.id) {
       finishingTrackId = currentTrack.id;
-      useMusicStore.getState().next().catch(() => undefined);
+      useMusicStore.setState({ lastFinishedTrackId: currentTrack.id, isPlaying: false });
+      if (useMusicStore.getState().autoAdvanceEnabled) {
+        useMusicStore.getState().next().catch(() => undefined);
+      }
     }
   });
 
@@ -216,6 +222,7 @@ async function loadTrack(index: number, shouldPlay: boolean): Promise<void> {
     currentTimeMs: 0,
     durationMs: track.durationMs ?? 0,
     currentLyricIndex: getTrackLyricIndex(track, 0),
+    lastFinishedTrackId: null,
     error: null,
   });
 
@@ -249,6 +256,8 @@ export const useMusicStore = create<MusicState>()(
   isMinimized: false,
   isPlaying: false,
   isBuffering: false,
+  autoAdvanceEnabled: true,
+  lastFinishedTrackId: null,
   desktopLyricsEnabled: false,
   desktopLyricBackgroundUri: '',
   currentTimeMs: 0,
@@ -359,6 +368,10 @@ export const useMusicStore = create<MusicState>()(
 
   setOrder: (order: PlayOrder) => {
     set({ order });
+  },
+
+  setAutoAdvanceEnabled: (enabled: boolean) => {
+    set({ autoAdvanceEnabled: enabled });
   },
 
   setDesktopLyricsEnabled: (enabled: boolean) => {

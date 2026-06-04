@@ -24,11 +24,16 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurTargetView } from 'expo-blur';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import { fonts } from '../src/theme/fonts';
+import { TopBarIcon } from '../src/components/TopBarIcon';
 import { useChatStore } from '../src/stores/chat';
 import { usePeriodStore } from '../src/stores/period';
+import { useSettingsStore } from '../src/stores/settings';
 import { ChatBubble } from '../src/components/ChatBubble';
 import { ChatInput } from '../src/components/ChatInput';
 import { ModelSelector } from '../src/components/ModelSelector';
@@ -52,6 +57,7 @@ import {
 let colors = lightColors;
 const INPUT_BAR_FALLBACK_HEIGHT = 128;
 const MESSAGE_BOTTOM_GAP = 16;
+const MESSAGE_TOP_GAP = 104;
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 function startOfMonth(date: Date): Date {
@@ -103,14 +109,26 @@ function buildCalendarCells(month: Date): Array<Date | null> {
   return cells;
 }
 
+function withAlpha(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return hex;
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
 export default function ChatScreen() {
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
-  const isDarkTheme = colors.background === '#12100D';
-  const headerImageTintStyle = isDarkTheme ? styles.invertedImageIcon : undefined;
 
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
+  const topBarIconUris = appearanceConfig?.topBarIconUris || {};
+  const topBarIconsHidden = !!appearanceConfig?.topBarIconsHidden;
+  const topBarFadeHidden = !!appearanceConfig?.topBarFadeHidden;
+  const chatBackgroundImageUri = appearanceConfig?.chatBackgroundImageUri;
   const {
     conversationId,
     messages,
@@ -148,6 +166,7 @@ export default function ChatScreen() {
   const [inputBarHeight, setInputBarHeight] = useState(INPUT_BAR_FALLBACK_HEIGHT);
   const [isInitialPositioning, setIsInitialPositioning] = useState(false);
   const flatListRef = useRef<FlatList<Message>>(null);
+  const blurTargetRef = useRef<View | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollFollowUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -531,6 +550,7 @@ export default function ChatScreen() {
           )}
           <ChatBubble
             message={item}
+            blurTarget={blurTargetRef}
             previousUserMessage={prev?.role === 'user' ? prev : null}
             isHidden={isHidden}
             floorNumber={floor}
@@ -568,42 +588,94 @@ export default function ChatScreen() {
     );
   }, [hasOlderMessages, isLoadingOlderMessages, loadOlderMessages]);
 
+  const messageListNode = (
+    <FlatList
+      ref={flatListRef}
+      data={messages}
+      keyExtractor={(item) => item.id}
+      keyboardShouldPersistTaps="handled"
+      renderItem={renderMessageItem}
+      style={[styles.messageList, isInitialPositioning && styles.messageListHidden]}
+      contentContainerStyle={messageContentStyle}
+      onLayout={handleListLayout}
+      onContentSizeChange={handleContentSizeChange}
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
+      maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+      onScrollToIndexFailed={({ index }) => {
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({
+            index,
+            animated: true,
+            viewPosition: 0.5,
+          });
+        }, 120);
+      }}
+      ListHeaderComponent={renderOlderMessagesHeader}
+      ListEmptyComponent={<EmptyState />}
+    />
+  );
+
   return (
     <Animated.View
       style={[styles.container, animatedContainerStyle]}
       onTouchStart={handleScreenTouchStart}
     >
+      <BlurTargetView ref={blurTargetRef} style={styles.backgroundBlurTarget}>
+        <View style={styles.backgroundBase} />
+        {chatBackgroundImageUri && (
+          <>
+            <Image source={{ uri: chatBackgroundImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <View pointerEvents="none" style={styles.backgroundImageOverlay} />
+          </>
+        )}
+      </BlurTargetView>
       <View style={styles.header}>
+        {!topBarFadeHidden && (
+          <LinearGradient
+            pointerEvents="none"
+            colors={[
+              colors.background,
+              withAlpha(colors.background, 0.92),
+              withAlpha(colors.background, 0),
+            ]}
+            locations={[0, 0.68, 1]}
+            style={styles.headerFade}
+          />
+        )}
         <View style={styles.headerLeftGroup}>
           <Pressable style={styles.headerButton} onPress={() => router.push('/history')}>
-            <View style={styles.hamburgerLines}>
-              <View style={styles.hamburgerLine} />
-              <View style={styles.hamburgerLine} />
-              <View style={[styles.hamburgerLine, styles.hamburgerLineShort]} />
-            </View>
+            {!topBarIconsHidden && <TopBarIcon iconKey="history" color={colors.text} customUri={topBarIconUris.history} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/reading')}>
-            <Image source={require('../assets/reading.png')} style={[styles.readingIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="reading" color={colors.text} customUri={topBarIconUris.reading} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={showWebViewPanel}>
-            <Image source={require('../assets/web.png')} style={[styles.webIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="web" color={colors.text} customUri={topBarIconUris.web} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/game')}>
-            <Image source={require('../assets/game.png')} style={[styles.gameIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="game" color={colors.text} customUri={topBarIconUris.game} />}
           </Pressable>
         </View>
         <View style={styles.headerRightGroup}>
           <Pressable style={styles.headerButton} onPress={() => router.push('/focus')}>
-            <Image source={require('../assets/todo.png')} style={[styles.todoIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="focus" color={colors.text} customUri={topBarIconUris.focus} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={openCalendar}>
-            <Image source={require('../assets/calendar.png')} style={[styles.calendarIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="calendar" color={colors.text} customUri={topBarIconUris.calendar} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/music')}>
-            <Image source={require('../assets/music.png')} style={[styles.musicIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="music" color={colors.text} customUri={topBarIconUris.music} />}
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/settings')}>
-            <Image source={require('../assets/setting.png')} style={[styles.settingIcon, headerImageTintStyle]} resizeMode="contain" />
+            {!topBarIconsHidden && <TopBarIcon iconKey="settings" color={colors.text} customUri={topBarIconUris.settings} />}
+          </Pressable>
+        </View>
+        <View pointerEvents="box-none" style={styles.headerCenterSlot}>
+          <Pressable style={styles.headerCenterButton} onPress={() => router.push('/m5stack')}>
+            {!topBarIconsHidden && (
+              <Image source={require('../assets/clawd.png')} style={styles.clawdHeaderIcon} resizeMode="contain" />
+            )}
           </Pressable>
         </View>
       </View>
@@ -614,31 +686,25 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        keyboardShouldPersistTaps="handled"
-        renderItem={renderMessageItem}
-        style={[styles.messageList, isInitialPositioning && styles.messageListHidden]}
-        contentContainerStyle={messageContentStyle}
-        onLayout={handleListLayout}
-        onContentSizeChange={handleContentSizeChange}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-        onScrollToIndexFailed={({ index }) => {
-          setTimeout(() => {
-            flatListRef.current?.scrollToIndex({
-              index,
-              animated: true,
-              viewPosition: 0.5,
-            });
-          }, 120);
-        }}
-        ListHeaderComponent={renderOlderMessagesHeader}
-        ListEmptyComponent={<EmptyState />}
-      />
+      {topBarFadeHidden ? (
+        <MaskedView
+          style={styles.messageMask}
+          maskElement={
+            <View style={styles.messageMaskElement}>
+              <LinearGradient
+                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']}
+                locations={[0, 1]}
+                style={styles.messageMaskFade}
+              />
+              <View style={styles.messageMaskSolid} />
+            </View>
+          }
+        >
+          {messageListNode}
+        </MaskedView>
+      ) : (
+        messageListNode
+      )}
 
       <Animated.View
         style={[styles.inputFloating, animatedInputStyle]}
@@ -646,6 +712,7 @@ export default function ChatScreen() {
         onLayout={handleInputLayout}
       >
         <ChatInput
+          blurTarget={blurTargetRef}
           onSend={async (text, imageUri) => {
             await addUserMessage(text, imageUri);
           }}
@@ -791,13 +858,50 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  backgroundBlurTarget: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  backgroundBase: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: colors.background,
+  },
+  backgroundImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: colors.background === '#12100D'
+      ? 'rgba(18,16,13,0.26)'
+      : 'rgba(250,249,245,0.18)',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 5,
     paddingTop: 48,
     paddingHorizontal: 12,
     paddingBottom: 8,
+  },
+  headerFade: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 104,
   },
   headerButton: {
     width: 40,
@@ -816,57 +920,34 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  hamburgerLines: {
-    width: 20,
-    height: 16,
-    justifyContent: 'space-between',
+  headerCenterSlot: {
+    position: 'absolute',
+    top: 48,
+    left: 0,
+    right: 0,
+    height: 40,
+    alignItems: 'center',
+    zIndex: 2,
   },
-  hamburgerLine: {
-    width: 18,
-    height: 2,
-    backgroundColor: colors.text,
-    borderRadius: 1,
+  headerCenterButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
   },
-  hamburgerLineShort: {
-    width: 9,
-  },
-  settingIcon: {
-    width: 22,
-    height: 22,
-  },
-  calendarIcon: {
-    width: 23,
-    height: 23,
-  },
-  todoIcon: {
-    width: 23,
-    height: 23,
-  },
-  musicIcon: {
-    width: 23,
-    height: 23,
-  },
-  readingIcon: {
-    width: 24,
-    height: 24,
-  },
-  webIcon: {
-    width: 24,
-    height: 24,
-  },
-  gameIcon: {
-    width: 24,
-    height: 24,
-  },
-  invertedImageIcon: {
-    tintColor: colors.text,
+  clawdHeaderIcon: {
+    width: 30,
+    height: 30,
   },
   errorBanner: {
     backgroundColor: colors.dangerSurface,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    marginTop: 96,
     marginHorizontal: 16,
     borderRadius: 8,
+    zIndex: 6,
   },
   errorText: {
     fontSize: 13,
@@ -875,11 +956,24 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   messageList: {
     flex: 1,
   },
+  messageMask: {
+    flex: 1,
+  },
+  messageMaskElement: {
+    flex: 1,
+  },
+  messageMaskFade: {
+    height: 104,
+  },
+  messageMaskSolid: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
   messageListHidden: {
     opacity: 0,
   },
   messageContent: {
-    paddingTop: 8,
+    paddingTop: MESSAGE_TOP_GAP,
     flexGrow: 1,
   },
   loadOlderContainer: {

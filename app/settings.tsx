@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, Pressable,
-  ActivityIndicator, Alert, Modal, FlatList, Switch,
+  ActivityIndicator, Alert, Modal, FlatList, Switch, Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { randomUUID } from 'expo-crypto';
+import { Directory, File, Paths } from 'expo-file-system';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import { fonts } from '../src/theme/fonts';
-import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig } from '../src/stores/settings';
+import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle } from '../src/stores/settings';
+import { TopBarIcon, TOP_BAR_ICON_ITEMS } from '../src/components/TopBarIcon';
+import type { TopBarIconKey } from '../src/utils/topBarIconTypes';
 import { useChatStore } from '../src/stores/chat';
 import { useDiaryStore } from '../src/stores/diary';
 import { playTTS, stopTTS } from '../src/services/tts';
@@ -32,9 +37,23 @@ import { useKeyboardHeight } from '../src/hooks/useKeyboardHeight';
 
 
 let colors = lightColors;
-const TABS = ['API 配置', '对话设置', 'TTS 配置', 'Tool 设置', '日记', '悬浮球'] as const;
+const TABS = ['API 配置', '对话设置', 'TTS 配置', 'Tool 设置', '日记', '悬浮球', '美化'] as const;
 type ToastFn = (message: string) => void;
 type SettingsTabProps = { showToast: ToastFn; keyboardBottomInset: number };
+const CUSTOM_TOP_BAR_ICON_MAX_BYTES = 2 * 1024 * 1024;
+const CUSTOM_TOP_BAR_ICON_MIN_SIDE = 48;
+const CUSTOM_TOP_BAR_ICON_MAX_SIDE = 2048;
+const CUSTOM_BACKGROUND_MAX_BYTES = 8 * 1024 * 1024;
+const CUSTOM_BACKGROUND_MIN_SIDE = 320;
+const CUSTOM_BACKGROUND_MAX_SIDE = 6000;
+const CHAT_INPUT_ICON_ITEMS: Array<{ key: ChatInputIconKey; label: string }> = [
+  { key: 'options', label: '左侧菜单' },
+  { key: 'sticker', label: '贴纸' },
+  { key: 'sendIdle', label: '发送/回复' },
+  { key: 'sendFocused', label: '聚焦发送' },
+  { key: 'stop', label: '停止生成' },
+];
+const COLOR_SWATCHES = ['#f1eee7', '#FFFFFF', '#FDE68A', '#BFDBFE', '#FBCFE8', '#DCFCE7', '#2B241D', '#141413'];
 
 export default function SettingsScreen() {
   colors = useThemeColors();
@@ -96,6 +115,7 @@ export default function SettingsScreen() {
       {activeTab === 3 && <ToolConfigTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 4 && <DiaryTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 5 && <FloatingBallTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
+      {activeTab === 6 && <AppearanceTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
 
       {toastMessage && (
         <View pointerEvents="none" style={styles.toast}>
@@ -103,6 +123,1024 @@ export default function SettingsScreen() {
         </View>
       )}
     </View>
+  );
+}
+
+/* ==================== 美化 Tab ==================== */
+
+function topBarIconExtension(asset: ImagePicker.ImagePickerAsset): string {
+  const mimeType = asset.mimeType?.toLowerCase();
+  if (mimeType === 'image/png') return '.png';
+  if (mimeType === 'image/webp') return '.webp';
+  if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') return '.jpg';
+
+  const cleanUri = asset.uri.split('?')[0].toLowerCase();
+  if (cleanUri.endsWith('.png')) return '.png';
+  if (cleanUri.endsWith('.webp')) return '.webp';
+  if (cleanUri.endsWith('.jpeg')) return '.jpg';
+  if (cleanUri.endsWith('.jpg')) return '.jpg';
+  return '.png';
+}
+
+async function copyTopBarIcon(asset: ImagePicker.ImagePickerAsset, key: TopBarIconKey): Promise<string> {
+  const dir = new Directory(Paths.document, 'top-bar-icons');
+  dir.create({ intermediates: true, idempotent: true });
+
+  const source = new File(asset.uri);
+  const destination = new File(dir, `${key}-${randomUUID()}${topBarIconExtension(asset)}`);
+  await source.copy(destination, { overwrite: true });
+  return destination.uri;
+}
+
+async function copyAppearanceImage(
+  asset: ImagePicker.ImagePickerAsset,
+  directoryName: string,
+  prefix: string
+): Promise<string> {
+  const dir = new Directory(Paths.document, directoryName);
+  dir.create({ intermediates: true, idempotent: true });
+
+  const source = new File(asset.uri);
+  const destination = new File(dir, `${prefix}-${randomUUID()}${topBarIconExtension(asset)}`);
+  await source.copy(destination, { overwrite: true });
+  return destination.uri;
+}
+
+function validateTopBarIconAsset(asset: ImagePicker.ImagePickerAsset): string | null {
+  if (asset.fileSize && asset.fileSize > CUSTOM_TOP_BAR_ICON_MAX_BYTES) {
+    return '图片不能超过 2MB';
+  }
+  if (
+    asset.width < CUSTOM_TOP_BAR_ICON_MIN_SIDE ||
+    asset.height < CUSTOM_TOP_BAR_ICON_MIN_SIDE
+  ) {
+    return `图片边长至少 ${CUSTOM_TOP_BAR_ICON_MIN_SIDE}px`;
+  }
+  if (
+    asset.width > CUSTOM_TOP_BAR_ICON_MAX_SIDE ||
+    asset.height > CUSTOM_TOP_BAR_ICON_MAX_SIDE
+  ) {
+    return `图片边长不能超过 ${CUSTOM_TOP_BAR_ICON_MAX_SIDE}px`;
+  }
+  return null;
+}
+
+function validateBackgroundAsset(asset: ImagePicker.ImagePickerAsset): string | null {
+  if (asset.fileSize && asset.fileSize > CUSTOM_BACKGROUND_MAX_BYTES) {
+    return '图片不能超过 8MB';
+  }
+  if (
+    asset.width < CUSTOM_BACKGROUND_MIN_SIDE ||
+    asset.height < CUSTOM_BACKGROUND_MIN_SIDE
+  ) {
+    return `图片边长至少 ${CUSTOM_BACKGROUND_MIN_SIDE}px`;
+  }
+  if (
+    asset.width > CUSTOM_BACKGROUND_MAX_SIDE ||
+    asset.height > CUSTOM_BACKGROUND_MAX_SIDE
+  ) {
+    return `图片边长不能超过 ${CUSTOM_BACKGROUND_MAX_SIDE}px`;
+  }
+  return null;
+}
+
+function isHexColor(value: string): boolean {
+  return /^#[0-9A-Fa-f]{6}$/.test(value.trim());
+}
+
+function parseAppearanceNumber(value: string, fallback: number, min: number, max: number): number {
+  const next = parseInt(value, 10);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.min(max, Math.max(min, next));
+}
+
+function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
+  const {
+    appearanceConfig,
+    setAppearanceConfig,
+    setTopBarIconUri,
+    clearTopBarIconUri,
+    resetTopBarIcons,
+    setChatInputIconUri,
+    clearChatInputIconUri,
+    resetChatInputIcons,
+    saveAppearanceTheme,
+    updateAppearanceTheme,
+    applyAppearanceTheme,
+    removeAppearanceTheme,
+    resetAppearanceConfig,
+  } = useSettingsStore();
+  const [pickingKey, setPickingKey] = useState<TopBarIconKey | null>(null);
+  const [pickingInputIconKey, setPickingInputIconKey] = useState<ChatInputIconKey | null>(null);
+  const [pickingBackground, setPickingBackground] = useState<'chat' | 'input' | null>(null);
+  const [pickingAvatar, setPickingAvatar] = useState<'user' | 'assistant' | null>(null);
+  const [appearanceThemeName, setAppearanceThemeName] = useState('');
+  const [appearanceThemesExpanded, setAppearanceThemesExpanded] = useState(false);
+  const [userBubbleColorInput, setUserBubbleColorInput] = useState(appearanceConfig?.userBubbleColor || colors.userBubble);
+  const [userTextColorInput, setUserTextColorInput] = useState(appearanceConfig?.userTextColor || colors.text);
+  const [assistantTextColorInput, setAssistantTextColorInput] = useState(appearanceConfig?.assistantTextColor || colors.text);
+  const [assistantTextStrokeColorInput, setAssistantTextStrokeColorInput] = useState(appearanceConfig?.assistantTextStrokeColor || colors.background);
+  const [assistantFooterColorInput, setAssistantFooterColorInput] = useState(appearanceConfig?.assistantFooterColor || colors.textTertiary);
+  const appearanceThemes = appearanceConfig?.appearanceThemes || [];
+  const activeAppearanceThemeId = appearanceConfig?.activeAppearanceThemeId;
+  const topBarIconUris = appearanceConfig?.topBarIconUris || {};
+  const topBarIconsHidden = !!appearanceConfig?.topBarIconsHidden;
+  const topBarFadeHidden = !!appearanceConfig?.topBarFadeHidden;
+  const inputIconUris = appearanceConfig?.inputIconUris || {};
+  const inputStyle = appearanceConfig?.inputStyle || 'default';
+  const inputBlurIntensity = appearanceConfig?.inputBlurIntensity ?? 72;
+  const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
+  const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
+  const messageAvatarsVisible = !!appearanceConfig?.messageAvatarsVisible;
+  const messageMetaVisible = appearanceConfig?.messageMetaVisible ?? true;
+  const userAvatarImageUri = appearanceConfig?.userAvatarImageUri;
+  const assistantAvatarImageUri = appearanceConfig?.assistantAvatarImageUri;
+  const messageAvatarRadius = appearanceConfig?.messageAvatarRadius ?? 18;
+  const userDisplayName = appearanceConfig?.userDisplayName ?? 'You';
+  const assistantDisplayName = appearanceConfig?.assistantDisplayName ?? 'Claude';
+  const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
+  const userBubbleRadius = appearanceConfig?.userBubbleRadius ?? 20;
+  const userBubbleBlurIntensity = appearanceConfig?.userBubbleBlurIntensity ?? 0;
+  const userFontSize = appearanceConfig?.userFontSize ?? 16;
+  const assistantFontSize = appearanceConfig?.assistantFontSize ?? 16;
+  const assistantTextStrokeWidth = appearanceConfig?.assistantTextStrokeWidth ?? 0;
+
+  useEffect(() => {
+    setUserBubbleColorInput(appearanceConfig?.userBubbleColor || colors.userBubble);
+    setUserTextColorInput(appearanceConfig?.userTextColor || colors.text);
+    setAssistantTextColorInput(appearanceConfig?.assistantTextColor || colors.text);
+    setAssistantTextStrokeColorInput(appearanceConfig?.assistantTextStrokeColor || colors.background);
+    setAssistantFooterColorInput(appearanceConfig?.assistantFooterColor || colors.textTertiary);
+  }, [
+    appearanceConfig?.assistantFooterColor,
+    appearanceConfig?.assistantTextStrokeColor,
+    appearanceConfig?.assistantTextColor,
+    appearanceConfig?.userBubbleColor,
+    appearanceConfig?.userTextColor,
+  ]);
+
+  async function handlePickIcon(key: TopBarIconKey) {
+    if (pickingKey) return;
+    setPickingKey(key);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+
+      const asset = result.assets[0];
+      const validationError = validateTopBarIconAsset(asset);
+      if (validationError) {
+        Alert.alert('图片不适合用作图标', validationError);
+        return;
+      }
+
+      const uri = await copyTopBarIcon(asset, key);
+      setTopBarIconUri(key, uri);
+      showToast('顶栏图标已更新');
+    } catch (error: any) {
+      Alert.alert('更换图标失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingKey(null);
+    }
+  }
+
+  function handleResetAll() {
+    resetTopBarIcons();
+    showToast('已恢复默认顶栏图标');
+  }
+
+  async function handlePickBackground(kind: 'chat' | 'input') {
+    if (pickingBackground) return;
+    setPickingBackground(kind);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+
+      const asset = result.assets[0];
+      const validationError = validateBackgroundAsset(asset);
+      if (validationError) {
+        Alert.alert('图片不适合作为背景', validationError);
+        return;
+      }
+
+      const uri = await copyAppearanceImage(
+        asset,
+        kind === 'chat' ? 'chat-backgrounds' : 'chat-input-backgrounds',
+        kind === 'chat' ? 'chat-bg' : 'input-bg'
+      );
+      setAppearanceConfig(
+        kind === 'chat'
+          ? { chatBackgroundImageUri: uri }
+          : { inputBackgroundImageUri: uri }
+      );
+      showToast(kind === 'chat' ? '聊天背景已更新' : '输入框背景已更新');
+    } catch (error: any) {
+      Alert.alert('选择背景失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingBackground(null);
+    }
+  }
+
+  async function handlePickAvatar(kind: 'user' | 'assistant') {
+    if (pickingAvatar) return;
+    setPickingAvatar(kind);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+
+      const asset = result.assets[0];
+      const validationError = validateTopBarIconAsset(asset);
+      if (validationError) {
+        Alert.alert('图片不适合作为头像', validationError);
+        return;
+      }
+
+      const uri = await copyAppearanceImage(asset, 'chat-avatars', `${kind}-avatar`);
+      setAppearanceConfig(
+        kind === 'user'
+          ? { userAvatarImageUri: uri }
+          : { assistantAvatarImageUri: uri }
+      );
+      showToast(kind === 'user' ? '用户头像已更新' : 'AI 头像已更新');
+    } catch (error: any) {
+      Alert.alert('选择头像失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingAvatar(null);
+    }
+  }
+
+  async function handlePickInputIcon(key: ChatInputIconKey) {
+    if (pickingInputIconKey) return;
+    setPickingInputIconKey(key);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+
+      const asset = result.assets[0];
+      const validationError = validateTopBarIconAsset(asset);
+      if (validationError) {
+        Alert.alert('图片不适合作为按钮图标', validationError);
+        return;
+      }
+
+      const uri = await copyAppearanceImage(asset, 'chat-input-icons', key);
+      setChatInputIconUri(key, uri);
+      showToast('输入框图标已更新');
+    } catch (error: any) {
+      Alert.alert('替换图标失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingInputIconKey(null);
+    }
+  }
+
+  function commitColor(
+    label: string,
+    value: string,
+    key:
+      | 'userBubbleColor'
+      | 'userTextColor'
+      | 'assistantTextColor'
+      | 'assistantTextStrokeColor'
+      | 'assistantFooterColor'
+  ) {
+    const next = value.trim();
+    if (!isHexColor(next)) {
+      Alert.alert('颜色格式不正确', `${label} 需要使用 #RRGGBB 格式`);
+      return;
+    }
+    setAppearanceConfig({ [key]: next });
+    showToast(`${label}已更新`);
+  }
+
+  function setInputStyle(nextStyle: ChatInputAppearanceStyle) {
+    setAppearanceConfig({ inputStyle: nextStyle });
+    showToast(nextStyle === 'glass' ? '输入框已切换为磨砂玻璃' : '输入框已切换为默认风格');
+  }
+
+  function handleSaveAppearanceTheme() {
+    const name = appearanceThemeName.trim();
+    if (!name) {
+      Alert.alert('提示', '请先填写主题名称');
+      return;
+    }
+    saveAppearanceTheme(name);
+    setAppearanceThemeName('');
+    showToast('美化主题已保存');
+  }
+
+  function handleApplyAppearanceTheme(id: string, name: string) {
+    applyAppearanceTheme(id);
+    showToast(`已切换到 ${name}`);
+  }
+
+  function handleUpdateAppearanceTheme(id: string, name: string) {
+    updateAppearanceTheme(id);
+    showToast(`${name} 已覆盖为当前美化`);
+  }
+
+  function handleRemoveAppearanceTheme(id: string, name: string) {
+    Alert.alert('删除美化主题', `确定删除「${name}」吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          removeAppearanceTheme(id);
+          showToast('美化主题已删除');
+        },
+      },
+    ]);
+  }
+
+  function handleResetAppearanceConfig() {
+    Alert.alert(
+      '清空全部美化',
+      '这会删除所有已保存主题，并将聊天页美化恢复到原始默认。确定继续吗？',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '清空',
+          style: 'destructive',
+          onPress: () => {
+            resetAppearanceConfig();
+            setAppearanceThemeName('');
+            setAppearanceThemesExpanded(false);
+            showToast('已恢复原始默认美化');
+          },
+        },
+      ]
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.content}
+      contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={styles.sectionTitle}>美化主题</Text>
+      <Text style={styles.hint}>
+        保存当前美化设置为主题，之后可以一键切换。背景图和自定义图标路径会一起保存。
+      </Text>
+      <View style={styles.appearanceThemeSaveRow}>
+        <TextInput
+          style={[styles.input, styles.appearanceThemeNameInput]}
+          value={appearanceThemeName}
+          onChangeText={setAppearanceThemeName}
+          placeholder="主题名称"
+          placeholderTextColor={colors.textTertiary}
+          returnKeyType="done"
+          onSubmitEditing={handleSaveAppearanceTheme}
+        />
+        <Pressable style={styles.appearanceThemeSaveButton} onPress={handleSaveAppearanceTheme}>
+          <Text style={styles.saveButtonText}>保存</Text>
+        </Pressable>
+      </View>
+
+      <Pressable style={styles.appearanceClearButton} onPress={handleResetAppearanceConfig}>
+        <Text style={styles.appearanceClearText}>一键清空，恢复原始默认</Text>
+      </Pressable>
+
+      <Pressable
+        style={styles.appearanceThemeToggle}
+        onPress={() => setAppearanceThemesExpanded((expanded) => !expanded)}
+      >
+        <View style={styles.appearanceThemeToggleText}>
+          <Text style={styles.label}>已保存主题</Text>
+          <Text style={styles.appearanceThemeHint}>
+            {appearanceThemes.length > 0
+              ? `${appearanceThemes.length} 个主题`
+              : '还没有保存的美化主题'}
+          </Text>
+        </View>
+        <Text style={styles.appearanceThemeToggleAction}>
+          {appearanceThemesExpanded ? '收起' : '展开'}
+        </Text>
+      </Pressable>
+
+      {appearanceThemesExpanded && appearanceThemes.length > 0 && (
+        <View style={styles.appearanceThemeList}>
+          {appearanceThemes.map((theme) => {
+            const isActive = theme.id === activeAppearanceThemeId;
+            return (
+              <View
+                key={theme.id}
+                style={[
+                  styles.appearanceThemeRow,
+                  isActive && styles.appearanceThemeRowActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.appearanceThemeName,
+                    isActive && styles.appearanceThemeNameActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {theme.name}
+                </Text>
+                <View style={styles.appearanceThemeActions}>
+                  <Pressable
+                    style={[
+                      styles.smallActionButton,
+                      isActive && styles.smallActionButtonDisabled,
+                    ]}
+                    onPress={() => handleApplyAppearanceTheme(theme.id, theme.name)}
+                    disabled={isActive}
+                  >
+                    <Text
+                      style={[
+                        styles.smallActionText,
+                        isActive && styles.smallActionTextDisabled,
+                      ]}
+                    >
+                      应用
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.smallActionButton}
+                    onPress={() => handleUpdateAppearanceTheme(theme.id, theme.name)}
+                  >
+                    <Text style={styles.smallActionText}>覆盖</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.smallActionButton}
+                    onPress={() => handleRemoveAppearanceTheme(theme.id, theme.name)}
+                  >
+                    <Text style={styles.smallActionText}>删除</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <Text style={styles.sectionTitle}>顶栏图标</Text>
+      <Text style={styles.hint}>
+        默认使用统一 SVG 图标；自定义图片会复制到应用目录，显示时固定在 24px 图标框内。
+      </Text>
+
+      <View style={styles.topBarPreview}>
+        {TOP_BAR_ICON_ITEMS.map((item) => (
+          <View key={item.key} style={styles.topBarPreviewButton}>
+            <TopBarIcon
+              iconKey={item.key}
+              color={colors.text}
+              customUri={topBarIconUris[item.key]}
+              size={22}
+            />
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>隐藏顶栏全部图标</Text>
+          <Text style={styles.hint}>只隐藏聊天页按键上的图标，顶栏和按键点击区域保持原位。</Text>
+        </View>
+        <Switch
+          value={topBarIconsHidden}
+          onValueChange={(value) => {
+            setAppearanceConfig({ topBarIconsHidden: value });
+            showToast(value ? '顶栏图标已隐藏' : '顶栏图标已显示');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>关闭顶栏有色遮罩</Text>
+          <Text style={styles.hint}>保留聊天内容减淡，但不再用主题背景色盖住背景图。</Text>
+        </View>
+        <Switch
+          value={topBarFadeHidden}
+          onValueChange={(value) => {
+            setAppearanceConfig({ topBarFadeHidden: value });
+            showToast(value ? '顶栏有色遮罩已关闭' : '顶栏有色遮罩已开启');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      {TOP_BAR_ICON_ITEMS.map((item) => {
+        const customUri = topBarIconUris[item.key];
+        const isPicking = pickingKey === item.key;
+        return (
+          <View key={item.key} style={styles.appearanceIconRow}>
+            <View style={styles.appearanceIconPreview}>
+              <TopBarIcon
+                iconKey={item.key}
+                color={colors.text}
+                customUri={customUri}
+                size={24}
+              />
+            </View>
+            <View style={styles.appearanceIconText}>
+              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.hint}>{customUri ? '已使用自定义图片' : '使用默认 SVG 图标'}</Text>
+            </View>
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
+                onPress={() => handlePickIcon(item.key)}
+                disabled={!!pickingKey}
+              >
+                {isPicking ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.smallActionText}>替换</Text>
+                )}
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !customUri && styles.smallActionButtonDisabled]}
+                onPress={() => {
+                  clearTopBarIconUri(item.key);
+                  showToast('已恢复默认图标');
+                }}
+                disabled={!customUri}
+              >
+                <Text style={[styles.smallActionText, !customUri && styles.smallActionTextDisabled]}>
+                  默认
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })}
+
+      <Text style={styles.hint}>限制：文件不超过 2MB，图片边长需在 48px 到 2048px 之间。</Text>
+      <View style={styles.actions}>
+        <Pressable style={styles.testButton} onPress={handleResetAll}>
+          <Text style={styles.testButtonText}>恢复全部默认</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.sectionTitle}>聊天页背景</Text>
+      <View style={styles.appearanceAssetRow}>
+        <View style={styles.appearanceImagePreview}>
+          {appearanceConfig?.chatBackgroundImageUri ? (
+            <Image source={{ uri: appearanceConfig.chatBackgroundImageUri }} style={styles.appearanceImageThumb} resizeMode="cover" />
+          ) : (
+            <Text style={styles.appearanceImagePlaceholder}>BG</Text>
+          )}
+        </View>
+        <View style={styles.appearanceIconText}>
+          <Text style={styles.label}>聊天页背景图</Text>
+          <Text style={styles.hint}>{appearanceConfig?.chatBackgroundImageUri ? '已使用自定义背景' : '使用主题纯色背景'}</Text>
+        </View>
+        <View style={styles.appearanceIconActions}>
+          <Pressable
+            style={[styles.smallActionButton, pickingBackground === 'chat' && styles.smallActionButtonDisabled]}
+            onPress={() => handlePickBackground('chat')}
+            disabled={!!pickingBackground}
+          >
+            {pickingBackground === 'chat' ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+          </Pressable>
+          <Pressable
+            style={[styles.smallActionButton, !appearanceConfig?.chatBackgroundImageUri && styles.smallActionButtonDisabled]}
+            onPress={() => {
+              setAppearanceConfig({ chatBackgroundImageUri: undefined });
+              showToast('聊天背景已恢复默认');
+            }}
+            disabled={!appearanceConfig?.chatBackgroundImageUri}
+          >
+            <Text style={[styles.smallActionText, !appearanceConfig?.chatBackgroundImageUri && styles.smallActionTextDisabled]}>默认</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>消息头像</Text>
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>显示消息头像</Text>
+          <Text style={styles.hint}>开启后每条用户和 AI 消息上方都会显示头像与自定义名字。</Text>
+        </View>
+        <Switch
+          value={messageAvatarsVisible}
+          onValueChange={(value) => {
+            setAppearanceConfig({ messageAvatarsVisible: value });
+            showToast(value ? '消息头像已显示' : '消息头像已隐藏');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      {messageAvatarsVisible && (
+        <View style={styles.switchRow}>
+          <View style={styles.switchText}>
+            <Text style={styles.label}>显示楼层与时间</Text>
+            <Text style={styles.hint}>在头像标题行里显示 #楼层 和消息时间。</Text>
+          </View>
+          <Switch
+            value={messageMetaVisible}
+            onValueChange={(value) => {
+              setAppearanceConfig({ messageMetaVisible: value });
+              showToast(value ? '楼层与时间已显示' : '楼层与时间已隐藏');
+            }}
+            trackColor={{ true: colors.primary }}
+          />
+        </View>
+      )}
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>用户名字</Text>
+          <TextInput
+            style={styles.input}
+            value={userDisplayName}
+            onChangeText={(value) => setAppearanceConfig({ userDisplayName: value })}
+            placeholder="You"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>AI 名字</Text>
+          <TextInput
+            style={styles.input}
+            value={assistantDisplayName}
+            onChangeText={(value) => setAppearanceConfig({ assistantDisplayName: value })}
+            placeholder="Claude"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>头像圆角</Text>
+          <TextInput
+            style={styles.input}
+            value={String(messageAvatarRadius)}
+            onChangeText={(value) => setAppearanceConfig({ messageAvatarRadius: parseAppearanceNumber(value, 18, 0, 20) })}
+            keyboardType="number-pad"
+            placeholder="18"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      {([
+        { kind: 'user' as const, label: '用户头像', uri: userAvatarImageUri },
+        { kind: 'assistant' as const, label: 'AI 头像', uri: assistantAvatarImageUri },
+      ]).map((item) => {
+        const isPicking = pickingAvatar === item.kind;
+        return (
+          <View key={item.kind} style={styles.appearanceAssetRow}>
+            <View style={[styles.appearanceImagePreview, { borderRadius: messageAvatarRadius }]}>
+              {item.uri ? (
+                <Image source={{ uri: item.uri }} style={styles.appearanceImageThumb} resizeMode="cover" />
+              ) : (
+                <Text style={styles.appearanceImagePlaceholder}>{item.kind === 'user' ? 'U' : 'AI'}</Text>
+              )}
+            </View>
+            <View style={styles.appearanceIconText}>
+              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.hint}>{item.uri ? '已使用自定义头像' : '使用默认文字占位头像'}</Text>
+            </View>
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
+                onPress={() => handlePickAvatar(item.kind)}
+                disabled={!!pickingAvatar}
+              >
+                {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !item.uri && styles.smallActionButtonDisabled]}
+                onPress={() => {
+                  setAppearanceConfig(
+                    item.kind === 'user'
+                      ? { userAvatarImageUri: undefined }
+                      : { assistantAvatarImageUri: undefined }
+                  );
+                  showToast(`${item.label}已恢复默认`);
+                }}
+                disabled={!item.uri}
+              >
+                <Text style={[styles.smallActionText, !item.uri && styles.smallActionTextDisabled]}>默认</Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })}
+
+      <Text style={styles.sectionTitle}>聊天气泡与文字</Text>
+      <Text style={styles.hint}>颜色使用 #RRGGBB 格式；磨砂系数为 0 时关闭玻璃效果。</Text>
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>隐藏 AI 回复尾部标识</Text>
+          <Text style={styles.hint}>隐藏操作按钮下方的 Claude logo 和提示文案。</Text>
+        </View>
+        <Switch
+          value={assistantFooterHidden}
+          onValueChange={(value) => {
+            setAppearanceConfig({ assistantFooterHidden: value });
+            showToast(value ? 'AI 回复尾部标识已隐藏' : 'AI 回复尾部标识已显示');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>AI 按键/尾注颜色</Text>
+        <TextInput
+          style={styles.input}
+          value={assistantFooterColorInput}
+          onChangeText={setAssistantFooterColorInput}
+          onBlur={() => commitColor('AI 按键/尾注颜色', assistantFooterColorInput, 'assistantFooterColor')}
+          placeholder="#9B9B9B"
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none"
+        />
+      </View>
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>用户气泡透明</Text>
+          <Text style={styles.hint}>保留文字和磨砂效果，不叠加气泡底色。</Text>
+        </View>
+        <Switch
+          value={userBubbleTransparent}
+          onValueChange={(value) => {
+            setAppearanceConfig({ userBubbleTransparent: value });
+            showToast(value ? '用户气泡已设为透明' : '用户气泡已恢复底色');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>用户气泡颜色</Text>
+        <View style={styles.colorSwatchRow}>
+          {COLOR_SWATCHES.map((swatch) => (
+            <Pressable
+              key={swatch}
+              style={[styles.colorSwatch, { backgroundColor: swatch }, userBubbleColorInput === swatch && styles.colorSwatchActive]}
+              onPress={() => {
+                setUserBubbleColorInput(swatch);
+                setAppearanceConfig({ userBubbleColor: swatch });
+              }}
+            />
+          ))}
+        </View>
+        <TextInput
+          style={styles.input}
+          value={userBubbleColorInput}
+          onChangeText={setUserBubbleColorInput}
+          onBlur={() => commitColor('用户气泡颜色', userBubbleColorInput, 'userBubbleColor')}
+          placeholder="#f1eee7"
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none"
+        />
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>用户气泡圆角</Text>
+          <TextInput
+            style={styles.input}
+            value={String(userBubbleRadius)}
+            onChangeText={(value) => setAppearanceConfig({ userBubbleRadius: parseAppearanceNumber(value, 20, 0, 36) })}
+            keyboardType="number-pad"
+            placeholder="20"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>磨砂系数</Text>
+          <TextInput
+            style={styles.input}
+            value={String(userBubbleBlurIntensity)}
+            onChangeText={(value) => setAppearanceConfig({ userBubbleBlurIntensity: parseAppearanceNumber(value, 0, 0, 100) })}
+            keyboardType="number-pad"
+            placeholder="0"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>用户字号</Text>
+          <TextInput
+            style={styles.input}
+            value={String(userFontSize)}
+            onChangeText={(value) => setAppearanceConfig({ userFontSize: parseAppearanceNumber(value, 16, 12, 24) })}
+            keyboardType="number-pad"
+            placeholder="16"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>AI 字号</Text>
+          <TextInput
+            style={styles.input}
+            value={String(assistantFontSize)}
+            onChangeText={(value) => setAppearanceConfig({ assistantFontSize: parseAppearanceNumber(value, 16, 12, 24) })}
+            keyboardType="number-pad"
+            placeholder="16"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>用户文字颜色</Text>
+          <TextInput
+            style={styles.input}
+            value={userTextColorInput}
+            onChangeText={setUserTextColorInput}
+            onBlur={() => commitColor('用户文字颜色', userTextColorInput, 'userTextColor')}
+            placeholder="#141413"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+        </View>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>AI 文字颜色</Text>
+          <TextInput
+            style={styles.input}
+            value={assistantTextColorInput}
+            onChangeText={setAssistantTextColorInput}
+            onBlur={() => commitColor('AI 文字颜色', assistantTextColorInput, 'assistantTextColor')}
+            placeholder="#141413"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+        </View>
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>AI 文字描边颜色</Text>
+          <TextInput
+            style={styles.input}
+            value={assistantTextStrokeColorInput}
+            onChangeText={setAssistantTextStrokeColorInput}
+            onBlur={() => commitColor('AI 文字描边颜色', assistantTextStrokeColorInput, 'assistantTextStrokeColor')}
+            placeholder="#faf9f5"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+        </View>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>AI 文字描边粗细</Text>
+          <TextInput
+            style={styles.input}
+            value={String(assistantTextStrokeWidth)}
+            onChangeText={(value) => setAppearanceConfig({ assistantTextStrokeWidth: parseAppearanceNumber(value, 0, 0, 8) })}
+            keyboardType="number-pad"
+            placeholder="0"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>输入框自定义</Text>
+      <View style={styles.segmentedRow}>
+        {(['default', 'glass'] as ChatInputAppearanceStyle[]).map((styleKey) => (
+          <Pressable
+            key={styleKey}
+            style={[styles.segmentedButton, inputStyle === styleKey && styles.segmentedButtonActive]}
+            onPress={() => setInputStyle(styleKey)}
+          >
+            <Text style={[styles.segmentedText, inputStyle === styleKey && styles.segmentedTextActive]}>
+              {styleKey === 'default' ? '默认原版' : '磨砂玻璃'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.appearanceNumberGrid}>
+        <View style={styles.appearanceNumberField}>
+          <Text style={styles.label}>输入框磨砂系数</Text>
+          <TextInput
+            style={styles.input}
+            value={String(inputBlurIntensity)}
+            onChangeText={(value) => setAppearanceConfig({ inputBlurIntensity: parseAppearanceNumber(value, 72, 0, 100) })}
+            keyboardType="number-pad"
+            placeholder="72"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>输入框背景透明</Text>
+          <Text style={styles.hint}>保留输入框内容、背景图和磨砂效果，不叠加默认底色。</Text>
+        </View>
+        <Switch
+          value={inputBackgroundTransparent}
+          onValueChange={(value) => {
+            setAppearanceConfig({ inputBackgroundTransparent: value });
+            showToast(value ? '输入框背景已设为透明' : '输入框背景已恢复底色');
+          }}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.appearanceAssetRow}>
+        <View style={styles.appearanceImagePreview}>
+          {appearanceConfig?.inputBackgroundImageUri ? (
+            <Image source={{ uri: appearanceConfig.inputBackgroundImageUri }} style={styles.appearanceImageThumb} resizeMode="cover" />
+          ) : (
+            <Text style={styles.appearanceImagePlaceholder}>IN</Text>
+          )}
+        </View>
+        <View style={styles.appearanceIconText}>
+          <Text style={styles.label}>输入框背景图</Text>
+          <Text style={styles.hint}>{appearanceConfig?.inputBackgroundImageUri ? '已使用自定义背景' : '使用默认输入框底色'}</Text>
+        </View>
+        <View style={styles.appearanceIconActions}>
+          <Pressable
+            style={[styles.smallActionButton, pickingBackground === 'input' && styles.smallActionButtonDisabled]}
+            onPress={() => handlePickBackground('input')}
+            disabled={!!pickingBackground}
+          >
+            {pickingBackground === 'input' ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+          </Pressable>
+          <Pressable
+            style={[styles.smallActionButton, !appearanceConfig?.inputBackgroundImageUri && styles.smallActionButtonDisabled]}
+            onPress={() => {
+              setAppearanceConfig({ inputBackgroundImageUri: undefined });
+              showToast('输入框背景已恢复默认');
+            }}
+            disabled={!appearanceConfig?.inputBackgroundImageUri}
+          >
+            <Text style={[styles.smallActionText, !appearanceConfig?.inputBackgroundImageUri && styles.smallActionTextDisabled]}>默认</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {CHAT_INPUT_ICON_ITEMS.map((item) => {
+        const customUri = inputIconUris[item.key];
+        const isPicking = pickingInputIconKey === item.key;
+        return (
+          <View key={item.key} style={styles.appearanceIconRow}>
+            <View style={styles.appearanceIconPreview}>
+              {customUri ? (
+                <Image source={{ uri: customUri }} style={styles.customInputIconPreview} resizeMode="contain" />
+              ) : (
+                <Text style={styles.appearanceImagePlaceholder}>IC</Text>
+              )}
+            </View>
+            <View style={styles.appearanceIconText}>
+              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.hint}>{customUri ? '已使用自定义图片' : '使用默认按钮图标'}</Text>
+            </View>
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
+                onPress={() => handlePickInputIcon(item.key)}
+                disabled={!!pickingInputIconKey}
+              >
+                {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !customUri && styles.smallActionButtonDisabled]}
+                onPress={() => {
+                  clearChatInputIconUri(item.key);
+                  showToast('已恢复默认输入框图标');
+                }}
+                disabled={!customUri}
+              >
+                <Text style={[styles.smallActionText, !customUri && styles.smallActionTextDisabled]}>默认</Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })}
+
+      <View style={styles.actions}>
+        <Pressable
+          style={styles.testButton}
+          onPress={() => {
+            resetChatInputIcons();
+            showToast('已恢复全部输入框图标');
+          }}
+        >
+          <Text style={styles.testButtonText}>恢复输入框默认图标</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -1740,6 +2778,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
   },
+  switchText: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
   nativeToolRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12,
     backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10,
@@ -1876,6 +2919,251 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   infoLabel: { fontSize: 14, color: colors.text, fontWeight: '500' },
   infoValue: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   hint: { fontSize: 12, color: colors.textTertiary, marginBottom: 12 },
+  appearanceThemeSaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  appearanceThemeNameInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  appearanceThemeSaveButton: {
+    minWidth: 72,
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  appearanceClearButton: {
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  appearanceClearText: {
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: '600',
+  },
+  appearanceThemeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  appearanceThemeToggleText: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  appearanceThemeHint: {
+    fontSize: 12,
+    color: colors.textTertiary,
+  },
+  appearanceThemeToggleAction: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  appearanceThemeList: {
+    marginBottom: 14,
+  },
+  appearanceThemeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  appearanceThemeRowActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  appearanceThemeName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  appearanceThemeNameActive: {
+    color: colors.primary,
+  },
+  appearanceThemeActions: {
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 6,
+  },
+  topBarPreview: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  topBarPreviewButton: {
+    width: 34,
+    height: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.background,
+  },
+  appearanceIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  appearanceAssetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  appearanceIconPreview: {
+    width: 42,
+    height: 42,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  appearanceImagePreview: {
+    width: 58,
+    height: 58,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  appearanceImageThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  appearanceImagePlaceholder: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textTertiary,
+  },
+  customInputIconPreview: {
+    width: 26,
+    height: 26,
+  },
+  appearanceIconText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  appearanceIconActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  smallActionButton: {
+    minWidth: 48,
+    height: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+  },
+  smallActionButtonDisabled: {
+    opacity: 0.45,
+  },
+  smallActionText: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  smallActionTextDisabled: {
+    color: colors.textTertiary,
+  },
+  colorSwatchRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  colorSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  colorSwatchActive: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  appearanceNumberGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  appearanceNumberField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  segmentedRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  segmentedButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  segmentedButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  segmentedText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  segmentedTextActive: {
+    color: colors.primary,
+  },
   importButton: {
     minHeight: 46,
     backgroundColor: colors.primary,

@@ -1,7 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { View, TextInput, Pressable, Text, StyleSheet, Image, Modal, ScrollView, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { BlurView } from 'expo-blur';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { useSettingsStore } from '../stores/settings';
@@ -11,7 +13,13 @@ import { USER_STICKERS } from '../utils/stickers';
 let colors = lightColors;
 const STICKER_PANEL_HEIGHT = Math.min(420, Dimensions.get('window').height * 0.48);
 
+function clampNumber(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value as number));
+}
+
 interface Props {
+  blurTarget?: RefObject<View | null>;
   onSend: (text: string, imageUri?: string) => void | Promise<void>;
   onTriggerResponse: () => void | Promise<void>;
   onEnableWebCruise?: () => void | Promise<void>;
@@ -22,6 +30,7 @@ interface Props {
 }
 
 export function ChatInput({
+  blurTarget,
   onSend,
   onTriggerResponse,
   onEnableWebCruise,
@@ -42,9 +51,28 @@ export function ChatInput({
   const shouldInvertResponseIcon = isDarkTheme && (isStreaming || !isInputFocused);
   const responseTouchStartedRef = useRef(false);
   const insets = useSafeAreaInsets();
-  const { apiConfigs, activeConfigIndex } = useSettingsStore();
+  const { apiConfigs, activeConfigIndex, appearanceConfig } = useSettingsStore();
   const current = apiConfigs[activeConfigIndex];
   const currentModel = current?.name || current?.model || '未配置';
+
+  const inputIconUris = appearanceConfig?.inputIconUris || {};
+  const inputStyle = appearanceConfig?.inputStyle || 'default';
+  const inputBackgroundImageUri = appearanceConfig?.inputBackgroundImageUri;
+  const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
+  const inputBlurIntensity = clampNumber(appearanceConfig?.inputBlurIntensity, 72, 0, 100);
+  const isGlassInput = inputStyle === 'glass';
+  const glassAlpha = 0.16 + (inputBlurIntensity / 100) * 0.16;
+  const hasCustomInputSurface = isGlassInput || !!inputBackgroundImageUri || inputBackgroundTransparent;
+  const inputPanelBackground = inputBackgroundTransparent
+    ? 'transparent'
+    : isGlassInput || inputBackgroundImageUri
+    ? (isDarkTheme ? `rgba(26,22,18,${glassAlpha})` : `rgba(255,255,255,${glassAlpha})`)
+    : colors.inputBackground;
+  const inputOverlayBackground = inputBackgroundTransparent
+    ? 'transparent'
+    : colors.background === '#12100D'
+      ? 'rgba(18,16,13,0.08)'
+      : 'rgba(255,255,255,0.08)';
 
   const pickImage = async () => {
     setOptionsMenuVisible(false);
@@ -115,15 +143,34 @@ export function ChatInput({
   };
 
   const getResponseIcon = () => {
-    if (isStreaming) return require('../../assets/stopsend.png');
-    return isInputFocused
-      ? require('../../assets/getresponse2.png')
-      : require('../../assets/getresponse1.png');
+    if (isStreaming) {
+      return inputIconUris.stop ? { uri: inputIconUris.stop } : require('../../assets/stopsend.png');
+    }
+    if (isInputFocused) {
+      return inputIconUris.sendFocused ? { uri: inputIconUris.sendFocused } : require('../../assets/getresponse2.png');
+    }
+    return inputIconUris.sendIdle ? { uri: inputIconUris.sendIdle } : require('../../assets/getresponse1.png');
   };
 
   return (
     <View style={[styles.wrapper, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: inputPanelBackground }, hasCustomInputSurface && styles.customContainer]}>
+        {inputBackgroundImageUri && (
+          <Image source={{ uri: inputBackgroundImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        )}
+        {isGlassInput && (
+          <BlurView
+            blurTarget={blurTarget}
+            blurMethod="dimezisBlurView"
+            blurReductionFactor={1}
+            intensity={inputBlurIntensity}
+            tint={isDarkTheme ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+        {hasCustomInputSurface && (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: inputOverlayBackground }]} />
+        )}
         {pendingImage && (
           <View style={styles.previewRow}>
             <View style={styles.previewWrap}>
@@ -148,7 +195,11 @@ export function ChatInput({
         />
         <View style={styles.toolbar}>
           <Pressable style={styles.optionsButton} onPress={() => setOptionsMenuVisible(true)}>
-            <Image source={require('../../assets/optionsbutton.png')} style={styles.optionsImage} resizeMode="contain" />
+            <Image
+              source={inputIconUris.options ? { uri: inputIconUris.options } : require('../../assets/optionsbutton.png')}
+              style={styles.optionsImage}
+              resizeMode="contain"
+            />
           </Pressable>
 
           <Pressable style={styles.modelPill} onPress={onModelPress}>
@@ -157,7 +208,11 @@ export function ChatInput({
 
           <View style={styles.rightButtons}>
             <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)}>
-              <Image source={require('../../assets/sticker.png')} style={styles.stickerButtonImage} resizeMode="contain" />
+              <Image
+                source={inputIconUris.sticker ? { uri: inputIconUris.sticker } : require('../../assets/sticker.png')}
+                style={styles.stickerButtonImage}
+                resizeMode="contain"
+              />
             </Pressable>
             <Pressable
               style={styles.sendButton}
@@ -229,6 +284,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
     paddingHorizontal: 16,
+  },
+  customContainer: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   previewRow: {
     marginBottom: 8,
