@@ -409,7 +409,16 @@ function APIConfigTab({ showToast }: { showToast: ToastFn }) {
 /* ==================== 对话设置 Tab ==================== */
 
 function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
-  const { maxOutputTokens, systemPrompt, stripThinking, setSystemPrompt, setMaxOutputTokens, setStripThinking } = useSettingsStore();
+  const {
+    maxOutputTokens,
+    systemPrompt,
+    stripThinking,
+    periodConfig,
+    setSystemPrompt,
+    setMaxOutputTokens,
+    setStripThinking,
+    setPeriodConfig,
+  } = useSettingsStore();
   // 隐藏楼层现在按对话独立存储，数据源改为 chat store
   const {
     messages,
@@ -657,6 +666,20 @@ function ChatSettingsTab({ showToast }: { showToast: ToastFn }) {
         <Switch
           value={stripThinking}
           onValueChange={setStripThinking}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>生理信息</Text>
+      <Text style={styles.hint}>开启后，仅在预计生理期前两天或经期内，把本地记录推算出的简短提醒附带给 AI。默认关闭。</Text>
+      <View style={styles.switchRow}>
+        <Text style={styles.label}>发送生理提醒给 AI</Text>
+        <Switch
+          value={!!periodConfig?.sendToAI}
+          onValueChange={(value) => {
+            setPeriodConfig({ sendToAI: value });
+            showToast(value ? '生理提醒会按条件发送给 AI' : '生理提醒已停止发送给 AI');
+          }}
           trackColor={{ true: colors.primary }}
         />
       </View>

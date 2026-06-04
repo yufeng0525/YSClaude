@@ -18,6 +18,7 @@ import {
   getPendingWebCruiseNotice,
 } from '../utils/webCruise';
 import { buildFocusEventSystemPrompt } from '../utils/focusEvents';
+import { buildPeriodSystemPrompt } from '../utils/periods';
 import {
   createConversation,
   updateConversation,
@@ -33,6 +34,7 @@ import {
   getHiddenRanges,
   updateHiddenRanges,
   getFavoriteDiaries,
+  getAllPeriodRecords,
   getAllConversations,
 } from '../db/operations';
 
@@ -479,6 +481,18 @@ async function streamAssistantResponse(
   const listeningContext = useMusicStore.getState().getListeningContextPrompt();
   if (listeningContext) {
     fullSystemPrompt += `\n\n---\n\n${listeningContext}`;
+  }
+
+  if (settings.periodConfig?.sendToAI) {
+    try {
+      const periodRecords = await getAllPeriodRecords();
+      const periodContext = buildPeriodSystemPrompt(periodRecords);
+      if (periodContext) {
+        fullSystemPrompt += `\n\n---\n\n${periodContext}`;
+      }
+    } catch (err) {
+      console.warn('[Chat] 读取生理期记录失败:', err);
+    }
   }
 
   try {

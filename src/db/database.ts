@@ -74,6 +74,16 @@ async function initTables(database: SQLite.SQLiteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_diaries_updated ON diaries(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_diaries_favorite ON diaries(is_favorite);
 
+    CREATE TABLE IF NOT EXISTS period_records (
+      id TEXT PRIMARY KEY,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_period_records_start ON period_records(start_date DESC);
+
     CREATE TABLE IF NOT EXISTS reading_books (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL DEFAULT '',
@@ -222,6 +232,48 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
 
       PRAGMA user_version = 5;
     `);
+  }
+
+  if (version < 6) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS period_records (
+        id TEXT PRIMARY KEY,
+        start_date TEXT NOT NULL,
+        end_date TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_period_records_start ON period_records(start_date DESC);
+
+      PRAGMA user_version = 6;
+    `);
+  }
+
+  if (version < 7) {
+    const periodColumns = await database.getAllAsync<{ name: string; notnull: number }>(
+      'PRAGMA table_info(period_records)'
+    );
+    const endDateColumn = periodColumns.find((column) => column.name === 'end_date');
+    if (endDateColumn?.notnull) {
+      await database.execAsync(`
+        CREATE TABLE IF NOT EXISTS period_records_next (
+          id TEXT PRIMARY KEY,
+          start_date TEXT NOT NULL,
+          end_date TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        INSERT INTO period_records_next (id, start_date, end_date, created_at, updated_at)
+        SELECT id, start_date, end_date, created_at, updated_at FROM period_records;
+
+        DROP TABLE period_records;
+        ALTER TABLE period_records_next RENAME TO period_records;
+        CREATE INDEX IF NOT EXISTS idx_period_records_start ON period_records(start_date DESC);
+      `);
+    }
+    await database.execAsync('PRAGMA user_version = 7;');
   }
 }
 

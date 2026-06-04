@@ -3,6 +3,7 @@ import {
   Conversation,
   Message,
   Diary,
+  PeriodRecord,
   HiddenRange,
   ToolInvocation,
   ReadingBook,
@@ -505,6 +506,76 @@ export async function getFavoriteDiaries(): Promise<Diary[]> {
     updated_at: number;
   }>('SELECT * FROM diaries WHERE is_favorite = 1 ORDER BY created_at ASC');
   return rows.map(mapDiaryRow);
+}
+
+/* ==================== Period Record CRUD ==================== */
+
+function mapPeriodRecordRow(row: {
+  id: string;
+  start_date: string;
+  end_date: string | null;
+  created_at: number;
+  updated_at: number;
+}): PeriodRecord {
+  return {
+    id: row.id,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function createPeriodRecord(record: PeriodRecord): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT INTO period_records (id, start_date, end_date, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [record.id, record.startDate, record.endDate, record.createdAt, record.updatedAt]
+  );
+}
+
+export async function updatePeriodRecord(
+  id: string,
+  updates: Partial<Pick<PeriodRecord, 'startDate' | 'endDate' | 'updatedAt'>>
+): Promise<void> {
+  const db = await getDatabase();
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  if (updates.startDate !== undefined) {
+    sets.push('start_date = ?');
+    values.push(updates.startDate);
+  }
+  if (updates.endDate !== undefined) {
+    sets.push('end_date = ?');
+    values.push(updates.endDate);
+  }
+  if (updates.updatedAt !== undefined) {
+    sets.push('updated_at = ?');
+    values.push(updates.updatedAt);
+  }
+
+  if (sets.length === 0) return;
+  values.push(id);
+  await db.runAsync(`UPDATE period_records SET ${sets.join(', ')} WHERE id = ?`, values);
+}
+
+export async function deletePeriodRecord(id: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM period_records WHERE id = ?', [id]);
+}
+
+export async function getAllPeriodRecords(): Promise<PeriodRecord[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    id: string;
+    start_date: string;
+    end_date: string | null;
+    created_at: number;
+    updated_at: number;
+  }>('SELECT * FROM period_records ORDER BY start_date DESC');
+  return rows.map(mapPeriodRecordRow);
 }
 
 /* ==================== Reading CRUD ==================== */

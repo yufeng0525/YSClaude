@@ -73,6 +73,10 @@ export interface FloatingBallConfig {
   ttsEnabled: boolean;
 }
 
+export interface PeriodConfig {
+  sendToAI: boolean;
+}
+
 interface SettingsState {
   _hydrated: boolean;
   apiConfigs: NamedAPIConfig[];
@@ -90,6 +94,7 @@ interface SettingsState {
   nativeToolConfig: NativeToolConfig;
   readingConfig: ReadingConfig;
   floatingBallConfig: FloatingBallConfig;
+  periodConfig: PeriodConfig;
 
   setActiveConfig: (index: number) => void;
   saveAPIConfig: (config: NamedAPIConfig) => void;
@@ -107,6 +112,7 @@ interface SettingsState {
   setNativeToolConfig: (config: Partial<NativeToolConfig>) => void;
   setReadingConfig: (config: Partial<ReadingConfig>) => void;
   setFloatingBallConfig: (config: Partial<FloatingBallConfig>) => void;
+  setPeriodConfig: (config: Partial<PeriodConfig>) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -175,6 +181,9 @@ export const useSettingsStore = create<SettingsState>()(
         enabled: false,
         ttsEnabled: false,
       },
+      periodConfig: {
+        sendToAI: false,
+      },
 
       setActiveConfig: (index) => set({ activeConfigIndex: index }),
 
@@ -221,6 +230,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ readingConfig: { ...state.readingConfig, ...config } })),
       setFloatingBallConfig: (config) =>
         set((state) => ({ floatingBallConfig: { ...state.floatingBallConfig, ...config } })),
+      setPeriodConfig: (config) =>
+        set((state) => ({ periodConfig: { ...state.periodConfig, ...config } })),
     }),
     {
       name: 'ysclaude-settings',
@@ -241,6 +252,7 @@ export const useSettingsStore = create<SettingsState>()(
         nativeToolConfig: state.nativeToolConfig,
         readingConfig: state.readingConfig,
         floatingBallConfig: state.floatingBallConfig,
+        periodConfig: state.periodConfig,
       }),
       onRehydrateStorage: () => () => {
         useSettingsStore.setState({ _hydrated: true });

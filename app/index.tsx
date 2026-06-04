@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Modal,
+  Alert,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type LayoutChangeEvent,
@@ -27,6 +28,7 @@ import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colo
 
 import { fonts } from '../src/theme/fonts';
 import { useChatStore } from '../src/stores/chat';
+import { usePeriodStore } from '../src/stores/period';
 import { ChatBubble } from '../src/components/ChatBubble';
 import { ChatInput } from '../src/components/ChatInput';
 import { ModelSelector } from '../src/components/ModelSelector';
@@ -34,6 +36,12 @@ import { TimeDivider } from '../src/components/TimeDivider';
 import { Message } from '../src/types';
 import { TIME_GAP_THRESHOLD_MS } from '../src/utils/time';
 import { pickGreeting } from '../src/utils/greetings';
+import {
+  buildPeriodDateSet,
+  calculatePeriodPrediction,
+  findPeriodRecordForDate,
+  getDateKeysInRange,
+} from '../src/utils/periods';
 import { showWebViewPanel } from '../src/services/webviewController';
 import {
   getConversationMessageDates,
@@ -121,6 +129,13 @@ export default function ChatScreen() {
     triggerResponse,
     stopStreaming,
   } = useChatStore();
+  const {
+    periodRecords,
+    loadPeriodRecords,
+    addPeriodRecord,
+    editPeriodRecord,
+    removePeriodRecord,
+  } = usePeriodStore();
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
@@ -148,20 +163,30 @@ export default function ChatScreen() {
   const floorVisibleAtTouchStartRef = useRef(false);
 
   const keyboard = useAnimatedKeyboard();
+  const periodDateKeys = useMemo(() => buildPeriodDateSet(periodRecords), [periodRecords]);
+  const periodPrediction = useMemo(() => calculatePeriodPrediction(periodRecords), [periodRecords]);
+  const predictedPeriodDateKeys = useMemo(() => {
+    if (!periodPrediction) return new Set<string>();
+    return new Set(getDateKeysInRange(periodPrediction.startDate, periodPrediction.endDate));
+  }, [periodPrediction]);
+  const pendingPeriodRecord = useMemo(
+    () => periodRecords.find((record) => !record.endDate) || null,
+    [periodRecords]
+  );
 
   const openCalendar = useCallback(async () => {
-    if (!conversationId) return;
     const lastMessage = messages[messages.length - 1];
     setCalendarMonth(startOfMonth(lastMessage ? new Date(lastMessage.createdAt) : new Date()));
     setCalendarVisible(true);
     setCalendarLoading(true);
     try {
-      const dates = await getConversationMessageDates(conversationId);
+      const dates = conversationId ? await getConversationMessageDates(conversationId) : [];
+      await loadPeriodRecords();
       setChatDateKeys(new Set(dates));
     } finally {
       setCalendarLoading(false);
     }
-  }, [conversationId, messages]);
+  }, [conversationId, loadPeriodRecords, messages]);
 
   const jumpToDate = useCallback(async (dateKey: string) => {
     if (!conversationId || !chatDateKeys.has(dateKey)) return;
@@ -183,6 +208,34 @@ export default function ChatScreen() {
     setCalendarMonth(nextMonth);
     setMonthJumpVisible(false);
   }, [monthJumpText]);
+
+  const handlePeriodLongPress = useCallback(async (key: string) => {
+    if (pendingPeriodRecord) {
+      if (key <= pendingPeriodRecord.startDate) {
+        Alert.alert('选择结束日', `请长按 ${pendingPeriodRecord.startDate} 之后的日期作为结束日。`);
+        return;
+      }
+      await editPeriodRecord(pendingPeriodRecord.id, { endDate: key });
+      return;
+    }
+
+    const record = findPeriodRecordForDate(periodRecords, key);
+    if (record?.endDate) {
+      Alert.alert('删除记录', `确定删除 ${record.startDate} 至 ${record.endDate} 的生理期记录？`, [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => {
+            removePeriodRecord(record.id).catch(() => undefined);
+          },
+        },
+      ]);
+      return;
+    }
+
+    await addPeriodRecord(key, null);
+  }, [addPeriodRecord, editPeriodRecord, pendingPeriodRecord, periodRecords, removePeriodRecord]);
 
   const scrollToEnd = useCallback((animated = false) => {
     shouldStickToBottomRef.current = true;
@@ -540,7 +593,7 @@ export default function ChatScreen() {
           <Pressable style={styles.headerButton} onPress={() => router.push('/focus')}>
             <Image source={require('../assets/todo.png')} style={[styles.todoIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
-          <Pressable style={styles.headerButton} onPress={openCalendar} disabled={!conversationId}>
+          <Pressable style={styles.headerButton} onPress={openCalendar}>
             <Image source={require('../assets/calendar.png')} style={[styles.calendarIcon, headerImageTintStyle]} resizeMode="contain" />
           </Pressable>
           <Pressable style={styles.headerButton} onPress={() => router.push('/music')}>
@@ -640,20 +693,38 @@ export default function ChatScreen() {
                 }
                 const key = dateKey(cell);
                 const hasMessages = chatDateKeys.has(key);
+                const isActualPeriod = periodDateKeys.has(key);
+                const isPredictedPeriod = !isActualPeriod && predictedPeriodDateKeys.has(key);
                 return (
                   <Pressable
                     key={key}
                     style={styles.calendarCell}
-                    onPress={() => jumpToDate(key)}
-                    disabled={!hasMessages}
+                    onPress={() => {
+                      if (hasMessages) {
+                        jumpToDate(key);
+                      }
+                    }}
+                    onLongPress={() => {
+                      handlePeriodLongPress(key).catch(() => undefined);
+                    }}
+                    delayLongPress={360}
                   >
-                    <Text style={[styles.calendarDayText, !hasMessages && styles.calendarDayTextDisabled]}>
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        !hasMessages && styles.calendarDayTextDisabled,
+                        isPredictedPeriod && styles.calendarDayTextPredicted,
+                        isActualPeriod && styles.calendarDayTextPeriod,
+                      ]}
+                    >
                       {cell.getDate()}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
+
+            <Text style={styles.calendarHint}>短按跳转聊天，长按开始记录；再次长按开始后的日期结束</Text>
 
             {calendarLoading && (
               <View style={styles.calendarLoadingRow}>
@@ -908,6 +979,22 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   calendarDayTextDisabled: {
     color: colors.textTertiary,
     fontWeight: '500',
+  },
+  calendarDayTextPredicted: {
+    backgroundColor: 'rgba(220,38,38,0.14)',
+    color: colors.danger,
+    fontWeight: '700',
+  },
+  calendarDayTextPeriod: {
+    backgroundColor: colors.danger,
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  calendarHint: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: 12,
+    color: colors.textTertiary,
   },
   calendarLoadingRow: {
     minHeight: 28,

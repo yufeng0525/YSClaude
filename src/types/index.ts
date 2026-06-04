@@ -53,6 +53,14 @@ export interface Diary {
   updatedAt: number;
 }
 
+export interface PeriodRecord {
+  id: string;
+  startDate: string;
+  endDate: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface APIConfig {
   baseUrl: string;
   apiKey: string;

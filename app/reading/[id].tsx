@@ -67,6 +67,7 @@ export default function ReadingBookScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const readingConfig = useSettingsStore((state) => state.readingConfig);
+  const maxOutputTokens = useSettingsStore((state) => state.maxOutputTokens);
   const [book, setBook] = useState<ReadingBook | null>(null);
   const [messages, setMessages] = useState<ReadingMessage[]>([]);
   const [input, setInput] = useState('');
@@ -77,8 +78,15 @@ export default function ReadingBookScreen() {
   const [panelFrame, setPanelFrameState] = useState<PanelFrame>(INITIAL_PANEL_FRAME);
   const [editingMessage, setEditingMessage] = useState<ReadingMessage | null>(null);
   const [editText, setEditText] = useState('');
+  const [visibleFloorMessageId, setVisibleFloorMessageId] = useState<string | null>(null);
+  const [summaryVisible, setSummaryVisible] = useState(false);
+  const [summaryFrom, setSummaryFrom] = useState('');
+  const [summaryTo, setSummaryTo] = useState('');
+  const [summaryText, setSummaryText] = useState('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const messageScrollRef = useRef<ScrollView>(null);
+  const summaryAbortRef = useRef<AbortController | null>(null);
   const contentHeightRef = useRef(1);
   const viewportHeightRef = useRef(1);
   const readingOffsetRef = useRef(0);
@@ -190,6 +198,16 @@ export default function ReadingBookScreen() {
     }
     return chapter;
   }, [book, messages.length]);
+
+  const messageFloorMap = useMemo(() => {
+    const map = new Map<string, number>();
+    messages.forEach((message, index) => {
+      map.set(message.id, index + 1);
+    });
+    return map;
+  }, [messages]);
+
+  const summaryRangeHint = messages.length > 0 ? `可总结楼层：1-${messages.length}` : '暂无聊天记录';
 
   function handleContentSizeChange(_width: number, height: number) {
     contentHeightRef.current = Math.max(1, height);
@@ -381,6 +399,102 @@ export default function ReadingBookScreen() {
     });
   }
 
+  function handleOpenSummary() {
+    if (messages.length === 0) {
+      Alert.alert('提示', '当前书籍还没有可总结的共读聊天记录');
+      return;
+    }
+    setSummaryFrom('1');
+    setSummaryTo(String(messages.length));
+    setSummaryText('');
+    setSummaryVisible(true);
+  }
+
+  function handleCloseSummary() {
+    if (isSummarizing) return;
+    setSummaryVisible(false);
+  }
+
+  function handleStopSummary() {
+    summaryAbortRef.current?.abort();
+    setIsSummarizing(false);
+  }
+
+  async function handleSummarizeMessages() {
+    if (!readingConfig.baseUrl || !readingConfig.apiKey || !readingConfig.model) {
+      Alert.alert('提示', '请先在共读设置中配置 API');
+      return;
+    }
+
+    const total = messages.length;
+    if (total === 0) {
+      Alert.alert('提示', '当前书籍还没有可总结的共读聊天记录');
+      return;
+    }
+
+    let from = parseInt(summaryFrom, 10);
+    let to = parseInt(summaryTo, 10);
+    if (Number.isNaN(from)) from = 1;
+    if (Number.isNaN(to)) to = total;
+    from = clamp(from, 1, total);
+    to = clamp(to, 1, total);
+
+    if (from > to) {
+      Alert.alert('提示', '请输入有效的楼层范围（起始楼层不能大于结束楼层）');
+      return;
+    }
+
+    const selectedMessages = messages.filter((_, index) => {
+      const floor = index + 1;
+      return floor >= from && floor <= to;
+    });
+
+    const conversationText = selectedMessages
+      .map((message) => {
+        const floor = messageFloorMap.get(message.id) ?? 0;
+        const speaker = message.role === 'user' ? '用户' : 'AI';
+        return `#${floor} ${speaker}：${message.content.trim() || '（空消息）'}`;
+      })
+      .join('\n\n');
+
+    setSummaryText('');
+    setIsSummarizing(true);
+    summaryAbortRef.current = new AbortController();
+
+    try {
+      await streamChat(
+        {
+          baseUrl: readingConfig.baseUrl,
+          apiKey: readingConfig.apiKey,
+          model: readingConfig.model,
+          messages: [
+            {
+              role: 'system',
+              content: '你只根据用户提供的聊天记录做总结，不补充书籍原文、阅读位置或外部信息。',
+            },
+            {
+              role: 'user',
+              content:
+                `请总结下面第 ${from} 层到第 ${to} 层的 AI 共读聊天记录。` +
+                '输出中文总结，保留关键问题、回答、结论和待继续讨论的点。只总结聊天记录本身。\n\n' +
+                conversationText,
+            },
+          ],
+          maxTokens: maxOutputTokens || undefined,
+        },
+        (token) => setSummaryText((current) => current + token),
+        summaryAbortRef.current.signal
+      );
+    } catch (err: any) {
+      if (!isAbortError(err)) {
+        Alert.alert('总结失败', err?.message || '请求失败');
+      }
+    } finally {
+      setIsSummarizing(false);
+      summaryAbortRef.current = null;
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -460,9 +574,18 @@ export default function ReadingBookScreen() {
               <Text style={styles.panelTitle}>共读对话</Text>
               <Text style={styles.panelSubtitle}>回车发送，按钮获取 AI 回复</Text>
             </View>
-            <Pressable style={styles.collapseButton} onPress={() => handleSetCollapsed(true)}>
-              <Text style={styles.collapseButtonText}>−</Text>
-            </Pressable>
+            <View style={styles.panelActions}>
+              <Pressable
+                style={[styles.summaryButton, messages.length === 0 && styles.summaryButtonDisabled]}
+                onPress={handleOpenSummary}
+                disabled={messages.length === 0}
+              >
+                <Text style={styles.summaryButtonText}>总结</Text>
+              </Pressable>
+              <Pressable style={styles.collapseButton} onPress={() => handleSetCollapsed(true)}>
+                <Text style={styles.collapseButtonText}>−</Text>
+              </Pressable>
+            </View>
           </View>
 
           <ScrollView
@@ -474,20 +597,44 @@ export default function ReadingBookScreen() {
             {messages.length === 0 ? (
               <Text style={styles.chatEmpty}>读到哪里，就从哪里问起。</Text>
             ) : (
-              messages.map((message) => (
-                <Pressable
-                  key={message.id}
-                  style={[
-                    styles.messageBubble,
-                    message.role === 'user' ? styles.userBubble : styles.assistantBubble,
-                  ]}
-                  onLongPress={() => openMessageEditor(message)}
-                >
-                  <Text style={styles.messageText}>
-                    {message.content || (isStreaming && message.role === 'assistant' ? '正在思考…' : '')}
-                  </Text>
-                </Pressable>
-              ))
+              messages.map((message) => {
+                const floorNumber = messageFloorMap.get(message.id);
+                const showFloorNumber = visibleFloorMessageId === message.id && floorNumber !== undefined;
+                const isUser = message.role === 'user';
+
+                return (
+                  <View
+                    key={message.id}
+                    style={[
+                      styles.messageRow,
+                      isUser ? styles.userMessageRow : styles.assistantMessageRow,
+                    ]}
+                  >
+                    {isUser && showFloorNumber && (
+                      <Text style={styles.messageFloorLeft}>#{floorNumber}</Text>
+                    )}
+                    <Pressable
+                      style={[
+                        styles.messageBubble,
+                        isUser ? styles.userBubble : styles.assistantBubble,
+                      ]}
+                      onPress={() =>
+                        setVisibleFloorMessageId((current) =>
+                          current === message.id ? null : message.id
+                        )
+                      }
+                      onLongPress={() => openMessageEditor(message)}
+                    >
+                      <Text style={styles.messageText}>
+                        {message.content || (isStreaming && message.role === 'assistant' ? '正在思考…' : '')}
+                      </Text>
+                    </Pressable>
+                    {!isUser && showFloorNumber && (
+                      <Text style={styles.messageFloorRight}>#{floorNumber}</Text>
+                    )}
+                  </View>
+                );
+              })
             )}
           </ScrollView>
 
@@ -520,6 +667,78 @@ export default function ReadingBookScreen() {
           </View>
         </View>
       )}
+
+      <Modal
+        visible={summaryVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseSummary}
+      >
+        <Pressable style={styles.overlay} onPress={handleCloseSummary}>
+          <View style={styles.summaryModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.summaryModalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>总结共读聊天</Text>
+                <Text style={styles.summaryHint}>{summaryRangeHint}</Text>
+              </View>
+              <Pressable
+                style={[styles.summaryCloseButton, isSummarizing && styles.summaryButtonDisabled]}
+                onPress={handleCloseSummary}
+                disabled={isSummarizing}
+              >
+                <Text style={styles.summaryCloseText}>×</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.summaryRangeRow}>
+              <Text style={styles.summaryRangeLabel}>从第</Text>
+              <TextInput
+                style={styles.summaryRangeInput}
+                value={summaryFrom}
+                onChangeText={setSummaryFrom}
+                keyboardType="number-pad"
+                placeholder="1"
+                placeholderTextColor={colors.textTertiary}
+                editable={!isSummarizing}
+              />
+              <Text style={styles.summaryRangeLabel}>层到第</Text>
+              <TextInput
+                style={styles.summaryRangeInput}
+                value={summaryTo}
+                onChangeText={setSummaryTo}
+                keyboardType="number-pad"
+                placeholder="末"
+                placeholderTextColor={colors.textTertiary}
+                editable={!isSummarizing}
+              />
+              <Text style={styles.summaryRangeLabel}>层</Text>
+            </View>
+
+            <TextInput
+              style={styles.summaryContentInput}
+              value={summaryText}
+              onChangeText={setSummaryText}
+              multiline
+              placeholder="总结内容将显示在这里..."
+              placeholderTextColor={colors.textTertiary}
+              editable={!isSummarizing}
+            />
+
+            <View style={styles.summaryFooter}>
+              {isSummarizing && <ActivityIndicator color={colors.primary} />}
+              {isSummarizing ? (
+                <Pressable style={styles.summaryPrimaryButton} onPress={handleStopSummary}>
+                  <Text style={styles.summaryPrimaryText}>停止</Text>
+                </Pressable>
+              ) : (
+                <Pressable style={styles.summaryPrimaryButton} onPress={handleSummarizeMessages}>
+                  <Text style={styles.summaryPrimaryText}>总结</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal visible={!!editingMessage} transparent animationType="fade">
         <Pressable style={styles.overlay} onPress={() => setEditingMessage(null)}>
@@ -561,6 +780,12 @@ function buildSourceExcerpt(text: string, rawOffset: number, limit: number): str
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function isAbortError(error: any): boolean {
+  const name = String(error?.name || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  return name.includes('abort') || message.includes('abort') || message.includes('cancel');
 }
 
 function clampFrame(frame: PanelFrame): PanelFrame {
@@ -680,6 +905,21 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   panelTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
   panelSubtitle: { marginTop: 2, fontSize: 11, color: colors.textTertiary },
+  panelActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  summaryButton: {
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight,
+  },
+  summaryButtonDisabled: { opacity: 0.45 },
+  summaryButtonText: { fontSize: 12, fontWeight: '700', color: colors.primary },
   collapseButton: {
     width: 32,
     height: 32,
@@ -697,11 +937,32 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
     paddingTop: 24,
   },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    width: '100%',
+  },
+  userMessageRow: { justifyContent: 'flex-end' },
+  assistantMessageRow: { justifyContent: 'flex-start' },
+  messageFloorLeft: {
+    marginRight: 6,
+    marginBottom: 5,
+    fontSize: 11,
+    color: colors.primary,
+    fontFamily: fonts.mono,
+  },
+  messageFloorRight: {
+    marginLeft: 6,
+    marginBottom: 5,
+    fontSize: 11,
+    color: colors.primary,
+    fontFamily: fonts.mono,
+  },
   messageBubble: {
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    maxWidth: '92%',
+    maxWidth: '86%',
   },
   userBubble: { alignSelf: 'flex-end', backgroundColor: colors.primaryLight },
   assistantBubble: { alignSelf: 'flex-start', backgroundColor: colors.surface },
@@ -765,6 +1026,94 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     padding: 20,
     width: '86%',
     maxHeight: '70%',
+  },
+  summaryModal: {
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    padding: 18,
+    width: '88%',
+    maxHeight: '78%',
+  },
+  summaryModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+  },
+  summaryHint: {
+    marginTop: 4,
+    fontSize: 12,
+    color: colors.textTertiary,
+  },
+  summaryCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  summaryCloseText: {
+    fontSize: 22,
+    lineHeight: 24,
+    color: colors.textSecondary,
+  },
+  summaryRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  summaryRangeLabel: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  summaryRangeInput: {
+    width: 54,
+    height: 38,
+    backgroundColor: colors.inputBackground,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  summaryContentInput: {
+    backgroundColor: colors.inputBackground,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 180,
+    maxHeight: 300,
+    textAlignVertical: 'top',
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+  },
+  summaryFooter: {
+    marginTop: 12,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+  },
+  summaryPrimaryButton: {
+    minWidth: 74,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  summaryPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   modalTitle: { fontSize: 17, fontWeight: '700', color: colors.text, marginBottom: 12 },
   modalInput: {
