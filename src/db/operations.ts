@@ -9,6 +9,9 @@ import {
   ReadingBook,
   ReadingChapter,
   ReadingMessage,
+  ReadingNote,
+  ReadingHighlight,
+  ReadingBookSnapshot,
   FocusTask,
   FocusSession,
   FocusTimerMode,
@@ -695,8 +698,56 @@ export async function updateReadingBook(
 
 export async function deleteReadingBook(id: string): Promise<void> {
   const db = await getDatabase();
+  const book = await getReadingBook(id);
+  if (book) {
+    await upsertReadingBookSnapshot({
+      bookId: book.id,
+      title: book.title,
+      author: book.author,
+      updatedAt: Date.now(),
+    });
+  }
+  await db.execAsync('PRAGMA foreign_keys = OFF;');
   await db.runAsync('DELETE FROM reading_messages WHERE book_id = ?', [id]);
   await db.runAsync('DELETE FROM reading_books WHERE id = ?', [id]);
+}
+
+async function ensureReadingBookSnapshotTable() {
+  const db = await getDatabase();
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS reading_book_snapshots (
+      book_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      author TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  return db;
+}
+
+export async function upsertReadingBookSnapshot(snapshot: ReadingBookSnapshot): Promise<void> {
+  const db = await ensureReadingBookSnapshotTable();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO reading_book_snapshots (book_id, title, author, updated_at)
+     VALUES (?, ?, ?, ?)`,
+    [snapshot.bookId, snapshot.title, snapshot.author, snapshot.updatedAt]
+  );
+}
+
+export async function getAllReadingBookSnapshots(): Promise<ReadingBookSnapshot[]> {
+  const db = await ensureReadingBookSnapshotTable();
+  const rows = await db.getAllAsync<{
+    book_id: string;
+    title: string;
+    author: string;
+    updated_at: number;
+  }>('SELECT * FROM reading_book_snapshots');
+  return rows.map((row) => ({
+    bookId: row.book_id,
+    title: row.title,
+    author: row.author,
+    updatedAt: row.updated_at,
+  }));
 }
 
 export async function getAllReadingBooks(): Promise<ReadingBook[]> {
@@ -780,6 +831,159 @@ export async function getReadingMessages(bookId: string): Promise<ReadingMessage
     created_at: number;
   }>('SELECT * FROM reading_messages WHERE book_id = ? ORDER BY created_at ASC', [bookId]);
   return rows.map(mapReadingMessageRow);
+}
+
+async function ensureReadingAnnotationTables() {
+  const db = await getDatabase();
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS reading_notes (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reading_notes_book ON reading_notes(book_id, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS reading_highlights (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      start_offset INTEGER NOT NULL,
+      end_offset INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reading_highlights_book ON reading_highlights(book_id, start_offset ASC);
+  `);
+  return db;
+}
+
+function mapReadingNoteRow(row: {
+  id: string;
+  book_id: string;
+  kind: string;
+  content: string;
+  created_at: number;
+  updated_at: number;
+}): ReadingNote {
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    kind: row.kind === 'reflection' ? 'reflection' : 'summary',
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function insertReadingNote(note: ReadingNote): Promise<void> {
+  const db = await ensureReadingAnnotationTables();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO reading_notes (id, book_id, kind, content, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [note.id, note.bookId, note.kind, note.content, note.createdAt, note.updatedAt]
+  );
+}
+
+export async function updateReadingNoteContent(id: string, content: string): Promise<void> {
+  const db = await ensureReadingAnnotationTables();
+  await db.runAsync(
+    'UPDATE reading_notes SET content = ?, updated_at = ? WHERE id = ?',
+    [content, Date.now(), id]
+  );
+}
+
+export async function deleteReadingNote(id: string): Promise<void> {
+  const db = await ensureReadingAnnotationTables();
+  await db.runAsync('DELETE FROM reading_notes WHERE id = ?', [id]);
+}
+
+export async function getReadingNotes(bookId: string): Promise<ReadingNote[]> {
+  const db = await ensureReadingAnnotationTables();
+  const rows = await db.getAllAsync<{
+    id: string;
+    book_id: string;
+    kind: string;
+    content: string;
+    created_at: number;
+    updated_at: number;
+  }>('SELECT * FROM reading_notes WHERE book_id = ? ORDER BY created_at ASC', [bookId]);
+  return rows.map(mapReadingNoteRow);
+}
+
+export async function getAllReadingNotes(): Promise<ReadingNote[]> {
+  const db = await ensureReadingAnnotationTables();
+  const rows = await db.getAllAsync<{
+    id: string;
+    book_id: string;
+    kind: string;
+    content: string;
+    created_at: number;
+    updated_at: number;
+  }>('SELECT * FROM reading_notes ORDER BY created_at ASC');
+  return rows.map(mapReadingNoteRow);
+}
+
+function mapReadingHighlightRow(row: {
+  id: string;
+  book_id: string;
+  content: string;
+  start_offset: number;
+  end_offset: number;
+  created_at: number;
+}): ReadingHighlight {
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    content: row.content,
+    start: row.start_offset,
+    end: row.end_offset,
+    createdAt: row.created_at,
+  };
+}
+
+export async function insertReadingHighlight(highlight: ReadingHighlight): Promise<void> {
+  const db = await ensureReadingAnnotationTables();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO reading_highlights
+      (id, book_id, content, start_offset, end_offset, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [highlight.id, highlight.bookId, highlight.content, highlight.start, highlight.end, highlight.createdAt]
+  );
+}
+
+export async function deleteReadingHighlight(id: string): Promise<void> {
+  const db = await ensureReadingAnnotationTables();
+  await db.runAsync('DELETE FROM reading_highlights WHERE id = ?', [id]);
+}
+
+export async function getReadingHighlights(bookId: string): Promise<ReadingHighlight[]> {
+  const db = await ensureReadingAnnotationTables();
+  const rows = await db.getAllAsync<{
+    id: string;
+    book_id: string;
+    content: string;
+    start_offset: number;
+    end_offset: number;
+    created_at: number;
+  }>('SELECT * FROM reading_highlights WHERE book_id = ? ORDER BY start_offset ASC', [bookId]);
+  return rows.map(mapReadingHighlightRow);
+}
+
+export async function getAllReadingHighlights(): Promise<ReadingHighlight[]> {
+  const db = await ensureReadingAnnotationTables();
+  const rows = await db.getAllAsync<{
+    id: string;
+    book_id: string;
+    content: string;
+    start_offset: number;
+    end_offset: number;
+    created_at: number;
+  }>('SELECT * FROM reading_highlights ORDER BY created_at ASC');
+  return rows.map(mapReadingHighlightRow);
 }
 
 /* ==================== Focus CRUD ==================== */

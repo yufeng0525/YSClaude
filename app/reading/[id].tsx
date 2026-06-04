@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
+  FlatList,
   TextInput,
   ActivityIndicator,
   NativeScrollEvent,
@@ -22,11 +23,15 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
 
 import { fonts } from '../../src/theme/fonts';
-import { ReadingBook, ReadingMessage } from '../../src/types';
+import { ReadingBook, ReadingHighlight, ReadingMessage } from '../../src/types';
 import {
+  deleteReadingHighlight,
   deleteReadingMessage,
   getReadingBook,
+  getReadingHighlights,
   getReadingMessages,
+  insertReadingHighlight,
+  insertReadingNote,
   insertReadingMessage,
   updateReadingBook,
   updateReadingMessageContent,
@@ -45,6 +50,17 @@ const PANEL_DEFAULT_HEIGHT = 300;
 const PANEL_MARGIN = 12;
 const HEADER_HEIGHT = 96;
 const BALL_SIZE = 58;
+const DEFAULT_SUMMARY_SYSTEM_PROMPT =
+  '你是一个细致的 AI 共读记录整理者。只根据用户提供的聊天记录做总结，不补充书籍原文、阅读位置或外部信息。';
+const HIGHLIGHT_COLOR = '#FFF36D';
+
+interface TextSegment {
+  key: string;
+  text: string;
+  start: number;
+  end: number;
+  highlightable: boolean;
+}
 
 interface PanelFrame {
   x: number;
@@ -70,6 +86,8 @@ export default function ReadingBookScreen() {
   const maxOutputTokens = useSettingsStore((state) => state.maxOutputTokens);
   const [book, setBook] = useState<ReadingBook | null>(null);
   const [messages, setMessages] = useState<ReadingMessage[]>([]);
+  const [highlights, setHighlights] = useState<ReadingHighlight[]>([]);
+  const [chapterIndex, setChapterIndex] = useState(0);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -84,7 +102,8 @@ export default function ReadingBookScreen() {
   const [summaryTo, setSummaryTo] = useState('');
   const [summaryText, setSummaryText] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const [catalogVisible, setCatalogVisible] = useState(false);
+  const readerListRef = useRef<FlatList<TextSegment>>(null);
   const messageScrollRef = useRef<ScrollView>(null);
   const summaryAbortRef = useRef<AbortController | null>(null);
   const contentHeightRef = useRef(1);
@@ -96,6 +115,7 @@ export default function ReadingBookScreen() {
   const resizeStartRef = useRef(INITIAL_PANEL_FRAME);
   const collapsedRef = useRef(false);
   const ballMovedRef = useRef(false);
+  const chapterSwitchingRef = useRef(false);
 
   const updatePanelFrame = useCallback((nextFrame: PanelFrame, mode: 'panel' | 'ball' = 'panel') => {
     const next = mode === 'ball' ? clampBallFrame(nextFrame) : clampFrame(nextFrame);
@@ -167,19 +187,36 @@ export default function ReadingBookScreen() {
     useCallback(() => {
       let mounted = true;
       async function load() {
-        if (!id) return;
+        if (!id) {
+          setLoading(false);
+          return;
+        }
         setLoading(true);
-        const [nextBook, nextMessages] = await Promise.all([
-          getReadingBook(id),
-          getReadingMessages(id),
-        ]);
-        if (!mounted) return;
-        setBook(nextBook);
-        setMessages(nextMessages);
-        readingOffsetRef.current = nextBook?.readingOffset || 0;
-        didRestoreScrollRef.current = false;
-        setError(null);
-        setLoading(false);
+        try {
+          const [nextBook, nextMessages] = await Promise.all([
+            getReadingBook(id),
+            getReadingMessages(id),
+          ]);
+          if (!mounted) return;
+          setBook(nextBook);
+          setMessages(nextMessages);
+          setChapterIndex(getChapterIndexForOffset(nextBook, nextBook?.readingOffset || 0));
+          readingOffsetRef.current = nextBook?.readingOffset || 0;
+          didRestoreScrollRef.current = false;
+          setError(null);
+          getReadingHighlights(id)
+            .then((nextHighlights) => {
+              if (mounted) setHighlights(nextHighlights);
+            })
+            .catch(() => {
+              if (mounted) setHighlights([]);
+            });
+        } catch (err: any) {
+          if (!mounted) return;
+          setError(err?.message || '加载书籍失败');
+        } finally {
+          if (mounted) setLoading(false);
+        }
       }
       load();
       return () => {
@@ -188,16 +225,23 @@ export default function ReadingBookScreen() {
     }, [id])
   );
 
-  const currentChapter = useMemo(() => {
-    if (!book || book.chapters.length === 0) return null;
-    const offset = readingOffsetRef.current;
-    let chapter = book.chapters[0];
-    for (const item of book.chapters) {
-      if (item.start <= offset) chapter = item;
-      else break;
-    }
-    return chapter;
-  }, [book, messages.length]);
+  const chapterRanges = useMemo(() => buildChapterRanges(book), [book]);
+  const currentChapter = chapterRanges[chapterIndex] ?? chapterRanges[0] ?? null;
+  const currentChapterText = currentChapter ? book?.text.slice(currentChapter.start, currentChapter.end) || '' : '';
+  const currentChapterNumber = chapterRanges.length > 0 ? chapterIndex + 1 : 0;
+
+  const chapterTextSegments = useMemo(
+    () => splitTextIntoSegments(currentChapterText, currentChapter?.start || 0),
+    [currentChapter?.start, currentChapterText]
+  );
+
+  const highlightByRange = useMemo(() => {
+    const map = new Map<string, ReadingHighlight>();
+    highlights.forEach((highlight) => {
+      map.set(rangeKey(highlight.start, highlight.end), highlight);
+    });
+    return map;
+  }, [highlights]);
 
   const messageFloorMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -211,25 +255,47 @@ export default function ReadingBookScreen() {
 
   function handleContentSizeChange(_width: number, height: number) {
     contentHeightRef.current = Math.max(1, height);
-    if (!book || didRestoreScrollRef.current || book.readingOffset <= 0 || book.text.length <= 0) {
+    if (!book || !currentChapter || didRestoreScrollRef.current || book.readingOffset <= currentChapter.start) {
       return;
     }
     didRestoreScrollRef.current = true;
     const scrollableHeight = Math.max(1, height - viewportHeightRef.current);
-    const y = (book.readingOffset / book.text.length) * scrollableHeight;
+    const chapterLength = Math.max(1, currentChapter.end - currentChapter.start);
+    const progress = clamp((book.readingOffset - currentChapter.start) / chapterLength, 0, 1);
+    const y = progress * scrollableHeight;
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, y), animated: false });
+      readerListRef.current?.scrollToOffset({ offset: Math.max(0, y), animated: false });
     });
   }
 
   function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
-    if (!book) return;
+    if (!book || !currentChapter) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     viewportHeightRef.current = Math.max(1, layoutMeasurement.height);
     contentHeightRef.current = Math.max(1, contentSize.height);
     const endY = Math.min(contentOffset.y + layoutMeasurement.height, contentSize.height);
     const ratio = contentSize.height > 0 ? endY / contentSize.height : 0;
-    readingOffsetRef.current = clamp(Math.round(book.text.length * ratio), 0, book.text.length);
+    const chapterLength = Math.max(1, currentChapter.end - currentChapter.start);
+    readingOffsetRef.current = clamp(
+      currentChapter.start + Math.round(chapterLength * ratio),
+      currentChapter.start,
+      currentChapter.end
+    );
+
+    const distanceToBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    if (
+      distanceToBottom <= 24 &&
+      contentOffset.y > 0 &&
+      chapterIndex < chapterRanges.length - 1 &&
+      !chapterSwitchingRef.current
+    ) {
+      chapterSwitchingRef.current = true;
+      switchChapter(chapterIndex + 1).finally(() => {
+        setTimeout(() => {
+          chapterSwitchingRef.current = false;
+        }, 450);
+      });
+    }
   }
 
   async function persistReadingOffset() {
@@ -242,6 +308,61 @@ export default function ReadingBookScreen() {
       updatedAt,
     });
     setBook({ ...book, readingOffset: nextOffset, updatedAt });
+  }
+
+  async function switchChapter(nextIndex: number) {
+    if (!book || nextIndex < 0 || nextIndex >= chapterRanges.length) return;
+    setCatalogVisible(false);
+    await persistReadingOffset();
+    const nextChapter = chapterRanges[nextIndex];
+    readingOffsetRef.current = nextChapter.start;
+    didRestoreScrollRef.current = false;
+    setChapterIndex(nextIndex);
+    const updatedAt = Date.now();
+    await updateReadingBook(book.id, {
+      readingOffset: nextChapter.start,
+      updatedAt,
+    });
+    setBook({ ...book, readingOffset: nextChapter.start, updatedAt });
+    requestAnimationFrame(() => {
+      readerListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
+  }
+
+  async function handleLongPressTextSegment(segment: TextSegment) {
+    if (!book || !segment.highlightable) return;
+    const key = rangeKey(segment.start, segment.end);
+    const existing = highlightByRange.get(key);
+
+    if (existing) {
+      Alert.alert('移除划线', '确定移除这句划线？', [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '移除',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteReadingHighlight(existing.id);
+            setHighlights((current) => current.filter((item) => item.id !== existing.id));
+          },
+        },
+      ]);
+      return;
+    }
+
+    const content = segment.text.trim();
+    if (!content) return;
+    const now = Date.now();
+    const highlight: ReadingHighlight = {
+      id: randomUUID(),
+      bookId: book.id,
+      content,
+      start: segment.start,
+      end: segment.end,
+      createdAt: now,
+    };
+    await insertReadingHighlight(highlight);
+    await updateReadingBook(book.id, { updatedAt: now });
+    setHighlights((current) => [...current, highlight].sort((a, b) => a.start - b.start));
   }
 
   async function handleSubmitUserMessage() {
@@ -299,7 +420,13 @@ export default function ReadingBookScreen() {
     await persistReadingOffset();
     scrollMessagesToEnd();
 
-    const source = buildSourceExcerpt(book.text, readingOffsetRef.current, readingConfig.sourceCharLimit);
+    const source = buildSourceExcerptInRange(
+      book.text,
+      readingOffsetRef.current,
+      currentChapter?.start || 0,
+      currentChapter?.end || book.text.length,
+      readingConfig.sourceCharLimit
+    );
     const recentMessages = previousMessages.slice(-readingConfig.conversationMessageLimit);
     const systemContent = [
       readingConfig.systemPrompt,
@@ -462,6 +589,7 @@ export default function ReadingBookScreen() {
     summaryAbortRef.current = new AbortController();
 
     try {
+      let generatedSummary = '';
       await streamChat(
         {
           baseUrl: readingConfig.baseUrl,
@@ -470,7 +598,7 @@ export default function ReadingBookScreen() {
           messages: [
             {
               role: 'system',
-              content: '你只根据用户提供的聊天记录做总结，不补充书籍原文、阅读位置或外部信息。',
+              content: readingConfig.summarySystemPrompt || DEFAULT_SUMMARY_SYSTEM_PROMPT,
             },
             {
               role: 'user',
@@ -482,9 +610,25 @@ export default function ReadingBookScreen() {
           ],
           maxTokens: maxOutputTokens || undefined,
         },
-        (token) => setSummaryText((current) => current + token),
+        (token) => {
+          generatedSummary += token;
+          setSummaryText((current) => current + token);
+        },
         summaryAbortRef.current.signal
       );
+      const content = generatedSummary.trim();
+      if (book && content) {
+        const now = Date.now();
+        await insertReadingNote({
+          id: randomUUID(),
+          bookId: book.id,
+          kind: 'summary',
+          content,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await updateReadingBook(book.id, { updatedAt: now });
+      }
     } catch (err: any) {
       if (!isAbortError(err)) {
         Alert.alert('总结失败', err?.message || '请求失败');
@@ -536,7 +680,9 @@ export default function ReadingBookScreen() {
             {currentChapter?.title || book.author || 'AI 共读'}
           </Text>
         </View>
-        <View style={styles.headerButton} />
+        <Pressable style={styles.headerButton} onPress={() => setCatalogVisible(true)}>
+          <Text style={styles.catalogButtonText}>目录</Text>
+        </Pressable>
       </View>
 
       {error && (
@@ -545,8 +691,39 @@ export default function ReadingBookScreen() {
         </View>
       )}
 
-      <ScrollView
-        ref={scrollRef}
+      <FlatList
+        ref={readerListRef}
+        data={chapterTextSegments}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) => {
+          const highlighted = !!highlightByRange.get(rangeKey(item.start, item.end));
+          return (
+            <Text
+              style={[styles.bodyText, highlighted && styles.highlightedText]}
+              onLongPress={item.highlightable ? () => handleLongPressTextSegment(item) : undefined}
+            >
+              {item.text}
+            </Text>
+          );
+        }}
+        ListHeaderComponent={
+          <>
+            <Text style={styles.bookHeading}>{book.title || '未命名书籍'}</Text>
+            {!!book.author && <Text style={styles.bookSubheading}>{book.author}</Text>}
+            {currentChapter && (
+              <View style={styles.chapterBar}>
+                <View style={styles.chapterInfo}>
+                  <Text style={styles.chapterTitle} numberOfLines={1}>
+                    {currentChapter.title || `第 ${currentChapterNumber} 章`}
+                  </Text>
+                  <Text style={styles.chapterMeta}>
+                    {currentChapterNumber}/{chapterRanges.length}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </>
+        }
         style={styles.reader}
         contentContainerStyle={styles.readerContent}
         onScroll={handleScroll}
@@ -554,11 +731,11 @@ export default function ReadingBookScreen() {
         onMomentumScrollEnd={persistReadingOffset}
         onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={48}
-      >
-        <Text style={styles.bookHeading}>{book.title || '未命名书籍'}</Text>
-        {!!book.author && <Text style={styles.bookSubheading}>{book.author}</Text>}
-        <Text style={styles.bodyText}>{book.text}</Text>
-      </ScrollView>
+        initialNumToRender={24}
+        maxToRenderPerBatch={16}
+        windowSize={9}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
 
       {collapsed ? (
         <View
@@ -740,6 +917,42 @@ export default function ReadingBookScreen() {
         </Pressable>
       </Modal>
 
+      <Modal visible={catalogVisible} transparent animationType="fade" onRequestClose={() => setCatalogVisible(false)}>
+        <Pressable style={styles.overlay} onPress={() => setCatalogVisible(false)}>
+          <View style={styles.catalogModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.catalogHeader}>
+              <Text style={styles.catalogTitle}>目录</Text>
+              <Pressable style={styles.summaryCloseButton} onPress={() => setCatalogVisible(false)}>
+                <Text style={styles.summaryCloseText}>×</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.catalogList}>
+              {chapterRanges.map((chapter, index) => (
+                <Pressable
+                  key={`${chapter.id}-${chapter.start}`}
+                  style={[
+                    styles.catalogItem,
+                    index === chapterIndex && styles.catalogItemActive,
+                  ]}
+                  onPress={() => switchChapter(index)}
+                >
+                  <Text
+                    style={[
+                      styles.catalogItemText,
+                      index === chapterIndex && styles.catalogItemTextActive,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {chapter.title || `第 ${index + 1} 章`}
+                  </Text>
+                  <Text style={styles.catalogItemMeta}>{index + 1}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
       <Modal visible={!!editingMessage} transparent animationType="fade">
         <Pressable style={styles.overlay} onPress={() => setEditingMessage(null)}>
           <View style={styles.modal} onStartShouldSetResponder={() => true}>
@@ -772,10 +985,100 @@ export default function ReadingBookScreen() {
   );
 }
 
-function buildSourceExcerpt(text: string, rawOffset: number, limit: number): string {
-  const end = rawOffset > 0 ? rawOffset : Math.min(text.length, limit);
-  const start = Math.max(0, end - Math.max(1, limit));
+function buildSourceExcerptInRange(
+  text: string,
+  rawOffset: number,
+  rangeStart: number,
+  rangeEnd: number,
+  limit: number
+): string {
+  const end = clamp(rawOffset > rangeStart ? rawOffset : Math.min(rangeEnd, rangeStart + limit), rangeStart, rangeEnd);
+  const start = Math.max(rangeStart, end - Math.max(1, limit));
   return text.slice(start, end).trim();
+}
+
+function buildChapterRanges(book: ReadingBook | null): Array<{ id: string; title: string; start: number; end: number }> {
+  if (!book || !book.text) return [];
+  const sourceChapters =
+    book.chapters.length > 0
+      ? [...book.chapters].sort((a, b) => a.start - b.start)
+      : [{ id: 'start', title: '正文', start: 0 }];
+
+  return sourceChapters.map((chapter, index) => {
+    const nextStart = sourceChapters[index + 1]?.start ?? book.text.length;
+    const start = clamp(chapter.start, 0, book.text.length);
+    const end = clamp(Math.max(nextStart, start), start, book.text.length);
+    return {
+      id: chapter.id,
+      title: chapter.title,
+      start,
+      end,
+    };
+  }).filter((chapter) => chapter.end > chapter.start);
+}
+
+function getChapterIndexForOffset(book: ReadingBook | null, offset: number): number {
+  const ranges = buildChapterRanges(book);
+  if (ranges.length === 0) return 0;
+  let index = 0;
+  for (let i = 0; i < ranges.length; i++) {
+    if (ranges[i].start <= offset) index = i;
+    else break;
+  }
+  return index;
+}
+
+function rangeKey(start: number, end: number): string {
+  return `${start}:${end}`;
+}
+
+function splitTextIntoSegments(text: string, globalStart: number): TextSegment[] {
+  const segments: TextSegment[] = [];
+  let start = 0;
+  let index = 0;
+
+  const pushSegment = (end: number, highlightable: boolean) => {
+    if (end <= start) return;
+    const value = text.slice(start, end);
+    segments.push({
+      key: `${globalStart + start}-${globalStart + end}-${index++}`,
+      text: value,
+      start: globalStart + start,
+      end: globalStart + end,
+      highlightable: highlightable && value.trim().length > 0,
+    });
+    start = end;
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '\n') {
+      pushSegment(i, true);
+      start = i;
+      pushSegment(i + 1, false);
+      continue;
+    }
+
+    if (isSentenceEnding(char)) {
+      let end = i + 1;
+      while (end < text.length && isClosingPunctuation(text[end])) {
+        end++;
+      }
+      pushSegment(end, true);
+      i = end - 1;
+    }
+  }
+
+  pushSegment(text.length, true);
+  return segments;
+}
+
+function isSentenceEnding(char: string): boolean {
+  return char === '。' || char === '！' || char === '？' || char === '；' || char === '!' || char === '?' || char === ';';
+}
+
+function isClosingPunctuation(char: string): boolean {
+  return char === '”' || char === '’' || char === '"' || char === "'" || char === '）' || char === ')' || char === '】' || char === '》';
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -827,6 +1130,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   headerButton: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
   backIcon: { fontSize: 28, color: colors.text, lineHeight: 30 },
+  catalogButtonText: { fontSize: 13, color: colors.primary, fontWeight: '700' },
   headerTitleWrap: { flex: 1, alignItems: 'center' },
   title: { fontSize: 17, fontWeight: '700', color: colors.text, maxWidth: '90%' },
   subtitle: { marginTop: 2, fontSize: 12, color: colors.textTertiary, maxWidth: '90%' },
@@ -858,11 +1162,25 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
     marginBottom: 28,
   },
+  chapterBar: {
+    marginBottom: 22,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  chapterInfo: { flex: 1, alignItems: 'center' },
+  chapterTitle: { fontSize: 15, color: colors.text, fontWeight: '700', maxWidth: '100%' },
+  chapterMeta: { marginTop: 2, fontSize: 11, color: colors.textTertiary },
   bodyText: {
     fontSize: 18,
     lineHeight: 31,
     color: colors.text,
     fontFamily: fonts.serif,
+  },
+  highlightedText: {
+    backgroundColor: HIGHLIGHT_COLOR,
+    color: lightColors.text,
   },
   floatBall: {
     position: 'absolute',
@@ -1114,6 +1432,49 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  catalogModal: {
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    padding: 18,
+    width: '88%',
+    maxHeight: '76%',
+  },
+  catalogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  catalogTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
+  catalogList: { maxHeight: 420 },
+  catalogItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  catalogItemActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  catalogItemText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+  },
+  catalogItemTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  catalogItemMeta: {
+    minWidth: 28,
+    textAlign: 'right',
+    fontSize: 12,
+    color: colors.textTertiary,
+    fontFamily: fonts.mono,
   },
   modalTitle: { fontSize: 17, fontWeight: '700', color: colors.text, marginBottom: 12 },
   modalInput: {

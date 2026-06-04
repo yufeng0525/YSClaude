@@ -18,11 +18,18 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
 
 import { fonts } from '../../src/theme/fonts';
-import { ReadingBook } from '../../src/types';
+import { ReadingBook, ReadingHighlight, ReadingNote } from '../../src/types';
 import {
   createReadingBook,
   deleteReadingBook,
+  deleteReadingHighlight,
+  deleteReadingNote,
+  getAllReadingBookSnapshots,
+  getAllReadingHighlights,
+  getAllReadingNotes,
   getAllReadingBooks,
+  insertReadingNote,
+  updateReadingNoteContent,
   updateReadingBook,
 } from '../../src/db/operations';
 import { parseReadingBookAsset, pickReadingBookDocument } from '../../src/services/readingImport';
@@ -30,8 +37,12 @@ import { useSettingsStore } from '../../src/stores/settings';
 
 
 let colors = lightColors;
-const TABS = ['书架', '设置'] as const;
+const TABS = ['书架', '总结', '设置'] as const;
 type ToastFn = (message: string) => void;
+const DEFAULT_SUMMARY_SYSTEM_PROMPT =
+  '你是一个细致的 AI 共读记录整理者。只根据用户提供的聊天记录做总结，不补充书籍原文、阅读位置或外部信息。';
+const HIGHLIGHT_COLOR = '#FFF36D';
+type SummaryBook = Pick<ReadingBook, 'id' | 'title' | 'author'> & { deleted?: boolean };
 
 export default function ReadingScreen() {
   colors = useThemeColors();
@@ -81,7 +92,9 @@ export default function ReadingScreen() {
         ))}
       </View>
 
-      {activeTab === 0 ? <BookshelfTab showToast={showToast} /> : <ReadingSettingsTab showToast={showToast} />}
+      {activeTab === 0 && <BookshelfTab showToast={showToast} />}
+      {activeTab === 1 && <ReadingSummaryTab showToast={showToast} />}
+      {activeTab === 2 && <ReadingSettingsTab showToast={showToast} />}
 
       {toastMessage && (
         <View pointerEvents="none" style={styles.toast}>
@@ -289,12 +302,324 @@ function BookshelfTab({ showToast }: { showToast: ToastFn }) {
   );
 }
 
+function ReadingSummaryTab({ showToast }: { showToast: ToastFn }) {
+  const [books, setBooks] = useState<ReadingBook[]>([]);
+  const [notesByBook, setNotesByBook] = useState<Record<string, ReadingNote[]>>({});
+  const [highlightsByBook, setHighlightsByBook] = useState<Record<string, ReadingHighlight[]>>({});
+  const [bookSnapshots, setBookSnapshots] = useState<Record<string, { title: string; author: string }>>({});
+  const [editingNote, setEditingNote] = useState<ReadingNote | null>(null);
+  const [editText, setEditText] = useState('');
+  const [reflectionBook, setReflectionBook] = useState<ReadingBook | null>(null);
+  const [reflectionText, setReflectionText] = useState('');
+  const [expandedBookIds, setExpandedBookIds] = useState<Set<string>>(new Set());
+
+  const summaryBooks = useMemo<SummaryBook[]>(() => {
+    const existingIds = new Set(books.map((book) => book.id));
+    const recordIds = new Set([
+      ...Object.keys(notesByBook),
+      ...Object.keys(highlightsByBook),
+    ]);
+    const deletedBooks = [...recordIds]
+      .filter((bookId) => !existingIds.has(bookId))
+      .map((bookId) => {
+        const snapshot = bookSnapshots[bookId];
+        return {
+          id: bookId,
+          title: snapshot?.title || '未命名书籍',
+          author: snapshot?.author || '未知作者',
+          deleted: true,
+        };
+      });
+    return [...books, ...deletedBooks];
+  }, [bookSnapshots, books, highlightsByBook, notesByBook]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSummaryData();
+    }, [])
+  );
+
+  async function loadSummaryData() {
+    const [nextBooks, notes, highlights, snapshots] = await Promise.all([
+      getAllReadingBooks(),
+      getAllReadingNotes(),
+      getAllReadingHighlights(),
+      getAllReadingBookSnapshots(),
+    ]);
+    const grouped: Record<string, ReadingNote[]> = {};
+    notes.forEach((note) => {
+      grouped[note.bookId] = [...(grouped[note.bookId] || []), note];
+    });
+    const groupedHighlights: Record<string, ReadingHighlight[]> = {};
+    highlights.forEach((highlight) => {
+      groupedHighlights[highlight.bookId] = [
+        ...(groupedHighlights[highlight.bookId] || []),
+        highlight,
+      ];
+    });
+    setBooks(nextBooks);
+    setNotesByBook(grouped);
+    setHighlightsByBook(groupedHighlights);
+    setBookSnapshots(
+      Object.fromEntries(
+        snapshots.map((snapshot) => [
+          snapshot.bookId,
+          { title: snapshot.title, author: snapshot.author },
+        ])
+      )
+    );
+  }
+
+  function handleOpenReflection(book: ReadingBook) {
+    setReflectionBook(book);
+    setReflectionText('');
+  }
+
+  function toggleBookExpanded(bookId: string) {
+    setExpandedBookIds((current) => {
+      const next = new Set(current);
+      if (next.has(bookId)) next.delete(bookId);
+      else next.add(bookId);
+      return next;
+    });
+  }
+
+  async function handleSaveReflection() {
+    if (!reflectionBook) return;
+    const content = reflectionText.trim();
+    if (!content) {
+      Alert.alert('提示', '请输入读书心得');
+      return;
+    }
+    const now = Date.now();
+    await insertReadingNote({
+      id: randomUUID(),
+      bookId: reflectionBook.id,
+      kind: 'reflection',
+      content,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await updateReadingBook(reflectionBook.id, { updatedAt: now });
+    setReflectionBook(null);
+    setReflectionText('');
+    await loadSummaryData();
+    showToast('读书心得已保存');
+  }
+
+  function handleOpenNote(note: ReadingNote) {
+    setEditingNote(note);
+    setEditText(note.content);
+  }
+
+  async function handleSaveNoteEdit() {
+    if (!editingNote) return;
+    const content = editText.trim();
+    if (!content) {
+      Alert.alert('提示', '内容不能为空');
+      return;
+    }
+    await updateReadingNoteContent(editingNote.id, content);
+    setEditingNote(null);
+    setEditText('');
+    await loadSummaryData();
+    showToast('已保存');
+  }
+
+  function handleDeleteNote() {
+    if (!editingNote) return;
+    const label = editingNote.kind === 'summary' ? '总结' : '读书心得';
+    Alert.alert(`删除${label}`, `确定删除这条${label}？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteReadingNote(editingNote.id);
+          setEditingNote(null);
+          setEditText('');
+          await loadSummaryData();
+        },
+      },
+    ]);
+  }
+
+  function handleDeleteHighlight(highlight: ReadingHighlight) {
+    Alert.alert('删除划线', '确定删除这句划线？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteReadingHighlight(highlight.id);
+          await loadSummaryData();
+          showToast('划线已删除');
+        },
+      },
+    ]);
+  }
+
+  return (
+    <ScrollView style={styles.summaryContent} contentContainerStyle={styles.summaryContentInner}>
+      {summaryBooks.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>还没有记录</Text>
+          <Text style={styles.emptyText}>导入书籍后，这里会按书显示划线、AI 总结和你的读书心得。</Text>
+        </View>
+      ) : (
+        summaryBooks.map((book) => {
+          const notes = notesByBook[book.id] || [];
+          const highlights = highlightsByBook[book.id] || [];
+          const entries = [
+            ...highlights.map((highlight) => ({
+              type: 'highlight' as const,
+              id: highlight.id,
+              createdAt: highlight.createdAt,
+              highlight,
+            })),
+            ...notes.map((note) => ({
+              type: 'note' as const,
+              id: note.id,
+              createdAt: note.createdAt,
+              note,
+            })),
+          ].sort((a, b) => a.createdAt - b.createdAt);
+          const expanded = expandedBookIds.has(book.id);
+
+          return (
+            <View key={book.id} style={styles.summaryBookSection}>
+              <Pressable style={styles.summaryBookHeader} onPress={() => toggleBookExpanded(book.id)}>
+                <View style={styles.summaryBookTitleWrap}>
+                  <Text style={styles.summaryBookTitle} numberOfLines={1}>
+                    {book.title || '未命名书籍'}
+                  </Text>
+                  <Text style={styles.summaryBookAuthor} numberOfLines={1}>
+                    {book.author || '未知作者'} · {entries.length} 条记录
+                  </Text>
+                </View>
+                <Text style={styles.summaryChevron}>{expanded ? '⌃' : '⌄'}</Text>
+              </Pressable>
+
+              {expanded && !book.deleted && (
+                <View style={styles.summaryBookActions}>
+                  <Pressable style={styles.addReflectionButton} onPress={() => handleOpenReflection(book as ReadingBook)}>
+                    <Text style={styles.addReflectionText}>添加心得</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {expanded && entries.length === 0 ? (
+                <Text style={styles.summaryEmptyText}>暂无划线、总结或读书心得。</Text>
+              ) : expanded ? (
+                entries.map((entry) => {
+                  if (entry.type === 'highlight') {
+                    return (
+                      <Pressable
+                        key={entry.id}
+                        style={[styles.noteItem, styles.highlightNote]}
+                        onLongPress={() => handleDeleteHighlight(entry.highlight)}
+                      >
+                        <Text style={[styles.noteBadge, styles.highlightNoteBadge]}>划线句子</Text>
+                        <Text style={styles.noteText}>{entry.highlight.content}</Text>
+                      </Pressable>
+                    );
+                  }
+
+                  const note = entry.note;
+                  return (
+                    <Pressable
+                      key={entry.id}
+                      style={[
+                        styles.noteItem,
+                        note.kind === 'summary' ? styles.summaryNote : styles.reflectionNote,
+                      ]}
+                      onLongPress={() => handleOpenNote(note)}
+                    >
+                      <Text
+                        style={[
+                          styles.noteBadge,
+                          note.kind === 'summary' ? styles.summaryNoteBadge : styles.reflectionNoteBadge,
+                        ]}
+                      >
+                        {note.kind === 'summary' ? 'AI 总结' : '读书心得'}
+                      </Text>
+                      <Text style={styles.noteText}>{note.content}</Text>
+                    </Pressable>
+                  );
+                })
+              ) : null}
+            </View>
+          );
+        })
+      )}
+
+      <Modal visible={!!reflectionBook} transparent animationType="fade">
+        <Pressable style={styles.overlay} onPress={() => setReflectionBook(null)}>
+          <View style={styles.modal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>添加读书心得</Text>
+            <TextInput
+              style={[styles.input, styles.noteEditInput]}
+              value={reflectionText}
+              onChangeText={setReflectionText}
+              multiline
+              placeholder="写下这本书给你的想法、问题或感受"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <View style={styles.modalButtons}>
+              <Pressable style={styles.modalCancel} onPress={() => setReflectionBook(null)}>
+                <Text style={styles.modalCancelText}>取消</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirm} onPress={handleSaveReflection}>
+                <Text style={styles.modalConfirmText}>保存</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!editingNote} transparent animationType="fade">
+        <Pressable style={styles.overlay} onPress={() => setEditingNote(null)}>
+          <View style={styles.modal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>
+              编辑{editingNote?.kind === 'summary' ? '总结' : '读书心得'}
+            </Text>
+            <TextInput
+              style={[styles.input, styles.noteEditInput]}
+              value={editText}
+              onChangeText={setEditText}
+              multiline
+              placeholder="内容"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <View style={styles.noteModalButtons}>
+              <Pressable style={styles.modalDelete} onPress={handleDeleteNote}>
+                <Text style={styles.modalDeleteText}>删除</Text>
+              </Pressable>
+              <View style={styles.modalRightButtons}>
+                <Pressable style={styles.modalCancel} onPress={() => setEditingNote(null)}>
+                  <Text style={styles.modalCancelText}>取消</Text>
+                </Pressable>
+                <Pressable style={styles.modalConfirm} onPress={handleSaveNoteEdit}>
+                  <Text style={styles.modalConfirmText}>保存</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+    </ScrollView>
+  );
+}
+
 function ReadingSettingsTab({ showToast }: { showToast: ToastFn }) {
   const { readingConfig, setReadingConfig, apiConfigs, activeConfigIndex } = useSettingsStore();
   const [baseUrl, setBaseUrl] = useState(readingConfig.baseUrl);
   const [apiKey, setApiKey] = useState(readingConfig.apiKey);
   const [model, setModel] = useState(readingConfig.model);
   const [systemPrompt, setSystemPrompt] = useState(readingConfig.systemPrompt);
+  const [summarySystemPrompt, setSummarySystemPrompt] = useState(
+    readingConfig.summarySystemPrompt || DEFAULT_SUMMARY_SYSTEM_PROMPT
+  );
   const [sourceCharLimit, setSourceCharLimit] = useState(String(readingConfig.sourceCharLimit));
   const [conversationMessageLimit, setConversationMessageLimit] = useState(String(readingConfig.conversationMessageLimit));
   const [testing, setTesting] = useState(false);
@@ -320,6 +645,7 @@ function ReadingSettingsTab({ showToast }: { showToast: ToastFn }) {
       apiKey: apiKey.trim(),
       model: model.trim(),
       systemPrompt: systemPrompt.trim(),
+      summarySystemPrompt: summarySystemPrompt.trim() || DEFAULT_SUMMARY_SYSTEM_PROMPT,
       sourceCharLimit: sourceLimit,
       conversationMessageLimit: messageLimit,
     });
@@ -428,6 +754,17 @@ function ReadingSettingsTab({ showToast }: { showToast: ToastFn }) {
           placeholderTextColor={colors.textTertiary}
         />
       </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>总结 System Prompt</Text>
+        <TextInput
+          style={[styles.input, styles.multilineInput]}
+          value={summarySystemPrompt}
+          onChangeText={setSummarySystemPrompt}
+          multiline
+          placeholder="总结共读聊天时发送给 AI 的系统提示词，可约束字数、格式和重点"
+          placeholderTextColor={colors.textTertiary}
+        />
+      </View>
       <View style={styles.twoColumn}>
         <View style={[styles.field, styles.flexField]}>
           <Text style={styles.label}>原文字数</Text>
@@ -490,6 +827,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   tabText: { fontSize: 14, fontWeight: '500', color: colors.textSecondary },
   tabTextActive: { color: '#FFFFFF' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
+  summaryContent: { flex: 1 },
+  summaryContentInner: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 28 },
   settingsContent: { flex: 1, padding: 20 },
   toast: {
     position: 'absolute',
@@ -565,10 +904,108 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
   },
   modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 6 },
+  noteModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 6,
+  },
+  modalRightButtons: { flexDirection: 'row', gap: 12 },
+  modalDelete: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  modalDeleteText: { fontSize: 15, color: colors.danger, fontWeight: '500' },
   modalCancel: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   modalCancelText: { fontSize: 15, color: colors.textSecondary },
   modalConfirm: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.primary },
   modalConfirmText: { fontSize: 15, color: '#FFFFFF', fontWeight: '500' },
+  summaryBookSection: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  summaryBookHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  summaryBookTitleWrap: { flex: 1 },
+  summaryBookTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  summaryBookAuthor: { marginTop: 3, fontSize: 12, color: colors.textTertiary },
+  summaryChevron: {
+    width: 26,
+    textAlign: 'center',
+    fontSize: 18,
+    color: colors.textTertiary,
+  },
+  summaryBookActions: {
+    alignItems: 'flex-end',
+    marginTop: 10,
+  },
+  addReflectionButton: {
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addReflectionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  summaryEmptyText: {
+    fontSize: 13,
+    color: colors.textTertiary,
+    paddingVertical: 8,
+  },
+  noteItem: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 8,
+  },
+  summaryNote: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primaryLight,
+  },
+  highlightNote: {
+    backgroundColor: HIGHLIGHT_COLOR,
+    borderColor: HIGHLIGHT_COLOR,
+  },
+  reflectionNote: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
+  noteBadge: {
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  summaryNoteBadge: {
+    backgroundColor: colors.primary,
+    color: '#FFFFFF',
+  },
+  highlightNoteBadge: {
+    backgroundColor: lightColors.text,
+    color: HIGHLIGHT_COLOR,
+  },
+  reflectionNoteBadge: {
+    backgroundColor: colors.inputBackground,
+    color: colors.textSecondary,
+  },
+  noteText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.text,
+  },
+  noteEditInput: {
+    minHeight: 180,
+    maxHeight: 320,
+    textAlignVertical: 'top',
+  },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',

@@ -97,6 +97,31 @@ export interface ReadingMessage {
   createdAt: number;
 }
 
+export interface ReadingNote {
+  id: string;
+  bookId: string;
+  kind: 'summary' | 'reflection';
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReadingHighlight {
+  id: string;
+  bookId: string;
+  content: string;
+  start: number;
+  end: number;
+  createdAt: number;
+}
+
+export interface ReadingBookSnapshot {
+  bookId: string;
+  title: string;
+  author: string;
+  updatedAt: number;
+}
+
 export type FocusTimerMode = 'countdown' | 'countup';
 
 export interface FocusTask {

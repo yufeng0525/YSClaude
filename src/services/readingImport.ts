@@ -85,7 +85,7 @@ export async function parseReadingBookAsset(
       author: '',
       format,
       text: cleanText,
-      chapters: buildFallbackChapters(cleanText),
+      chapters: buildTextChapters(cleanText),
       fileUri,
     };
   }
@@ -286,6 +286,30 @@ function decodeEntities(text: string): string {
 
 function buildFallbackChapters(text: string): ReadingChapter[] {
   return text ? [{ id: 'start', title: '正文', start: 0 }] : [];
+}
+
+function buildTextChapters(text: string): ReadingChapter[] {
+  if (!text) return [];
+  const chapters: ReadingChapter[] = [];
+  const chapterPattern =
+    /^(?:\s*)((?:第[零〇一二三四五六七八九十百千万\d]+[章节回卷部集篇].{0,40})|(?:Chapter\s+\d+.{0,40})|(?:CHAPTER\s+\d+.{0,40}))\s*$/gm;
+
+  let match: RegExpExecArray | null;
+  while ((match = chapterPattern.exec(text)) !== null) {
+    const title = (match[1] || '').trim();
+    if (!title) continue;
+    chapters.push({
+      id: `txt-${chapters.length + 1}`,
+      title,
+      start: match.index,
+    });
+  }
+
+  if (chapters.length === 0) return buildFallbackChapters(text);
+  if (chapters[0].start > 0) {
+    chapters.unshift({ id: 'txt-preface', title: '序章', start: 0 });
+  }
+  return chapters;
 }
 
 function titleFromFilename(nameOrUri: string): string {

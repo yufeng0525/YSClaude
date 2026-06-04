@@ -111,6 +111,35 @@ async function initTables(database: SQLite.SQLiteDatabase) {
 
     CREATE INDEX IF NOT EXISTS idx_reading_messages_book ON reading_messages(book_id, created_at ASC);
 
+    CREATE TABLE IF NOT EXISTS reading_notes (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reading_notes_book ON reading_notes(book_id, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS reading_highlights (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      start_offset INTEGER NOT NULL,
+      end_offset INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reading_highlights_book ON reading_highlights(book_id, start_offset ASC);
+
+    CREATE TABLE IF NOT EXISTS reading_book_snapshots (
+      book_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      author TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS focus_tasks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL DEFAULT '',
@@ -274,6 +303,91 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `);
     }
     await database.execAsync('PRAGMA user_version = 7;');
+  }
+
+  if (version < 8) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS reading_notes (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_reading_notes_book ON reading_notes(book_id, created_at ASC);
+
+      PRAGMA user_version = 8;
+    `);
+  }
+
+  if (version < 9) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS reading_highlights (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        start_offset INTEGER NOT NULL,
+        end_offset INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_reading_highlights_book ON reading_highlights(book_id, start_offset ASC);
+
+      PRAGMA user_version = 9;
+    `);
+  }
+
+  if (version < 10) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS reading_notes_next (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      INSERT OR REPLACE INTO reading_notes_next (id, book_id, kind, content, created_at, updated_at)
+      SELECT id, book_id, kind, content, created_at, updated_at FROM reading_notes;
+
+      DROP TABLE reading_notes;
+      ALTER TABLE reading_notes_next RENAME TO reading_notes;
+      CREATE INDEX IF NOT EXISTS idx_reading_notes_book ON reading_notes(book_id, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS reading_highlights_next (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        start_offset INTEGER NOT NULL,
+        end_offset INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      INSERT OR REPLACE INTO reading_highlights_next (id, book_id, content, start_offset, end_offset, created_at)
+      SELECT id, book_id, content, start_offset, end_offset, created_at FROM reading_highlights;
+
+      DROP TABLE reading_highlights;
+      ALTER TABLE reading_highlights_next RENAME TO reading_highlights;
+      CREATE INDEX IF NOT EXISTS idx_reading_highlights_book ON reading_highlights(book_id, start_offset ASC);
+
+      PRAGMA user_version = 10;
+    `);
+  }
+
+  if (version < 11) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS reading_book_snapshots (
+        book_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL
+      );
+
+      PRAGMA user_version = 11;
+    `);
   }
 }
 

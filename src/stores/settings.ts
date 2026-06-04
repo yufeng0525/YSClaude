@@ -64,6 +64,7 @@ export interface ReadingConfig {
   apiKey: string;
   model: string;
   systemPrompt: string;
+  summarySystemPrompt: string;
   sourceCharLimit: number;
   conversationMessageLimit: number;
 }
@@ -174,6 +175,8 @@ export const useSettingsStore = create<SettingsState>()(
         model: '',
         systemPrompt:
           '你是一个温柔、细致的 AI 共读伙伴。围绕用户正在阅读的原文回答，帮助解释、联想、提问和梳理，但不要剧透当前原文之后的内容。',
+        summarySystemPrompt:
+          '你是一个细致的 AI 共读记录整理者。只根据用户提供的聊天记录做总结，不补充书籍原文、阅读位置或外部信息。',
         sourceCharLimit: 4000,
         conversationMessageLimit: 8,
       },
