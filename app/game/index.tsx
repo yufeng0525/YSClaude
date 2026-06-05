@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
+import { ActorScriptMount, GameScriptPoolPanel, GameScriptSelect } from '../../src/components/GameScriptSection';
 import {
   GAME_MACARON_SWATCHES,
   useGameStore,
@@ -58,6 +59,7 @@ function createCharacter(colorIndex = 0): GameActor {
     name: '新角色',
     prompt: '你是副本中的参与角色。根据自己的设定、当前场景和聊天历史自然回应。',
     apiPresetId: null,
+    scriptEntryIds: [],
     bubbleColor: swatch.bg,
     textColor: swatch.text,
   };
@@ -85,7 +87,7 @@ export default function GameHomeScreen() {
   const ensureScenarioDefaults = useGameStore((state) => state.ensureScenarioDefaults);
 
   const [editingScenario, setEditingScenario] = useState<GameScenario | null>(null);
-  const [apiManagerVisible, setApiManagerVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
 
   function handleCreateScenario() {
     const id = createScenario();
@@ -95,7 +97,7 @@ export default function GameHomeScreen() {
 
   useEffect(() => {
     scenarios.forEach((scenario) => {
-      if (!scenario.summarizer || !scenario.hiddenRanges) {
+      if (!scenario.summarizer || !scenario.hiddenRanges || scenario.scripts?.length) {
         ensureScenarioDefaults(scenario.id);
       }
     });
@@ -116,8 +118,8 @@ export default function GameHomeScreen() {
           <Text style={styles.headerButtonText}>‹</Text>
         </Pressable>
         <Text style={styles.title}>Game</Text>
-        <Pressable style={styles.apiButton} onPress={() => setApiManagerVisible(true)}>
-          <Text style={styles.apiButtonText}>API</Text>
+        <Pressable style={styles.apiButton} onPress={() => setSettingsVisible(true)}>
+          <Text style={styles.apiButtonText}>设置</Text>
         </Pressable>
       </View>
 
@@ -233,7 +235,7 @@ export default function GameHomeScreen() {
           setEditingScenario(null);
         }}
       />
-      <ApiManager visible={apiManagerVisible} onClose={() => setApiManagerVisible(false)} />
+      <GameSettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
     </View>
   );
 }
@@ -248,8 +250,10 @@ function ScenarioEditor({
   onSave: (scenario: GameScenario) => void;
 }) {
   const apiPresets = useGameStore((state) => state.apiPresets);
+  const gameScripts = useGameStore((state) => state.gameScripts);
   const keyboardHeight = useKeyboardHeight();
   const [draft, setDraft] = useState<GameScenario | null>(scenario);
+  const selectedScript = draft ? gameScripts.find((script) => script.id === draft.scriptId) ?? null : null;
 
   useEffect(() => {
     setDraft(scenario);
@@ -297,6 +301,19 @@ function ScenarioEditor({
     );
   }
 
+  function updateScriptId(scriptId: string | null) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            scriptId,
+            narrator: { ...current.narrator, scriptEntryIds: [] },
+            characters: current.characters.map((actor) => ({ ...actor, scriptEntryIds: [] })),
+          }
+        : current
+    );
+  }
+
   function handleSave() {
     if (!draft) return;
     if (!draft.title.trim()) {
@@ -312,6 +329,8 @@ function ScenarioEditor({
       title: draft.title.trim(),
       description: draft.description.trim(),
       systemPrompt: draft.systemPrompt.trim(),
+      scriptId: draft.scriptId ?? null,
+      scripts: undefined,
       narrator: {
         ...draft.narrator,
         name: draft.narrator.name.trim(),
@@ -369,6 +388,8 @@ function ScenarioEditor({
               tall
             />
 
+            <GameScriptSelect value={draft.scriptId} onChange={updateScriptId} />
+
             <Text style={styles.sectionTitle}>旁白</Text>
             <View style={styles.editorCard}>
               <Field label="名称" value={draft.narrator.name} onChangeText={(name) => updateNarrator({ name })} />
@@ -384,6 +405,11 @@ function ScenarioEditor({
                 onChangeText={(prompt) => updateNarrator({ prompt })}
                 multiline
                 tall
+              />
+              <ActorScriptMount
+                actor={draft.narrator}
+                script={selectedScript}
+                onChange={(scriptEntryIds) => updateNarrator({ scriptEntryIds })}
               />
             </View>
 
@@ -441,6 +467,11 @@ function ScenarioEditor({
                   multiline
                   tall
                 />
+                <ActorScriptMount
+                  actor={actor}
+                  script={selectedScript}
+                  onChange={(scriptEntryIds) => updateCharacter(actor.id, { scriptEntryIds })}
+                />
               </View>
             ))}
           </ScrollView>
@@ -450,11 +481,12 @@ function ScenarioEditor({
   );
 }
 
-function ApiManager({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function GameSettingsModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const apiPresets = useGameStore((state) => state.apiPresets);
   const saveApiPreset = useGameStore((state) => state.saveApiPreset);
   const removeApiPreset = useGameStore((state) => state.removeApiPreset);
   const keyboardHeight = useKeyboardHeight();
+  const [activeTab, setActiveTab] = useState<'api' | 'script'>('api');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -600,82 +632,105 @@ function ApiManager({ visible, onClose }: { visible: boolean; onClose: () => voi
           <Pressable style={styles.headerButton} onPress={onClose}>
             <Text style={styles.headerButtonText}>‹</Text>
           </Pressable>
-          <Text style={styles.modalTitle}>副本 API</Text>
-          <Pressable style={styles.modalSaveButton} onPress={handleSave}>
-            <Text style={styles.modalSaveText}>保存</Text>
+          <Text style={styles.modalTitle}>Game 设置</Text>
+          {activeTab === 'api' ? (
+            <Pressable style={styles.modalSaveButton} onPress={handleSave}>
+              <Text style={styles.modalSaveText}>保存</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.headerButton} />
+          )}
+        </View>
+
+        <View style={styles.settingsTabs}>
+          <Pressable
+            style={[styles.settingsTab, activeTab === 'api' && styles.settingsTabActive]}
+            onPress={() => setActiveTab('api')}
+          >
+            <Text style={[styles.settingsTabText, activeTab === 'api' && styles.settingsTabTextActive]}>API 池</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.settingsTab, activeTab === 'script' && styles.settingsTabActive]}
+            onPress={() => setActiveTab('script')}
+          >
+            <Text style={[styles.settingsTabText, activeTab === 'script' && styles.settingsTabTextActive]}>剧本池</Text>
           </Pressable>
         </View>
 
-        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentInner}>
-          {apiPresets.length > 0 && (
-            <>
-              <Text style={styles.sectionTitle}>已保存</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetRow}>
-                {apiPresets.map((preset) => (
-                  <Pressable
-                    key={preset.id}
-                    style={[styles.presetChip, editingId === preset.id && styles.presetChipActive]}
-                    onPress={() => loadPreset(preset)}
-                    onLongPress={() => handleDelete(preset)}
-                  >
-                    <Text style={[styles.presetChipText, editingId === preset.id && styles.presetChipTextActive]}>
-                      {preset.name}
-                    </Text>
+        {activeTab === 'api' ? (
+          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentInner}>
+            {apiPresets.length > 0 && (
+              <>
+                <Text style={styles.sectionTitle}>已保存</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetRow}>
+                  {apiPresets.map((preset) => (
+                    <Pressable
+                      key={preset.id}
+                      style={[styles.presetChip, editingId === preset.id && styles.presetChipActive]}
+                      onPress={() => loadPreset(preset)}
+                      onLongPress={() => handleDelete(preset)}
+                    >
+                      <Text style={[styles.presetChipText, editingId === preset.id && styles.presetChipTextActive]}>
+                        {preset.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                  <Pressable style={styles.presetChip} onPress={resetForm}>
+                    <Text style={styles.presetChipText}>新建</Text>
                   </Pressable>
-                ))}
-                <Pressable style={styles.presetChip} onPress={resetForm}>
-                  <Text style={styles.presetChipText}>新建</Text>
-                </Pressable>
-              </ScrollView>
-            </>
-          )}
-
-          <Text style={styles.sectionTitle}>配置</Text>
-          <Field label="名称" value={name} onChangeText={setName} placeholder="例如：旁白模型" />
-          <Field label="Base URL" value={baseUrl} onChangeText={setBaseUrl} placeholder="https://api.openai.com/v1" autoCapitalize="none" />
-          <Field label="API Key" value={apiKey} onChangeText={setApiKey} placeholder="sk-..." secureTextEntry autoCapitalize="none" />
-          <View style={styles.field}>
-            <Text style={styles.label}>Model</Text>
-            <View style={styles.modelRow}>
-              <TextInput
-                style={[styles.input, styles.modelInput]}
-                value={model}
-                onChangeText={setModel}
-                placeholder="gpt-4.1"
-                placeholderTextColor={colors.textTertiary}
-                autoCapitalize="none"
-              />
-              <Pressable style={styles.fetchButton} onPress={handleFetchModels} disabled={fetching}>
-                {fetching ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.fetchButtonText}>拉取</Text>}
-              </Pressable>
-            </View>
-          </View>
-          <View style={styles.twoColumnRow}>
-            <Field
-              label="temperature"
-              value={temperature}
-              onChangeText={setTemperature}
-              placeholder="可选"
-              keyboardType="decimal-pad"
-              compact
-            />
-            <Field
-              label="max tokens"
-              value={maxTokens}
-              onChangeText={setMaxTokens}
-              placeholder="可选"
-              keyboardType="number-pad"
-              compact
-            />
-          </View>
-          <Pressable style={styles.testConnectionButton} onPress={handleTest} disabled={testing}>
-            {testing ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <Text style={styles.testConnectionText}>测试连接</Text>
+                </ScrollView>
+              </>
             )}
-          </Pressable>
-        </ScrollView>
+
+            <Text style={styles.sectionTitle}>配置</Text>
+            <Field label="名称" value={name} onChangeText={setName} placeholder="例如：旁白模型" />
+            <Field label="Base URL" value={baseUrl} onChangeText={setBaseUrl} placeholder="https://api.openai.com/v1" autoCapitalize="none" />
+            <Field label="API Key" value={apiKey} onChangeText={setApiKey} placeholder="sk-..." secureTextEntry autoCapitalize="none" />
+            <View style={styles.field}>
+              <Text style={styles.label}>Model</Text>
+              <View style={styles.modelRow}>
+                <TextInput
+                  style={[styles.input, styles.modelInput]}
+                  value={model}
+                  onChangeText={setModel}
+                  placeholder="gpt-4.1"
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="none"
+                />
+                <Pressable style={styles.fetchButton} onPress={handleFetchModels} disabled={fetching}>
+                  {fetching ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.fetchButtonText}>拉取</Text>}
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.twoColumnRow}>
+              <Field
+                label="temperature"
+                value={temperature}
+                onChangeText={setTemperature}
+                placeholder="可选"
+                keyboardType="decimal-pad"
+                compact
+              />
+              <Field
+                label="max tokens"
+                value={maxTokens}
+                onChangeText={setMaxTokens}
+                placeholder="可选"
+                keyboardType="number-pad"
+                compact
+              />
+            </View>
+            <Pressable style={styles.testConnectionButton} onPress={handleTest} disabled={testing}>
+              {testing ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text style={styles.testConnectionText}>测试连接</Text>
+              )}
+            </Pressable>
+          </ScrollView>
+        ) : (
+          <GameScriptPoolPanel />
+        )}
 
         <Modal visible={showModels} transparent animationType="fade" onRequestClose={() => setShowModels(false)}>
           <Pressable style={styles.overlay} onPress={() => setShowModels(false)}>
@@ -1095,6 +1150,37 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   modalContentInner: {
     padding: 18,
     paddingBottom: 40,
+  },
+  settingsTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 6,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.border,
+  },
+  settingsTab: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsTabActive: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  settingsTabText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  settingsTabTextActive: {
+    color: colors.primary,
   },
   editorCard: {
     backgroundColor: colors.surface,

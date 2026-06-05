@@ -36,6 +36,7 @@ export interface GameActor {
   name: string;
   prompt: string;
   apiPresetId: string | null;
+  scriptEntryIds?: string[];
   avatarUri?: string;
   bubbleColor?: string;
   textColor?: string;
@@ -46,11 +47,31 @@ export interface GameHiddenRange {
   to: number;
 }
 
+export interface GameScriptEntry {
+  id: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+  keys?: string[];
+  source?: 'manual' | 'sillytavern';
+}
+
+export interface GameScript {
+  id: string;
+  title: string;
+  description: string;
+  entries: GameScriptEntry[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface GameScenario {
   id: string;
   title: string;
   description: string;
   systemPrompt: string;
+  scriptId?: string | null;
+  scripts?: GameScript[];
   cardFaceUri?: string;
   narrator: GameActor;
   summarizer?: GameActor;
@@ -75,6 +96,7 @@ export interface GameMessage {
 interface GameState {
   _hydrated: boolean;
   apiPresets: GameApiPreset[];
+  gameScripts: GameScript[];
   scenarios: GameScenario[];
   messagesByScenario: Record<string, GameMessage[]>;
   activeGeneratingActorId: string | null;
@@ -86,6 +108,8 @@ interface GameState {
   removeScenario: (scenarioId: string) => void;
   saveApiPreset: (preset: Omit<GameApiPreset, 'id'> & { id?: string }) => string;
   removeApiPreset: (presetId: string) => void;
+  saveGameScript: (script: Omit<GameScript, 'id' | 'createdAt' | 'updatedAt'> & Partial<Pick<GameScript, 'id' | 'createdAt' | 'updatedAt'>>) => string;
+  removeGameScript: (scriptId: string) => void;
   addUserMessage: (
     scenarioId: string,
     content: string,
@@ -112,6 +136,7 @@ function createActor(type: GameActorType, name: string, prompt: string, colorInd
     name,
     prompt,
     apiPresetId: null,
+    scriptEntryIds: [],
     bubbleColor: type === 'character' ? swatch.bg : undefined,
     textColor: type === 'character' ? swatch.text : undefined,
   };
@@ -132,6 +157,7 @@ function createDefaultScenario(): GameScenario {
     title: '新副本',
     description: '一个独立的多角色情景房间',
     systemPrompt: '这是一个独立于主聊天的情景副本。保持世界观一致，尊重用户输入，只输出当前被调用身份的发言。',
+    scriptId: null,
     narrator: createActor(
       'narrator',
       '旁白',
@@ -154,16 +180,32 @@ function createDefaultScenario(): GameScenario {
   };
 }
 
+function normalizeActor(actor: GameActor): GameActor {
+  return {
+    ...actor,
+    scriptEntryIds: Array.isArray(actor.scriptEntryIds) ? actor.scriptEntryIds : [],
+  };
+}
+
 function normalizeScenario(scenario: GameScenario): GameScenario {
   return {
     ...scenario,
-    summarizer: scenario.summarizer ?? createSummarizer(),
+    scriptId: scenario.scriptId ?? null,
+    narrator: normalizeActor(scenario.narrator),
+    summarizer: scenario.summarizer ? normalizeActor(scenario.summarizer) : createSummarizer(),
     showAvatars: scenario.showAvatars ?? true,
     hiddenRanges: scenario.hiddenRanges ?? [],
     characters: scenario.characters.map((actor, index) => {
-      if (actor.type !== 'character' || (actor.bubbleColor && actor.textColor)) return actor;
+      const normalizedActor = normalizeActor(actor);
+      if (normalizedActor.type !== 'character' || (normalizedActor.bubbleColor && normalizedActor.textColor)) {
+        return normalizedActor;
+      }
       const swatch = GAME_MACARON_SWATCHES[index % GAME_MACARON_SWATCHES.length];
-      return { ...actor, bubbleColor: actor.bubbleColor || swatch.bg, textColor: actor.textColor || swatch.text };
+      return {
+        ...normalizedActor,
+        bubbleColor: normalizedActor.bubbleColor || swatch.bg,
+        textColor: normalizedActor.textColor || swatch.text,
+      };
     }),
   };
 }
@@ -184,13 +226,47 @@ function updateScenarioTimestamp(scenarios: GameScenario[], scenarioId: string):
   );
 }
 
-function buildSystemPrompt(scenario: GameScenario, actor: GameActor): string {
+function selectedScenarioScript(scenario: GameScenario, gameScripts: GameScript[]): GameScript | null {
+  if (scenario.scriptId) {
+    const selected = gameScripts.find((script) => script.id === scenario.scriptId);
+    if (selected) return selected;
+    const legacySelected = scenario.scripts?.find((script) => script.id === scenario.scriptId);
+    if (legacySelected) return legacySelected;
+  }
+  return null;
+}
+
+function mountedScriptEntries(script: GameScript | null, actor: GameActor): GameScriptEntry[] {
+  if (!script) return [];
+  const entryById = new Map(script.entries.map((entry) => [entry.id, entry]));
+
+  return (actor.scriptEntryIds ?? [])
+    .map((entryId) => entryById.get(entryId))
+    .filter((entry): entry is GameScriptEntry => !!entry && entry.enabled !== false && !!entry.content.trim());
+}
+
+function buildScriptEntriesPrompt(script: GameScript | null, actor: GameActor): string {
+  const entries = mountedScriptEntries(script, actor);
+  if (entries.length === 0) return '';
+
+  return [
+    '剧本条目：',
+    ...entries.map((entry, index) => {
+      const keys = entry.keys?.length ? `\n关键词：${entry.keys.join('、')}` : '';
+      return `[${index + 1}] ${entry.title}${keys}\n${entry.content.trim()}`;
+    }),
+  ].join('\n\n');
+}
+
+function buildSystemPrompt(scenario: GameScenario, actor: GameActor, gameScripts: GameScript[]): string {
   const participants = actorList(scenario)
     .map((item) => {
       const label = item.type === 'narrator' ? '旁白' : item.type === 'summary' ? '总结AI' : '角色';
       return `${label}：${item.name}`;
     })
     .join('\n');
+
+  const scriptEntriesPrompt = buildScriptEntriesPrompt(selectedScenarioScript(scenario, gameScripts), actor);
 
   return [
     '你正在运行应用内的独立游戏副本。这个副本与主聊天完全隔离。',
@@ -202,6 +278,8 @@ function buildSystemPrompt(scenario: GameScenario, actor: GameActor): string {
     '副本总设定：',
     scenario.systemPrompt,
     '',
+    scriptEntriesPrompt,
+    scriptEntriesPrompt ? '' : null,
     '参与者：',
     participants,
     '',
@@ -213,7 +291,7 @@ function buildSystemPrompt(scenario: GameScenario, actor: GameActor): string {
         : '身份类型：参与角色',
     '当前身份设定：',
     actor.prompt,
-  ].join('\n');
+  ].filter((item): item is string => item !== null).join('\n');
 }
 
 function buildApiMessages(messages: GameMessage[]): { role: string; content: string }[] {
@@ -254,11 +332,63 @@ function mergeHiddenRanges(ranges: GameHiddenRange[]): GameHiddenRange[] {
   return merged;
 }
 
+function normalizeGameScript(script: GameScript): GameScript {
+  return {
+    ...script,
+    title: script.title.trim() || '未命名剧本',
+    description: script.description.trim(),
+    entries: script.entries
+      .map((entry) => ({
+        ...entry,
+        title: entry.title.trim() || '未命名条目',
+        content: entry.content.trim(),
+        enabled: entry.enabled !== false,
+        keys: (entry.keys ?? []).map((key) => key.trim()).filter(Boolean),
+      })),
+  };
+}
+
+function migrateScenarioScripts(scenarios: GameScenario[], gameScripts: GameScript[]) {
+  const nextScripts = [...gameScripts];
+  const knownScriptIds = new Set(nextScripts.map((script) => script.id));
+
+  const nextScenarios = scenarios.map((scenario) => {
+    const normalized = normalizeScenario(scenario);
+    const legacyScripts = Array.isArray(scenario.scripts) ? scenario.scripts : [];
+    if (legacyScripts.length === 0) {
+      return { ...normalized, scripts: undefined };
+    }
+
+    legacyScripts.forEach((script) => {
+      if (!knownScriptIds.has(script.id)) {
+        nextScripts.push(normalizeGameScript(script));
+        knownScriptIds.add(script.id);
+      }
+    });
+
+    return {
+      ...normalized,
+      scriptId: normalized.scriptId ?? legacyScripts[0]?.id ?? null,
+      scripts: undefined,
+    };
+  });
+
+  return { scenarios: nextScenarios, gameScripts: nextScripts };
+}
+
+function stripScriptEntryIds(actor: GameActor, removedEntryIds: Set<string>): GameActor {
+  return {
+    ...actor,
+    scriptEntryIds: (actor.scriptEntryIds ?? []).filter((entryId) => !removedEntryIds.has(entryId)),
+  };
+}
+
 export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
       _hydrated: false,
       apiPresets: [],
+      gameScripts: [],
       scenarios: [],
       messagesByScenario: {},
       activeGeneratingActorId: null,
@@ -266,8 +396,11 @@ export const useGameStore = create<GameState>()(
 
       ensureScenarioDefaults: (scenarioId) => {
         set((state) => ({
-          scenarios: state.scenarios.map((scenario) =>
-            scenario.id === scenarioId ? normalizeScenario(scenario) : scenario
+          ...migrateScenarioScripts(
+            state.scenarios.map((scenario) =>
+              scenario.id === scenarioId ? normalizeScenario(scenario) : scenario
+            ),
+            state.gameScripts
           ),
         }));
       },
@@ -357,6 +490,48 @@ export const useGameStore = create<GameState>()(
           })),
           error: null,
         }));
+      },
+
+      saveGameScript: (script) => {
+        const now = Date.now();
+        const id = script.id || randomUUID();
+        const normalized = normalizeGameScript({
+          id,
+          title: script.title,
+          description: script.description,
+          entries: script.entries,
+          createdAt: script.createdAt ?? now,
+          updatedAt: now,
+        });
+
+        set((state) => {
+          const exists = state.gameScripts.some((item) => item.id === id);
+          return {
+            gameScripts: exists
+              ? state.gameScripts.map((item) => (item.id === id ? normalized : item))
+              : [...state.gameScripts, normalized],
+            error: null,
+          };
+        });
+        return id;
+      },
+
+      removeGameScript: (scriptId) => {
+        set((state) => {
+          const script = state.gameScripts.find((item) => item.id === scriptId);
+          const removedEntryIds = new Set(script?.entries.map((entry) => entry.id) ?? []);
+          return {
+            gameScripts: state.gameScripts.filter((item) => item.id !== scriptId),
+            scenarios: state.scenarios.map((scenario) => ({
+              ...scenario,
+              scriptId: scenario.scriptId === scriptId ? null : scenario.scriptId,
+              narrator: stripScriptEntryIds(scenario.narrator, removedEntryIds),
+              summarizer: scenario.summarizer ? stripScriptEntryIds(scenario.summarizer, removedEntryIds) : undefined,
+              characters: scenario.characters.map((actor) => stripScriptEntryIds(actor, removedEntryIds)),
+            })),
+            error: null,
+          };
+        });
       },
 
       addUserMessage: (scenarioId, content, sender) => {
@@ -464,7 +639,7 @@ export const useGameStore = create<GameState>()(
               maxTokens: preset.maxTokens,
               temperature: preset.temperature,
               messages: [
-                { role: 'system', content: buildSystemPrompt(scenario, actor) },
+                { role: 'system', content: buildSystemPrompt(scenario, actor, get().gameScripts) },
                 ...buildApiMessages(apiHistory),
               ],
             },
@@ -588,6 +763,7 @@ export const useGameStore = create<GameState>()(
       storage: createJSONStorage(() => sqliteStorage),
       partialize: (state) => ({
         apiPresets: state.apiPresets,
+        gameScripts: state.gameScripts,
         scenarios: state.scenarios,
         messagesByScenario: state.messagesByScenario,
       }),

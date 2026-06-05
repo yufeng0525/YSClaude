@@ -18,6 +18,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { lightColors, useThemeColors, type ThemeColors } from '../../src/theme/colors';
+import { ActorScriptMount, GameScriptSelect } from '../../src/components/GameScriptSection';
 import {
   GAME_MACARON_SWATCHES,
   useGameStore,
@@ -122,7 +123,7 @@ export default function GameRoomScreen() {
   const showAvatars = scenario?.showAvatars ?? true;
 
   useEffect(() => {
-    if (scenario && (!scenario.summarizer || !scenario.hiddenRanges)) {
+    if (scenario && (!scenario.summarizer || !scenario.hiddenRanges || scenario.scripts?.length)) {
       ensureScenarioDefaults(scenario.id);
     }
   }, [ensureScenarioDefaults, scenario]);
@@ -667,8 +668,10 @@ function ScenarioEditModal({
   onSave: (scenario: GameScenario) => void;
 }) {
   const apiPresets = useGameStore((state) => state.apiPresets);
+  const gameScripts = useGameStore((state) => state.gameScripts);
   const keyboardHeight = useKeyboardHeight();
   const [draft, setDraft] = useState<GameScenario>(scenario);
+  const selectedScript = gameScripts.find((script) => script.id === draft.scriptId) ?? null;
 
   useEffect(() => {
     if (visible) {
@@ -698,6 +701,15 @@ function ScenarioEditModal({
     setDraft((current) => ({
       ...current,
       characters: current.characters.map((actor) => (actor.id === actorId ? { ...actor, ...patch } : actor)),
+    }));
+  }
+
+  function updateScriptId(scriptId: string | null) {
+    setDraft((current) => ({
+      ...current,
+      scriptId,
+      narrator: { ...current.narrator, scriptEntryIds: [] },
+      characters: current.characters.map((actor) => ({ ...actor, scriptEntryIds: [] })),
     }));
   }
 
@@ -736,6 +748,8 @@ function ScenarioEditModal({
       title: draft.title.trim(),
       description: draft.description.trim(),
       systemPrompt: draft.systemPrompt.trim(),
+      scriptId: draft.scriptId ?? null,
+      scripts: undefined,
       narrator: {
         ...draft.narrator,
         name: draft.narrator.name.trim() || '旁白',
@@ -792,6 +806,8 @@ function ScenarioEditModal({
             tall
           />
 
+          <GameScriptSelect value={draft.scriptId} onChange={updateScriptId} />
+
           <Text style={styles.panelSectionTitle}>用户</Text>
           <View style={styles.editorCard}>
             <AvatarPicker
@@ -825,6 +841,11 @@ function ScenarioEditModal({
               onChangeText={(prompt) => updateNarrator({ prompt })}
               multiline
               tall
+            />
+            <ActorScriptMount
+              actor={draft.narrator}
+              script={selectedScript}
+              onChange={(scriptEntryIds) => updateNarrator({ scriptEntryIds })}
             />
           </View>
 
@@ -881,6 +902,11 @@ function ScenarioEditModal({
                 onChangeText={(prompt) => updateCharacter(actor.id, { prompt })}
                 multiline
                 tall
+              />
+              <ActorScriptMount
+                actor={actor}
+                script={selectedScript}
+                onChange={(scriptEntryIds) => updateCharacter(actor.id, { scriptEntryIds })}
               />
             </View>
           ))}
