@@ -107,6 +107,36 @@ export interface NativeToolConfig {
   calendarEnabled: boolean;
 }
 
+export interface PhoneFileRoot {
+  id: string;
+  name: string;
+  uri: string;
+  kind?: 'directory' | 'file';
+  mimeType?: string;
+  size?: number;
+  addedAt: number;
+}
+
+export interface PhoneFileAgentConfig {
+  enabled: boolean;
+  includeAppDocument: boolean;
+  roots: PhoneFileRoot[];
+  maxToolCalls: number;
+}
+
+export interface ShizukuFileRoot {
+  id: string;
+  name: string;
+  path: string;
+  addedAt: number;
+}
+
+export interface ShizukuFileConfig {
+  enabled: boolean;
+  roots: ShizukuFileRoot[];
+  maxToolCalls: number;
+}
+
 export interface ReadingConfig {
   baseUrl: string;
   apiKey: string;
@@ -212,6 +242,8 @@ interface SettingsState {
   webInteractionConfig: WebInteractionConfig;
   hotboardConfig: HotboardConfig;
   nativeToolConfig: NativeToolConfig;
+  phoneFileAgentConfig: PhoneFileAgentConfig;
+  shizukuFileConfig: ShizukuFileConfig;
   readingConfig: ReadingConfig;
   floatingBallConfig: FloatingBallConfig;
   periodConfig: PeriodConfig;
@@ -232,6 +264,8 @@ interface SettingsState {
   setWebInteractionConfig: (config: Partial<WebInteractionConfig>) => void;
   setHotboardConfig: (config: Partial<HotboardConfig>) => void;
   setNativeToolConfig: (config: Partial<NativeToolConfig>) => void;
+  setPhoneFileAgentConfig: (config: Partial<PhoneFileAgentConfig>) => void;
+  setShizukuFileConfig: (config: Partial<ShizukuFileConfig>) => void;
   setReadingConfig: (config: Partial<ReadingConfig>) => void;
   setFloatingBallConfig: (config: Partial<FloatingBallConfig>) => void;
   setPeriodConfig: (config: Partial<PeriodConfig>) => void;
@@ -303,6 +337,17 @@ export const useSettingsStore = create<SettingsState>()(
         appUsageStatsEnabled: false,
         calendarEnabled: false,
       },
+      phoneFileAgentConfig: {
+        enabled: false,
+        includeAppDocument: true,
+        roots: [],
+        maxToolCalls: 6,
+      },
+      shizukuFileConfig: {
+        enabled: false,
+        roots: [],
+        maxToolCalls: 6,
+      },
       readingConfig: {
         baseUrl: '',
         apiKey: '',
@@ -367,6 +412,25 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ hotboardConfig: { ...state.hotboardConfig, ...config } })),
       setNativeToolConfig: (config) =>
         set((state) => ({ nativeToolConfig: { ...state.nativeToolConfig, ...config } })),
+      setPhoneFileAgentConfig: (config) =>
+        set((state) => ({
+          phoneFileAgentConfig: {
+            ...(state.phoneFileAgentConfig || {
+              enabled: false,
+              includeAppDocument: true,
+              roots: [],
+              maxToolCalls: 6,
+            }),
+            ...config,
+          },
+        })),
+      setShizukuFileConfig: (config) =>
+        set((state) => ({
+          shizukuFileConfig: {
+            ...(state.shizukuFileConfig || { enabled: false, roots: [], maxToolCalls: 6 }),
+            ...config,
+          },
+        })),
       setReadingConfig: (config) =>
         set((state) => ({ readingConfig: { ...state.readingConfig, ...config } })),
       setFloatingBallConfig: (config) =>
@@ -532,6 +596,8 @@ export const useSettingsStore = create<SettingsState>()(
         webInteractionConfig: state.webInteractionConfig,
         hotboardConfig: state.hotboardConfig,
         nativeToolConfig: state.nativeToolConfig,
+        phoneFileAgentConfig: state.phoneFileAgentConfig,
+        shizukuFileConfig: state.shizukuFileConfig,
         readingConfig: state.readingConfig,
         floatingBallConfig: state.floatingBallConfig,
         periodConfig: state.periodConfig,

@@ -1,6 +1,8 @@
 import { hotboardTool } from './toolModules/hotboard';
 import { memoryVaultTool, uploadDiary } from './toolModules/memoryVault';
 import { nativeDeviceTool } from './toolModules/nativeDevice';
+import { phoneFileTool } from './toolModules/phoneFile';
+import { shizukuFileTool } from './toolModules/shizukuFile';
 import { webPageReaderTool } from './toolModules/webPageReader';
 import { webSearchTool } from './toolModules/webSearch';
 import { webViewTool } from './toolModules/webView';
@@ -21,6 +23,8 @@ const TOOL_MODULES: ToolModule[] = [
   hotboardTool,
   webViewTool,
   nativeDeviceTool,
+  phoneFileTool,
+  shizukuFileTool,
 ];
 
 export const TOOL_LABELS: Record<string, string> = TOOL_MODULES.reduce(

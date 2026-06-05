@@ -393,6 +393,7 @@ export const useMusicStore = create<MusicState>()(
       currentTimeMs: 0,
       durationMs: playableTracks[0]?.durationMs ?? DEMO_TRACKS[0].durationMs ?? 0,
       currentLyricIndex: 0,
+      lastFinishedTrackId: null,
       error: null,
     });
   },

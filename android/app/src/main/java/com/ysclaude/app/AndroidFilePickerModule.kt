@@ -21,7 +21,11 @@ class AndroidFilePickerModule(
 
   private val activityEventListener: ActivityEventListener = object : BaseActivityEventListener() {
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
-      if (requestCode != REQUEST_PICK_READING_BOOK) return
+      if (
+        requestCode != REQUEST_PICK_READING_BOOK &&
+        requestCode != REQUEST_PICK_PHONE_AGENT_FILE &&
+        requestCode != REQUEST_PICK_PHONE_AGENT_DIRECTORY
+      ) return
 
       val promise = pendingPromise ?: return
       pendingPromise = null
@@ -37,6 +41,20 @@ class AndroidFilePickerModule(
         return
       }
 
+      if (requestCode == REQUEST_PICK_PHONE_AGENT_DIRECTORY) {
+        try {
+          reactContext.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION
+          )
+        } catch (_: Exception) {
+          // Some providers do not expose persistable grants. Continue with the URI
+          // so it can still work during the current app session.
+        }
+        promise.resolve(buildDirectoryResult(uri))
+        return
+      }
+
       promise.resolve(buildFileResult(uri))
     }
   }
@@ -47,6 +65,43 @@ class AndroidFilePickerModule(
 
   @ReactMethod
   fun pickReadingBook(promise: Promise) {
+    openFileChooser(promise, "选择电子书来源", REQUEST_PICK_READING_BOOK)
+  }
+
+  @ReactMethod
+  fun pickPhoneAgentFile(promise: Promise) {
+    openFileChooser(promise, "选择文件来源", REQUEST_PICK_PHONE_AGENT_FILE)
+  }
+
+  @ReactMethod
+  fun pickPhoneAgentDirectory(promise: Promise) {
+    val activity = reactContext.currentActivity
+    if (activity == null) {
+      promise.reject("NO_ACTIVITY", "Current Android activity is not available")
+      return
+    }
+    if (pendingPromise != null) {
+      promise.reject("PICKER_BUSY", "A file picker is already open")
+      return
+    }
+
+    pendingPromise = promise
+
+    val openIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(openIntent, "选择文件夹来源")
+
+    try {
+      activity.startActivityForResult(chooser, REQUEST_PICK_PHONE_AGENT_DIRECTORY)
+    } catch (error: Exception) {
+      pendingPromise = null
+      promise.reject("OPEN_PICKER_FAILED", error)
+    }
+  }
+
+  private fun openFileChooser(promise: Promise, title: String, requestCode: Int) {
     val activity = reactContext.currentActivity
     if (activity == null) {
       promise.reject("NO_ACTIVITY", "Current Android activity is not available")
@@ -66,10 +121,10 @@ class AndroidFilePickerModule(
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    val chooser = Intent.createChooser(openIntent, "选择电子书来源")
+    val chooser = Intent.createChooser(openIntent, title)
 
     try {
-      activity.startActivityForResult(chooser, REQUEST_PICK_READING_BOOK)
+      activity.startActivityForResult(chooser, requestCode)
     } catch (error: Exception) {
       pendingPromise = null
       promise.reject("OPEN_PICKER_FAILED", error)
@@ -109,7 +164,20 @@ class AndroidFilePickerModule(
     return result
   }
 
+  private fun buildDirectoryResult(uri: Uri): WritableNativeMap {
+    val result = WritableNativeMap()
+    val lastSegment = uri.lastPathSegment ?: "用户选择文件夹"
+    val name = lastSegment.substringAfterLast(':').ifBlank { lastSegment }
+
+    result.putString("uri", uri.toString())
+    result.putString("name", name)
+
+    return result
+  }
+
   companion object {
     private const val REQUEST_PICK_READING_BOOK = 4108
+    private const val REQUEST_PICK_PHONE_AGENT_FILE = 4109
+    private const val REQUEST_PICK_PHONE_AGENT_DIRECTORY = 4110
   }
 }

@@ -40,6 +40,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.bumptech.glide.Glide
 import com.facebook.react.bridge.Arguments
@@ -234,7 +235,69 @@ class FloatingBallModule(
           promise.reject("OVERLAY_PERMISSION_REQUIRED", "Desktop lyric overlay permission is not granted")
           return@post
         }
-        showDesktopLyricInternal(text, lyricProgress, title, artist, artworkUrl, songProgress, isPlaying, backgroundUri)
+        showDesktopLyricInternal(
+          text,
+          lyricProgress,
+          title,
+          artist,
+          artworkUrl,
+          songProgress,
+          isPlaying,
+          backgroundUri,
+          "lyrics",
+          "",
+          "",
+          "",
+          "",
+          false
+        )
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("SHOW_DESKTOP_LYRIC_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun showDesktopLyricPanel(
+    text: String,
+    lyricProgress: Double,
+    title: String,
+    artist: String,
+    artworkUrl: String,
+    songProgress: Double,
+    isPlaying: Boolean,
+    backgroundUri: String,
+    panelMode: String,
+    radioStatus: String,
+    radioScript: String,
+    radioTrack: String,
+    radioActionLabel: String,
+    radioActionEnabled: Boolean,
+    promise: Promise
+  ) {
+    mainHandler.post {
+      try {
+        if (!canDrawOverlays()) {
+          promise.reject("OVERLAY_PERMISSION_REQUIRED", "Desktop lyric overlay permission is not granted")
+          return@post
+        }
+        showDesktopLyricInternal(
+          text,
+          lyricProgress,
+          title,
+          artist,
+          artworkUrl,
+          songProgress,
+          isPlaying,
+          backgroundUri,
+          panelMode,
+          radioStatus,
+          radioScript,
+          radioTrack,
+          radioActionLabel,
+          radioActionEnabled
+        )
         promise.resolve(true)
       } catch (error: Exception) {
         promise.reject("SHOW_DESKTOP_LYRIC_FAILED", error)
@@ -799,7 +862,13 @@ class FloatingBallModule(
     rawArtworkUrl: String,
     rawSongProgress: Double,
     isPlaying: Boolean,
-    rawBackgroundUri: String
+    rawBackgroundUri: String,
+    rawPanelMode: String,
+    rawRadioStatus: String,
+    rawRadioScript: String,
+    rawRadioTrack: String,
+    rawRadioActionLabel: String,
+    radioActionEnabled: Boolean
   ) {
     val text = normalizeDesktopLyricText(rawText)
     if (text.isBlank()) {
@@ -825,10 +894,16 @@ class FloatingBallModule(
       rawArtworkUrl.trim(),
       rawSongProgress.toFloat(),
       isPlaying,
-      rawBackgroundUri.trim()
+      rawBackgroundUri.trim(),
+      rawPanelMode.trim(),
+      normalizeDesktopLyricText(rawRadioStatus),
+      normalizeDesktopLyricText(rawRadioScript),
+      normalizeDesktopLyricText(rawRadioTrack),
+      normalizeDesktopLyricText(rawRadioActionLabel),
+      radioActionEnabled
     )
     if (lyric.parent == null) {
-      val width = (screenWidth() * 0.6f).toInt()
+      val width = (screenWidth() * 0.7f).toInt()
       desktopLyricParams = WindowManager.LayoutParams(
         width,
         lyric.preferredHeight(),
@@ -1221,15 +1296,65 @@ private class DesktopLyricCardView(
   }
   private val progressView = DesktopMusicProgressView(context)
   private val playPauseButton = controlButton(">", "toggle_play")
+  private val viewToggleButton = controlButton("FM", "toggle_view")
+  private val radioMetaView = TextView(context).apply {
+    textSize = 12f
+    setTextColor(Color.argb(168, 22, 22, 22))
+    maxLines = 1
+    ellipsize = TextUtils.TruncateAt.END
+    includeFontPadding = false
+  }
+  private val radioStatusView = TextView(context).apply {
+    textSize = 13f
+    setTextColor(Color.rgb(22, 22, 22))
+    maxLines = 2
+    ellipsize = TextUtils.TruncateAt.END
+    includeFontPadding = false
+    setLineSpacing(dp(2).toFloat(), 1.0f)
+  }
+  private val radioScriptView = TextView(context).apply {
+    textSize = 14f
+    setTextColor(Color.argb(214, 22, 22, 22))
+    includeFontPadding = false
+    setLineSpacing(dp(3).toFloat(), 1.0f)
+  }
+  private val radioActionButton = controlButton("开台", "radio_action").apply {
+    textSize = 13f
+  }
+  private val radioBackButton = controlButton("歌词", "toggle_view").apply {
+    textSize = 13f
+  }
+  private val radioScriptScroll = ScrollView(context).apply {
+    isVerticalScrollBarEnabled = true
+    overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+    setPadding(0, dp(6), 0, 0)
+    setOnTouchListener { view, event ->
+      view.parent?.requestDisallowInterceptTouchEvent(event.actionMasked != MotionEvent.ACTION_UP)
+      false
+    }
+    addView(radioScriptView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+  }
+  private val radioButtonRow = LinearLayout(context).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER
+  }
   private val root = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     gravity = Gravity.CENTER
+  }
+  private lateinit var infoRow: LinearLayout
+  private lateinit var controlsRow: LinearLayout
+  private val radioContent = LinearLayout(context).apply {
+    orientation = LinearLayout.VERTICAL
+    visibility = View.GONE
+    setPadding(0, dp(6), 0, 0)
   }
   private val expandedContent = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     visibility = View.GONE
   }
   private var isExpanded = false
+  private var panelMode = "lyrics"
   private var lastArtworkUrl = ""
   private var lastBackgroundUri = ""
   private val clipPath = Path()
@@ -1238,7 +1363,6 @@ private class DesktopLyricCardView(
   init {
     isClickable = true
     setWillNotDraw(false)
-    applyExpandedState()
     clipToOutline = true
     outlineProvider = object : ViewOutlineProvider() {
       override fun getOutline(view: View, outline: Outline) {
@@ -1252,7 +1376,7 @@ private class DesktopLyricCardView(
     addView(root, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     root.addView(lyricText, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
-    val infoRow = LinearLayout(context).apply {
+    infoRow = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
       setPadding(0, dp(12), 0, 0)
@@ -1270,10 +1394,13 @@ private class DesktopLyricCardView(
     })
     infoRow.addView(infoColumn, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
 
-    val controls = LinearLayout(context).apply {
+    controlsRow = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER
       setPadding(0, dp(12), 0, 0)
+      addView(viewToggleButton, LinearLayout.LayoutParams(dp(42), dp(36)).apply {
+        rightMargin = dp(8)
+      })
       addView(controlButton("|<", "previous"), LinearLayout.LayoutParams(dp(42), dp(36)))
       addView(playPauseButton, LinearLayout.LayoutParams(dp(48), dp(36)).apply {
         leftMargin = dp(8)
@@ -1285,9 +1412,20 @@ private class DesktopLyricCardView(
       })
     }
 
+    radioButtonRow.addView(radioActionButton, LinearLayout.LayoutParams(dp(88), dp(32)).apply {
+      rightMargin = dp(8)
+    })
+    radioButtonRow.addView(radioBackButton, LinearLayout.LayoutParams(dp(72), dp(32)))
+    radioContent.addView(radioButtonRow, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(32)))
+    radioContent.addView(radioScriptScroll, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
+      topMargin = dp(8)
+    })
+
     expandedContent.addView(infoRow, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-    expandedContent.addView(controls, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-    root.addView(expandedContent, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    expandedContent.addView(radioContent, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+    expandedContent.addView(controlsRow, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    root.addView(expandedContent, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+    applyExpandedState()
   }
 
   fun update(
@@ -1298,14 +1436,38 @@ private class DesktopLyricCardView(
     artworkUrl: String,
     songProgress: Float,
     isPlaying: Boolean,
-    backgroundUri: String
+    backgroundUri: String,
+    nextPanelMode: String,
+    radioStatus: String,
+    radioScript: String,
+    radioTrack: String,
+    radioActionLabel: String,
+    radioActionEnabled: Boolean
   ) {
-    lyricText.setLyricText(lyric)
-    lyricText.setLyricProgress(lyricProgress)
+    panelMode = if (nextPanelMode == "radio") "radio" else "lyrics"
+    val isRadioMode = panelMode == "radio"
+    val radioHeader = listOf(radioTrack, radioStatus)
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+      .joinToString("\n")
+      .ifBlank { lyric }
+    lyricText.textSize = if (isRadioMode) 14f else 17f
+    lyricText.setLyricText(if (isRadioMode) radioHeader else lyric)
+    lyricText.setLyricProgress(if (isRadioMode) 0f else lyricProgress)
     titleView.text = title
-    artistView.text = artist.ifBlank { "Unknown Artist" }
+    artistView.text = if (isRadioMode) radioStatus else artist.ifBlank { "Unknown Artist" }
     progressView.setProgress(songProgress)
     playPauseButton.text = if (isPlaying) "II" else ">"
+    viewToggleButton.text = if (isRadioMode) "Ly" else "FM"
+    infoRow.visibility = if (isRadioMode) View.GONE else View.VISIBLE
+    radioContent.visibility = if (isRadioMode && isExpanded) View.VISIBLE else View.GONE
+    radioMetaView.text = radioTrack.ifBlank { "AI Radio" }
+    radioStatusView.text = radioStatus.ifBlank { "AI 电台" }
+    radioScriptView.text = radioScript.ifBlank { lyric }
+    radioActionButton.text = radioActionLabel.ifBlank { "开台" }
+    radioActionButton.isEnabled = radioActionEnabled
+    radioActionButton.alpha = if (radioActionEnabled) 1f else 0.52f
+    radioBackButton.alpha = 1f
     if (artworkUrl != lastArtworkUrl) {
       lastArtworkUrl = artworkUrl
       if (artworkUrl.isBlank()) {
@@ -1330,6 +1492,7 @@ private class DesktopLyricCardView(
         Glide.with(context).load(backgroundUri).into(backgroundView)
       }
     }
+    applyExpandedState()
   }
 
   fun toggleExpanded() {
@@ -1340,10 +1503,18 @@ private class DesktopLyricCardView(
   }
 
   private fun applyExpandedState() {
-    lyricText.maxLines = if (isExpanded) 2 else 1
+    val isRadioMode = panelMode == "radio"
+    lyricText.maxLines = if (isRadioMode) {
+      2
+    } else {
+      if (isExpanded) 2 else 1
+    }
     root.gravity = if (isExpanded) Gravity.CENTER_HORIZONTAL else Gravity.CENTER
     val verticalPadding = if (isExpanded) dp(10) else dp(6)
     setPadding(dp(14), verticalPadding, dp(14), verticalPadding)
+    infoRow.visibility = if (isRadioMode) View.GONE else View.VISIBLE
+    radioContent.visibility = if (isRadioMode && isExpanded) View.VISIBLE else View.GONE
+    controlsRow.visibility = if (isRadioMode) View.GONE else View.VISIBLE
   }
 
   fun preferredHeight(): Int {

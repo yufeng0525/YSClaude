@@ -53,12 +53,14 @@ export default function MusicScreen() {
   const [progressWidth, setProgressWidth] = useState(1);
   const [queueVisible, setQueueVisible] = useState(false);
   const {
+    phase: radioPhase,
     loading: radioLoading,
     active: radioActive,
     ending: radioEnding,
     title: radioTitle,
     status: radioStatus,
     start: startRadio,
+    continueProgram: continueRadio,
     end: endRadio,
   } = useRadioStore();
 
@@ -90,6 +92,9 @@ export default function MusicScreen() {
   const track = tracks[currentIndex];
   const progress = durationMs > 0 ? Math.min(1, currentTimeMs / durationMs) : 0;
   const lyricBlurTint = colors === lightColors ? 'systemThickMaterialLight' : 'systemThickMaterialDark';
+  const radioButtonLabel = radioPhase === 'call_in_waiting' ? '继续' : radioActive ? '结束' : '开台';
+  const handleRadioButtonPress =
+    radioPhase === 'call_in_waiting' ? continueRadio : radioActive ? endRadio : startRadio;
 
   useEffect(() => {
     openPlayer();
@@ -194,13 +199,13 @@ export default function MusicScreen() {
         </View>
         <Pressable
           style={[styles.radioButton, (radioLoading || radioEnding) && styles.radioButtonDisabled]}
-          onPress={radioActive ? endRadio : startRadio}
+          onPress={handleRadioButtonPress}
           disabled={radioLoading || radioEnding}
         >
           {radioLoading || radioEnding ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.radioButtonText}>{radioActive ? '结束' : '开台'}</Text>
+            <Text style={styles.radioButtonText}>{radioButtonLabel}</Text>
           )}
         </Pressable>
       </View>

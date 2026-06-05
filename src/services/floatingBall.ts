@@ -20,6 +20,22 @@ interface FloatingBallModule {
     isPlaying: boolean,
     backgroundUri: string
   ) => Promise<boolean>;
+  showDesktopLyricPanel?: (
+    text: string,
+    lyricProgress: number,
+    title: string,
+    artist: string,
+    artworkUrl: string,
+    songProgress: number,
+    isPlaying: boolean,
+    backgroundUri: string,
+    panelMode: string,
+    radioStatus: string,
+    radioScript: string,
+    radioTrack: string,
+    radioActionLabel: string,
+    radioActionEnabled: boolean
+  ) => Promise<boolean>;
   hideDesktopLyric: () => Promise<boolean>;
   openApp: () => Promise<boolean>;
   captureScreen: () => Promise<string | null>;
@@ -36,7 +52,13 @@ export type FloatingBallToolAction =
   | 'open_app'
   | { action: 'text_input'; text?: string };
 
-export type DesktopLyricAction = 'previous' | 'toggle_play' | 'next' | 'close';
+export type DesktopLyricAction =
+  | 'previous'
+  | 'toggle_play'
+  | 'next'
+  | 'toggle_view'
+  | 'radio_action'
+  | 'close';
 
 const nativeModule = NativeModules.FloatingBall as FloatingBallModule | undefined;
 
@@ -94,9 +116,37 @@ export async function showDesktopLyric(
   artworkUrl = '',
   songProgress = 0,
   isPlaying = false,
-  backgroundUri = ''
+  backgroundUri = '',
+  panelMode = 'lyrics',
+  radioStatus = '',
+  radioScript = '',
+  radioTrack = '',
+  radioActionLabel = '',
+  radioActionEnabled = false
 ): Promise<void> {
-  await ensureFloatingBall().showDesktopLyric(
+  const floatingBall = ensureFloatingBall();
+  const showEnhanced = floatingBall.showDesktopLyricPanel;
+  if (showEnhanced) {
+    await showEnhanced(
+      text,
+      lyricProgress,
+      title,
+      artist,
+      artworkUrl,
+      songProgress,
+      isPlaying,
+      backgroundUri,
+      panelMode,
+      radioStatus,
+      radioScript,
+      radioTrack,
+      radioActionLabel,
+      radioActionEnabled
+    );
+    return;
+  }
+
+  await floatingBall.showDesktopLyric(
     text,
     lyricProgress,
     title,

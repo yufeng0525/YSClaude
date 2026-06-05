@@ -10,6 +10,7 @@ class AndroidSystemToolsPackage : ReactPackage {
     return listOf(
       AndroidSystemToolsModule(reactContext),
       AndroidFilePickerModule(reactContext),
+      ShizukuFileModule(reactContext),
       FloatingBallModule(reactContext)
     )
   }

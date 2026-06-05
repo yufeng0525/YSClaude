@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, Pressable,
-  ActivityIndicator, Alert, Modal, FlatList, Switch, Image,
+  ActivityIndicator, Alert, Modal, FlatList, Switch, Image, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,7 +10,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import { fonts } from '../src/theme/fonts';
-import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle } from '../src/stores/settings';
+import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle, type PhoneFileRoot, type ShizukuFileRoot } from '../src/stores/settings';
 import { TopBarIcon, TOP_BAR_ICON_ITEMS } from '../src/components/TopBarIcon';
 import type { TopBarIconKey } from '../src/utils/topBarIconTypes';
 import { useChatStore } from '../src/stores/chat';
@@ -22,6 +22,13 @@ import { getFavoriteDiaries } from '../src/db/operations';
 import { uploadDiary } from '../src/services/tools';
 import { formatFullTime, formatDateOnly } from '../src/utils/time';
 import { importMyphonePrivateChatsFromPicker } from '../src/services/myphoneImport';
+import { pickAndroidPhoneAgentDirectory, pickAndroidPhoneAgentFile } from '../src/services/androidFilePicker';
+import {
+  createShizukuRoot,
+  getShizukuStatus,
+  requestShizukuPermission,
+  type ShizukuStatus,
+} from '../src/services/shizukuFiles';
 import {
   DEFAULT_HOTBOARD_PLATFORM_TYPES,
   HOTBOARD_PLATFORMS,
@@ -1896,12 +1903,16 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     webInteractionConfig,
     hotboardConfig,
     nativeToolConfig,
+    phoneFileAgentConfig,
+    shizukuFileConfig,
     setMemoryVaultConfig,
     setWebSearchConfig,
     setWebPageReaderConfig,
     setWebInteractionConfig,
     setHotboardConfig,
     setNativeToolConfig,
+    setPhoneFileAgentConfig,
+    setShizukuFileConfig,
   } = useSettingsStore();
 
   // 记忆库本地 state
@@ -1932,6 +1943,20 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     normalizeHotboardPlatformTypes(hotboardConfig?.platforms || DEFAULT_HOTBOARD_PLATFORM_TYPES.join(','))
   );
   const [hbPlatformsExpanded, setHbPlatformsExpanded] = useState(false);
+
+  // 手机文件 Agent 本地 state
+  const [phoneFileEnabled, setPhoneFileEnabled] = useState(!!phoneFileAgentConfig?.enabled);
+  const [phoneFileIncludeAppDocument, setPhoneFileIncludeAppDocument] = useState(
+    phoneFileAgentConfig?.includeAppDocument ?? true
+  );
+  const [phoneFileRoots, setPhoneFileRoots] = useState<PhoneFileRoot[]>(phoneFileAgentConfig?.roots || []);
+
+  // Shizuku 文件访问本地 state
+  const [shizukuEnabled, setShizukuEnabled] = useState(!!shizukuFileConfig?.enabled);
+  const [shizukuRoots, setShizukuRoots] = useState<ShizukuFileRoot[]>(shizukuFileConfig?.roots || []);
+  const [shizukuPathInput, setShizukuPathInput] = useState('');
+  const [shizukuStatus, setShizukuStatus] = useState<ShizukuStatus | null>(null);
+  const [shizukuChecking, setShizukuChecking] = useState(false);
 
   // 设备原生工具本地 state
   const [deviceInfoEnabled, setDeviceInfoEnabled] = useState(!!nativeToolConfig?.deviceInfoEnabled);
@@ -2047,6 +2072,157 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 
   function clearHotboardPlatforms() {
     setHbPlatformTypes([]);
+  }
+
+  async function handlePickPhoneAgentFile() {
+    if (Platform.OS !== 'android') {
+      Alert.alert('提示', '手机文件 Agent 的用户选择文件当前仅支持 Android');
+      return;
+    }
+
+    try {
+      const pickedFile = await pickAndroidPhoneAgentFile();
+      if (!pickedFile) return;
+
+      const exists = phoneFileRoots.some((root) => root.uri === pickedFile.uri);
+      if (exists) {
+        showToast('该文件已经添加过');
+        return;
+      }
+
+      const rootId = `phone-file-root-${randomUUID()}`;
+      const root: PhoneFileRoot = {
+        id: rootId,
+        name: pickedFile.name || '用户选择文件',
+        uri: pickedFile.uri,
+        kind: 'file',
+        mimeType: pickedFile.mimeType,
+        size: pickedFile.size,
+        addedAt: Date.now(),
+      };
+      setPhoneFileRoots((current) => [...current, root]);
+      showToast('已添加只读文件，记得保存配置');
+    } catch (e: any) {
+      const message = String(e?.message || '');
+      if (message.toLowerCase().includes('cancel')) return;
+      Alert.alert('选择文件失败', message || '未知错误');
+    }
+  }
+
+  async function handlePickPhoneAgentDirectory() {
+    if (Platform.OS !== 'android') {
+      Alert.alert('提示', '手机文件 Agent 的用户选择文件夹当前仅支持 Android');
+      return;
+    }
+
+    try {
+      const pickedDirectory = await pickAndroidPhoneAgentDirectory();
+      if (!pickedDirectory) return;
+
+      const exists = phoneFileRoots.some((root) => root.uri === pickedDirectory.uri);
+      if (exists) {
+        showToast('该文件夹已经添加过');
+        return;
+      }
+
+      const root: PhoneFileRoot = {
+        id: `phone-file-root-${randomUUID()}`,
+        name: pickedDirectory.name || '用户选择文件夹',
+        uri: pickedDirectory.uri,
+        kind: 'directory',
+        addedAt: Date.now(),
+      };
+      setPhoneFileRoots((current) => [...current, root]);
+      showToast('已添加只读文件夹，记得保存配置');
+    } catch (e: any) {
+      const message = String(e?.message || '');
+      if (message.toLowerCase().includes('cancel')) return;
+      Alert.alert('选择文件夹失败', message || '未知错误');
+    }
+  }
+
+  function handleRemovePhoneFileRoot(rootId: string) {
+    setPhoneFileRoots((current) => current.filter((root) => root.id !== rootId));
+  }
+
+  function handleSavePhoneFileAgent() {
+    if (phoneFileEnabled && !phoneFileIncludeAppDocument && phoneFileRoots.length === 0) {
+      Alert.alert('提示', '启用手机文件 Agent 时，请至少开启应用内部目录或添加一个用户选择文件/文件夹');
+      return;
+    }
+
+    setPhoneFileAgentConfig({
+      enabled: phoneFileEnabled,
+      includeAppDocument: phoneFileIncludeAppDocument,
+      roots: phoneFileRoots,
+      maxToolCalls: phoneFileAgentConfig?.maxToolCalls || 6,
+    });
+    showToast(phoneFileEnabled ? '手机文件 Agent 已保存' : '手机文件 Agent 已关闭');
+  }
+
+  async function handleCheckShizukuStatus() {
+    setShizukuChecking(true);
+    try {
+      const status = await getShizukuStatus();
+      setShizukuStatus(status);
+      if (!status.running) {
+        showToast('Shizuku 未运行');
+      } else if (!status.permissionGranted) {
+        showToast('Shizuku 已运行，尚未授权');
+      } else {
+        showToast('Shizuku 已运行且已授权');
+      }
+    } catch (e: any) {
+      Alert.alert('检测失败', e?.message || '无法检测 Shizuku 状态');
+    } finally {
+      setShizukuChecking(false);
+    }
+  }
+
+  async function handleRequestShizukuPermission() {
+    setShizukuChecking(true);
+    try {
+      const status = await requestShizukuPermission();
+      setShizukuStatus(status);
+      showToast(status.permissionGranted ? 'Shizuku 授权成功' : 'Shizuku 未授权');
+    } catch (e: any) {
+      Alert.alert('授权失败', e?.message || '无法请求 Shizuku 授权');
+    } finally {
+      setShizukuChecking(false);
+    }
+  }
+
+  function handleAddShizukuRoot() {
+    try {
+      const root = createShizukuRoot(shizukuPathInput);
+      if (shizukuRoots.some((item) => item.path === root.path)) {
+        showToast('该路径已经添加过');
+        return;
+      }
+      setShizukuRoots((current) => [...current, root]);
+      setShizukuPathInput('');
+      showToast('已添加 Shizuku 只读路径，记得保存配置');
+    } catch (e: any) {
+      Alert.alert('路径无效', e?.message || '请填写有效的绝对路径');
+    }
+  }
+
+  function handleRemoveShizukuRoot(rootId: string) {
+    setShizukuRoots((current) => current.filter((root) => root.id !== rootId));
+  }
+
+  function handleSaveShizukuFile() {
+    if (shizukuEnabled && shizukuRoots.length === 0) {
+      Alert.alert('提示', '启用 Shizuku 文件访问时，请至少添加一个允许访问的路径');
+      return;
+    }
+
+    setShizukuFileConfig({
+      enabled: shizukuEnabled,
+      roots: shizukuRoots,
+      maxToolCalls: shizukuFileConfig?.maxToolCalls || 6,
+    });
+    showToast(shizukuEnabled ? 'Shizuku 文件访问已保存' : 'Shizuku 文件访问已关闭');
   }
 
   function handleSaveNativeTools() {
@@ -2296,6 +2472,137 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
       <View style={styles.actions}>
         <Pressable style={styles.saveButton} onPress={handleSaveWebInteraction}>
           <Text style={styles.saveButtonText}>保存配置</Text>
+        </Pressable>
+      </View>
+
+      {/* ===== 手机文件 Agent ===== */}
+      <Text style={styles.sectionTitle}>手机文件 Agent（只读）</Text>
+      <Text style={styles.hint}>开启后，AI 只能读取应用内部目录和你选择授权的文件/文件夹：列目录、读文本文件、搜索文件名和小型文本内容；不会创建、修改、移动或删除文件。</Text>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>启用手机文件 Agent</Text>
+          <Text style={styles.hint}>当前只开放 Android 端只读能力</Text>
+        </View>
+        <Switch
+          value={phoneFileEnabled}
+          onValueChange={setPhoneFileEnabled}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>允许读取应用内部目录</Text>
+          <Text style={styles.hint}>仅限本应用 document 目录中的文件</Text>
+        </View>
+        <Switch
+          value={phoneFileIncludeAppDocument}
+          onValueChange={setPhoneFileIncludeAppDocument}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>用户选择文件/文件夹</Text>
+        <Text style={styles.hint}>添加文件会使用和 AI 共读导入图书一致的来源选择器；添加文件夹会使用 Android 文件夹授权入口。AI 会直接按系统返回的访问 URI 只读打开。</Text>
+        {phoneFileRoots.length === 0 ? (
+          <Text style={styles.emptyText}>尚未添加用户选择文件或文件夹</Text>
+        ) : (
+          phoneFileRoots.map((root) => (
+            <View key={root.id} style={styles.phoneFileRootRow}>
+              <View style={styles.nativeToolText}>
+                <Text style={styles.label}>{root.name}</Text>
+                <Text style={styles.hint}>
+                  {root.kind === 'directory' ? '只读文件夹' : '只读文件'} · {new Date(root.addedAt).toLocaleString()}
+                </Text>
+              </View>
+              <Pressable style={styles.removeSmallButton} onPress={() => handleRemovePhoneFileRoot(root.id)}>
+                <Text style={styles.removeSmallButtonText}>移除</Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable style={styles.testButton} onPress={handlePickPhoneAgentFile}>
+          <Text style={styles.testButtonText}>添加文件</Text>
+        </Pressable>
+        <Pressable style={styles.testButton} onPress={handlePickPhoneAgentDirectory}>
+          <Text style={styles.testButtonText}>添加文件夹</Text>
+        </Pressable>
+        <Pressable style={styles.saveButton} onPress={handleSavePhoneFileAgent}>
+          <Text style={styles.saveButtonText}>保存文件 Agent</Text>
+        </Pressable>
+      </View>
+
+      {/* ===== Shizuku 文件访问 ===== */}
+      <Text style={styles.sectionTitle}>Shizuku 文件访问（只读）</Text>
+      <Text style={styles.hint}>个人高级模式：通过 Shizuku 以 shell 身份只读访问你手动添加的绝对路径。AI 仍只能访问这些路径根内的相对路径。</Text>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchText}>
+          <Text style={styles.label}>启用 Shizuku 文件访问</Text>
+          <Text style={styles.hint}>适合尝试读取 Android/data 下普通权限无法访问的目录</Text>
+        </View>
+        <Switch
+          value={shizukuEnabled}
+          onValueChange={setShizukuEnabled}
+          trackColor={{ true: colors.primary }}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Shizuku 状态</Text>
+        <Text style={styles.hint}>
+          {shizukuStatus
+            ? `运行：${shizukuStatus.running ? '是' : '否'} · 授权：${shizukuStatus.permissionGranted ? '是' : '否'}${shizukuStatus.uid != null && shizukuStatus.uid >= 0 ? ` · uid ${shizukuStatus.uid}` : ''}`
+            : '尚未检测'}
+        </Text>
+        <View style={styles.platformActions}>
+          <Pressable style={styles.platformActionButton} onPress={handleCheckShizukuStatus} disabled={shizukuChecking}>
+            <Text style={styles.platformActionText}>{shizukuChecking ? '检测中' : '检测状态'}</Text>
+          </Pressable>
+          <Pressable style={styles.platformActionButton} onPress={handleRequestShizukuPermission} disabled={shizukuChecking}>
+            <Text style={styles.platformActionText}>请求授权</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>允许访问的路径</Text>
+        <TextInput
+          style={styles.input}
+          value={shizukuPathInput}
+          onChangeText={setShizukuPathInput}
+          placeholder="/storage/emulated/0/Android/data/com.tencent.mobileqq"
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none"
+        />
+        <Pressable style={styles.addPathButton} onPress={handleAddShizukuRoot}>
+          <Text style={styles.addPathButtonText}>添加路径</Text>
+        </Pressable>
+        {shizukuRoots.length === 0 ? (
+          <Text style={styles.emptyText}>尚未添加 Shizuku 路径</Text>
+        ) : (
+          shizukuRoots.map((root) => (
+            <View key={root.id} style={styles.phoneFileRootRow}>
+              <View style={styles.nativeToolText}>
+                <Text style={styles.label}>{root.name}</Text>
+                <Text style={styles.hint}>{root.path}</Text>
+              </View>
+              <Pressable style={styles.removeSmallButton} onPress={() => handleRemoveShizukuRoot(root.id)}>
+                <Text style={styles.removeSmallButtonText}>移除</Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable style={styles.saveButton} onPress={handleSaveShizukuFile}>
+          <Text style={styles.saveButtonText}>保存 Shizuku 配置</Text>
         </Pressable>
       </View>
 
@@ -2788,6 +3095,26 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10,
   },
   nativeToolText: { flex: 1 },
+  phoneFileRootRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+    backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 8,
+  },
+  removeSmallButton: {
+    borderWidth: 1, borderColor: colors.danger, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  removeSmallButtonText: { fontSize: 13, fontWeight: '600', color: colors.danger },
+  emptyText: { fontSize: 13, color: colors.textTertiary, marginTop: 8 },
+  addPathButton: {
+    marginTop: 10,
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addPathButtonText: { fontSize: 14, fontWeight: '600', color: colors.primary },
   content: { flex: 1, padding: 20 },
   sectionTitle: {
     fontSize: 13, fontWeight: '600', color: colors.textSecondary,

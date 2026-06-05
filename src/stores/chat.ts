@@ -17,6 +17,7 @@ import {
   WEB_CRUISE_SYSTEM_PROMPT,
   getPendingWebCruiseNotice,
 } from '../utils/webCruise';
+import { buildRadioRuntimeContext } from '../utils/radioMarkers';
 import { buildFocusEventSystemPrompt } from '../utils/focusEvents';
 import { buildPeriodSystemPrompt } from '../utils/periods';
 import {
@@ -378,6 +379,8 @@ async function runToolLoop(
     webInteraction: webInteractionEnabled,
     hotboard: webCruiseEnabled,
     nativeTools: settings.nativeToolConfig,
+    phoneFileAgent: settings.phoneFileAgentConfig,
+    shizukuFile: settings.shizukuFileConfig,
   });
   if (tools.length === 0) {
     return false; // 无工具 → 走原有流式路径
@@ -388,6 +391,8 @@ async function runToolLoop(
     1,
     settings.memoryVaultConfig.maxToolCalls || 3,
     webInteractionEnabled ? settings.webInteractionConfig?.maxToolCalls || 8 : 0,
+    settings.phoneFileAgentConfig?.enabled ? settings.phoneFileAgentConfig.maxToolCalls || 6 : 0,
+    settings.shizukuFileConfig?.enabled ? settings.shizukuFileConfig.maxToolCalls || 6 : 0,
     webCruiseEnabled ? 10 : 0
   );
 
@@ -449,6 +454,8 @@ async function runToolLoop(
         },
         hotboardConfig: settings.hotboardConfig,
         nativeToolConfig: settings.nativeToolConfig,
+        phoneFileAgentConfig: settings.phoneFileAgentConfig,
+        shizukuFileConfig: settings.shizukuFileConfig,
         webCruiseEnabled,
       });
       onToolInvocation?.({
@@ -577,6 +584,11 @@ async function streamAssistantResponse(
   const runtimeSections: string[] = [];
   if (pendingWebCruise) {
     runtimeSections.push(WEB_CRUISE_SYSTEM_PROMPT);
+  }
+
+  const radioContext = buildRadioRuntimeContext(historyMessages);
+  if (radioContext) {
+    runtimeSections.push(radioContext);
   }
 
   const listeningContext = useMusicStore.getState().getListeningContextPrompt();
