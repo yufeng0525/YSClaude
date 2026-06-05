@@ -379,7 +379,6 @@ async function runToolLoop(
     webInteraction: webInteractionEnabled,
     hotboard: webCruiseEnabled,
     nativeTools: settings.nativeToolConfig,
-    phoneFileAgent: settings.phoneFileAgentConfig,
     shizukuFile: settings.shizukuFileConfig,
   });
   if (tools.length === 0) {
@@ -391,7 +390,6 @@ async function runToolLoop(
     1,
     settings.memoryVaultConfig.maxToolCalls || 3,
     webInteractionEnabled ? settings.webInteractionConfig?.maxToolCalls || 8 : 0,
-    settings.phoneFileAgentConfig?.enabled ? settings.phoneFileAgentConfig.maxToolCalls || 6 : 0,
     settings.shizukuFileConfig?.enabled ? settings.shizukuFileConfig.maxToolCalls || 6 : 0,
     webCruiseEnabled ? 10 : 0
   );
@@ -454,7 +452,6 @@ async function runToolLoop(
         },
         hotboardConfig: settings.hotboardConfig,
         nativeToolConfig: settings.nativeToolConfig,
-        phoneFileAgentConfig: settings.phoneFileAgentConfig,
         shizukuFileConfig: settings.shizukuFileConfig,
         webCruiseEnabled,
       });

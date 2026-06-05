@@ -1,7 +1,6 @@
 import { hotboardTool } from './toolModules/hotboard';
 import { memoryVaultTool, uploadDiary } from './toolModules/memoryVault';
 import { nativeDeviceTool } from './toolModules/nativeDevice';
-import { phoneFileTool } from './toolModules/phoneFile';
 import { shizukuFileTool } from './toolModules/shizukuFile';
 import { webPageReaderTool } from './toolModules/webPageReader';
 import { webSearchTool } from './toolModules/webSearch';
@@ -23,7 +22,6 @@ const TOOL_MODULES: ToolModule[] = [
   hotboardTool,
   webViewTool,
   nativeDeviceTool,
-  phoneFileTool,
   shizukuFileTool,
 ];
 

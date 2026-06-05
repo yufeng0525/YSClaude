@@ -2,7 +2,6 @@ import {
   HotboardConfig,
   MemoryVaultConfig,
   NativeToolConfig,
-  PhoneFileAgentConfig,
   ShizukuFileConfig,
   WebInteractionConfig,
   WebPageReaderConfig,
@@ -29,7 +28,6 @@ export interface ToolDefinitionConfig {
   webInteraction?: boolean;
   hotboard?: boolean;
   nativeTools?: NativeToolConfig;
-  phoneFileAgent?: PhoneFileAgentConfig;
   shizukuFile?: ShizukuFileConfig;
 }
 
@@ -40,7 +38,6 @@ export interface ToolExecutionContext {
   webInteractionConfig: WebInteractionConfig;
   hotboardConfig: HotboardConfig;
   nativeToolConfig: NativeToolConfig;
-  phoneFileAgentConfig: PhoneFileAgentConfig;
   shizukuFileConfig: ShizukuFileConfig;
   webCruiseEnabled?: boolean;
 }
