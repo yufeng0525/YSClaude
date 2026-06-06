@@ -63,6 +63,7 @@ interface Props {
   blurTarget?: RefObject<View | null>;
   previousUserMessage?: Message | null;
   isLastAssistant?: boolean;
+  showAssistantFooter?: boolean;
   isHidden?: boolean;
   floorNumber?: number;
   showFloorNumber?: boolean;
@@ -149,6 +150,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   blurTarget,
   previousUserMessage,
   isLastAssistant,
+  showAssistantFooter,
   isHidden,
   floorNumber,
   showFloorNumber,
@@ -540,7 +542,7 @@ export const ChatBubble = React.memo(function ChatBubble({
               </Pressable>
             ))}
           </View>
-          {!assistantFooterHidden && (
+          {!assistantFooterHidden && showAssistantFooter && (
             <View style={styles.logoRow}>
               <Image source={require('../../assets/claudelogo.png')} style={styles.logoImage} resizeMode="contain" />
               <Text style={[styles.disclaimerText, { color: assistantFooterColor }]}>

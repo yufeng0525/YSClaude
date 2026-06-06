@@ -534,6 +534,13 @@ export default function ChatScreen() {
     return map;
   }, [messageFloorOffset, messages]);
 
+  const latestAssistantMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   const hiddenFloorSet = useMemo(() => {
     const set = new Set<number>();
     for (const r of hiddenRanges) {
@@ -591,11 +598,15 @@ export default function ChatScreen() {
               item.role === 'assistant' &&
               index === messages.length - 1
             }
+            showAssistantFooter={
+              item.role === 'assistant' &&
+              item.id === latestAssistantMessageId
+            }
           />
         </>
       );
     },
-    [dismissedDividers, floorMap, handleBubblePress, hiddenFloorSet, messages, visibleFloorMessageId]
+    [dismissedDividers, floorMap, handleBubblePress, hiddenFloorSet, latestAssistantMessageId, messages, visibleFloorMessageId]
   );
 
   const renderOlderMessagesHeader = useCallback(() => {
