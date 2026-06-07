@@ -6,12 +6,17 @@ import { useSettingsStore } from '../stores/settings';
 import { Conversation, Message } from '../types';
 import { createConversation, getAllConversations } from '../db/operations';
 import {
-  captureFloatingBallScreen,
   FloatingBallToolAction,
   hideDesktopLyric,
   openYSClaudeFromFloatingBall,
   showFloatingBallMessage,
 } from './floatingBall';
+import {
+  isAccessibilityControlEnabled,
+  openAccessibilitySettings,
+} from './nativeTools';
+import { capturePendingAndroidAccessibilityContext } from './androidAccessibilitySession';
+import { buildAndroidAccessibilityCaptureNotice } from '../utils/androidAccessibilityControl';
 
 let actionBusy = false;
 
@@ -35,7 +40,7 @@ async function ensureLatestCreatedConversationLoaded(): Promise<void> {
   const now = Date.now();
   const conversation: Conversation = {
     id: randomUUID(),
-    title: '新对话',
+    title: 'New conversation',
     systemPrompt: settings.systemPrompt,
     model: config?.model || '',
     createdAt: now,
@@ -58,15 +63,20 @@ async function insertUserMessage(content: string, imageUri?: string): Promise<Me
 }
 
 async function handleScreenShare(): Promise<void> {
-  const imageUri = await captureFloatingBallScreen();
-  if (!imageUri) return;
-  const message = await insertUserMessage('屏幕共享', imageUri);
-  if (message) {
-    useChatStore.getState().markMessagesForAutoHideAfterResponse([message.id]);
+  const accessibilityEnabled = await isAccessibilityControlEnabled();
+  if (!accessibilityEnabled) {
+    showFloatingBallMessage('Enable YSClaude accessibility service first', { speak: false }).catch(() => {});
+    await openAccessibilitySettings();
+    return;
   }
-  showFloatingBallMessage('已把当前屏幕发送到最新聊天', { speak: false }).catch(() => {});
-}
 
+  const context = await capturePendingAndroidAccessibilityContext();
+  await ensureLatestCreatedConversationLoaded();
+  await useChatStore
+    .getState()
+    .addSystemMessage(buildAndroidAccessibilityCaptureNotice(context.activePackage));
+  showFloatingBallMessage('Screen context captured for next reply', { speak: false }).catch(() => {});
+}
 async function handleTextInput(text?: string): Promise<void> {
   const content = text?.trim();
   if (!content) return;
@@ -119,7 +129,7 @@ export async function handleFloatingBallToolAction(action: FloatingBallToolActio
         break;
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : '悬浮球工具执行失败';
+    const message = error instanceof Error ? error.message : 'Floating ball tool failed';
     showFloatingBallMessage(message, { speak: false }).catch(() => {});
   } finally {
     actionBusy = false;

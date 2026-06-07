@@ -5,9 +5,11 @@ import { File } from 'expo-file-system';
 import { ChatMessage, streamChat, streamChatCompletion } from '../services/api';
 import { notifyReplyReady } from '../services/notifications';
 import { useSettingsStore } from './settings';
-import { getToolDefinitions, executeTool } from '../services/tools';
+import { getToolDefinitions, executeTool, getToolLabel } from '../services/tools';
 import { observeActiveWebView } from '../services/webviewController';
 import { formatWebViewObservation } from '../services/toolModules/webView';
+import { showFloatingBallMessage } from '../services/floatingBall';
+import { playTTSAndWait, stopTTS } from '../services/tts';
 import { formatCurrentTime, formatFullTime, formatTimeMarker, TIME_GAP_THRESHOLD_MS } from '../utils/time';
 import { mergeRanges, subtractRange } from '../utils/ranges';
 import { buildStickerSystemInstruction } from '../utils/stickers';
@@ -20,6 +22,12 @@ import {
 import { buildRadioRuntimeContext } from '../utils/radioMarkers';
 import { buildFocusEventSystemPrompt } from '../utils/focusEvents';
 import { buildPeriodSystemPrompt } from '../utils/periods';
+import {
+  ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX,
+  ANDROID_ACCESSIBILITY_CONTROL_MARKER,
+  buildAndroidAccessibilityRuntimeContext,
+} from '../utils/androidAccessibilityControl';
+import { consumePendingAndroidAccessibilityContext } from '../services/androidAccessibilitySession';
 import {
   createConversation,
   updateConversation,
@@ -43,6 +51,11 @@ import {
 } from '../db/operations';
 
 const MESSAGE_PAGE_SIZE = 20;
+const FLOATING_STREAM_MAX_CHARS = 180;
+const FLOATING_STREAM_HARD_BOUNDARIES = '。！？!?；;\n';
+const FLOATING_STREAM_SOFT_BOUNDARIES = '，,、';
+const FLOATING_STREAM_MIN_SOFT_SEGMENT_CHARS = 18;
+const FLOATING_STREAM_MAX_SEGMENT_CHARS = 72;
 
 interface ChatState {
   conversationId: string | null;
@@ -57,6 +70,7 @@ interface ChatState {
 
   sendMessage: (content: string, imageUri?: string) => Promise<void>;
   addUserMessage: (content: string, imageUri?: string) => Promise<Message | null>;
+  addSystemMessage: (content: string) => Promise<Message | null>;
   enableWebCruise: () => Promise<void>;
   triggerResponse: () => Promise<void>;
   markMessagesForAutoHideAfterResponse: (ids: string[]) => void;
@@ -79,6 +93,177 @@ interface ChatState {
 
 let abortController: AbortController | null = null;
 const autoHideAfterResponseIds = new Set<string>();
+let floatingSpeechBridgeId = 0;
+
+function stripFloatingStreamNoise(content: string): string {
+  return content
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/\[[^\[\]]{1,24}\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function clipFloatingStreamText(content: string): string {
+  const text = stripFloatingStreamNoise(content);
+  if (text.length <= FLOATING_STREAM_MAX_CHARS) return text;
+
+  const hardStart = Math.max(0, text.length - FLOATING_STREAM_MAX_CHARS);
+  let start = hardStart;
+  for (let index = hardStart; index < text.length - 18; index++) {
+    if (
+      FLOATING_STREAM_HARD_BOUNDARIES.includes(text[index]) ||
+      FLOATING_STREAM_SOFT_BOUNDARIES.includes(text[index])
+    ) {
+      start = index + 1;
+      break;
+    }
+  }
+
+  return `${start > 0 ? '...' : ''}${text.slice(start).trim()}`;
+}
+
+function extractFloatingSpeechSegment(buffer: string, force: boolean): { segment: string; rest: string } | null {
+  const text = buffer.replace(/\s+\n/g, '\n');
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const length = index + 1;
+    if (FLOATING_STREAM_HARD_BOUNDARIES.includes(char) && length >= 4) {
+      return { segment: text.slice(0, length), rest: text.slice(length) };
+    }
+    if (
+      FLOATING_STREAM_SOFT_BOUNDARIES.includes(char) &&
+      length >= FLOATING_STREAM_MIN_SOFT_SEGMENT_CHARS
+    ) {
+      return { segment: text.slice(0, length), rest: text.slice(length) };
+    }
+  }
+
+  if (text.length >= FLOATING_STREAM_MAX_SEGMENT_CHARS) {
+    let cutIndex = -1;
+    const floor = Math.floor(FLOATING_STREAM_MAX_SEGMENT_CHARS * 0.62);
+    for (let index = Math.min(text.length - 1, FLOATING_STREAM_MAX_SEGMENT_CHARS); index >= floor; index--) {
+      if (
+        FLOATING_STREAM_HARD_BOUNDARIES.includes(text[index]) ||
+        FLOATING_STREAM_SOFT_BOUNDARIES.includes(text[index]) ||
+        /\s/.test(text[index])
+      ) {
+        cutIndex = index + 1;
+        break;
+      }
+    }
+    if (cutIndex < 0) cutIndex = FLOATING_STREAM_MAX_SEGMENT_CHARS;
+    return { segment: text.slice(0, cutIndex), rest: text.slice(cutIndex) };
+  }
+
+  if (force && text.trim()) {
+    return { segment: text, rest: '' };
+  }
+
+  return null;
+}
+
+function estimateSilentReadingDelay(text: string): number {
+  return Math.min(5200, Math.max(1000, text.length * 140));
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createFloatingStreamBridge() {
+  const bridgeId = ++floatingSpeechBridgeId;
+  let buffer = '';
+  const queue: string[] = [];
+  let playing = false;
+  let closed = false;
+  let cancelled = false;
+
+  const show = (text: string) => {
+    showFloatingBallMessage(text, { speak: false }).catch(() => {});
+  };
+
+  const isCurrent = () => !cancelled && floatingSpeechBridgeId === bridgeId;
+
+  const enqueue = (rawSegment: string) => {
+    const segment = stripFloatingStreamNoise(rawSegment);
+    if (!segment) return;
+    queue.push(segment);
+    playNext().catch(() => {});
+  };
+
+  const drainBuffer = (force = false) => {
+    while (isCurrent()) {
+      const next = extractFloatingSpeechSegment(buffer, force);
+      if (!next) return;
+      buffer = next.rest;
+      enqueue(next.segment);
+      if (force) {
+        continue;
+      }
+    }
+  };
+
+  const playNext = async () => {
+    if (playing || !isCurrent()) return;
+    const segment = queue.shift();
+    if (!segment) return;
+
+    playing = true;
+    show(clipFloatingStreamText(segment));
+
+    try {
+      const { floatingBallConfig, ttsConfig } = useSettingsStore.getState();
+      if (floatingBallConfig.ttsEnabled) {
+        await playTTSAndWait(segment, ttsConfig);
+      } else {
+        await delay(estimateSilentReadingDelay(segment));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'TTS 播放失败';
+      show(message);
+    } finally {
+      playing = false;
+      if (isCurrent()) {
+        playNext().catch(() => {});
+      }
+    }
+  };
+
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    queue.length = 0;
+    buffer = '';
+    stopTTS().catch(() => {});
+  };
+
+  return {
+    start() {
+      stopTTS().catch(() => {});
+      show('正在思考...');
+    },
+    append(token: string) {
+      if (!isCurrent()) return;
+      buffer += token;
+      drainBuffer(false);
+    },
+    tool(name: string, status: 'running' | 'done') {
+      if (!isCurrent() || playing || queue.length > 0 || buffer.trim()) return;
+      const label = getToolLabel(name);
+      show(status === 'running' ? `正在使用工具：${label}` : `工具完成：${label}`);
+    },
+    error(message: string) {
+      cancel();
+      show(message);
+    },
+    cancel,
+    close() {
+      if (closed || !isCurrent()) return;
+      closed = true;
+      drainBuffer(true);
+    },
+  };
+}
 
 async function readImageAsDataUrl(uri: string): Promise<string | null> {
   try {
@@ -108,6 +293,25 @@ function buildVisionContent(text: string, dataUrl: string): any[] {
     image_url: { url: dataUrl },
   });
   return parts;
+}
+
+function appendVisionImageContent(message: ChatMessage, dataUrl: string): ChatMessage {
+  const imagePart = {
+    type: 'image_url',
+    image_url: { url: dataUrl },
+  };
+
+  if (typeof message.content === 'string') {
+    return {
+      ...message,
+      content: buildVisionContent(message.content, dataUrl),
+    };
+  }
+
+  return {
+    ...message,
+    content: [...message.content, imagePart],
+  };
 }
 
 function rangesForMessageIds(messages: Message[], ids: Set<string>, offset = 0): HiddenRange[] {
@@ -208,6 +412,23 @@ function contentContainsHttpUrl(content: string | any[]): boolean {
 
 function messagesContainHttpUrl(messages: { role: string; content: string | any[] }[]): boolean {
   return messages.some((message) => contentContainsHttpUrl(message.content));
+}
+
+function contentContainsText(content: string | any[], needle: string): boolean {
+  if (typeof content === 'string') {
+    return content.includes(needle);
+  }
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((part) => {
+    if (typeof part === 'string') return part.includes(needle);
+    return part && typeof part.text === 'string' && part.text.includes(needle);
+  });
+}
+
+function messagesContainText(messages: { role: string; content: string | any[] }[], needle: string): boolean {
+  return messages.some((message) => contentContainsText(message.content, needle));
 }
 
 function cloneContent(content: string | any[]): string | any[] {
@@ -371,6 +592,8 @@ async function runToolLoop(
   const webInteractionEnabled =
     webCruiseEnabled ||
     !!settings.webInteractionConfig?.enabled;
+  const androidAccessibilityControlEnabled =
+    messagesContainText(requestMessages, ANDROID_ACCESSIBILITY_CONTROL_MARKER);
 
   const tools = getToolDefinitions({
     memoryVault: memoryEnabled,
@@ -378,7 +601,12 @@ async function runToolLoop(
     webPageReader: webPageReaderEnabled,
     webInteraction: webInteractionEnabled,
     hotboard: webCruiseEnabled,
-    nativeTools: settings.nativeToolConfig,
+    nativeTools: {
+      ...settings.nativeToolConfig,
+      accessibilityControlEnabled:
+        !!settings.nativeToolConfig?.accessibilityControlEnabled ||
+        androidAccessibilityControlEnabled,
+    },
     shizukuFile: settings.shizukuFileConfig,
   });
   if (tools.length === 0) {
@@ -391,7 +619,8 @@ async function runToolLoop(
     settings.memoryVaultConfig.maxToolCalls || 3,
     webInteractionEnabled ? settings.webInteractionConfig?.maxToolCalls || 8 : 0,
     settings.shizukuFileConfig?.enabled ? settings.shizukuFileConfig.maxToolCalls || 6 : 0,
-    webCruiseEnabled ? 10 : 0
+    webCruiseEnabled ? 10 : 0,
+    androidAccessibilityControlEnabled ? 10 : 0
   );
 
   const messages: any[] = requestMessages.map((message) => ({
@@ -524,6 +753,8 @@ async function streamAssistantResponse(
 
   const allMessages = await getMessagesByConversation(conversationId);
   const historyMessages = allMessages.filter((message) => message.id !== assistantMessage.id);
+  const pendingAndroidContext = consumePendingAndroidAccessibilityContext();
+  const lastHistoryMessage = historyMessages[historyMessages.length - 1] ?? null;
   const pendingWebCruise = getPendingWebCruiseNotice(historyMessages);
   // 隐藏楼层现在按对话独立存储，从 chat store 自身读取。
   const hiddenRanges = get().hiddenRanges;
@@ -583,6 +814,16 @@ async function streamAssistantResponse(
     runtimeSections.push(WEB_CRUISE_SYSTEM_PROMPT);
   }
 
+  if (pendingAndroidContext) {
+    runtimeSections.push(
+      buildAndroidAccessibilityRuntimeContext(
+        pendingAndroidContext.screenSummary,
+        pendingAndroidContext.interactiveElements,
+        pendingAndroidContext.activePackage
+      )
+    );
+  }
+
   const radioContext = buildRadioRuntimeContext(historyMessages);
   if (radioContext) {
     runtimeSections.push(radioContext);
@@ -624,9 +865,23 @@ async function streamAssistantResponse(
     ...runtimeSections,
   ].join('\n\n---\n\n');
 
-  const suffixMessages: ChatMessage[] = latestUserMessage
-    ? [prependRuntimeContext(latestUserMessage, runtimeContext)]
-    : [{ role: 'user', content: runtimeContext }];
+  const shouldUseSyntheticAccessibilityRequest =
+    !!pendingAndroidContext &&
+    lastHistoryMessage?.role === 'system' &&
+    lastHistoryMessage.content.startsWith(ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX);
+
+  const suffixMessages: ChatMessage[] = shouldUseSyntheticAccessibilityRequest
+    ? [{ role: 'user', content: runtimeContext }]
+    : latestUserMessage
+      ? [prependRuntimeContext(latestUserMessage, runtimeContext)]
+      : [{ role: 'user', content: runtimeContext }];
+
+  if (pendingAndroidContext?.imageUri && suffixMessages[0]) {
+    const dataUrl = await readImageAsDataUrl(pendingAndroidContext.imageUri);
+    if (dataUrl) {
+      suffixMessages[0] = appendVisionImageContent(suffixMessages[0], dataUrl);
+    }
+  }
 
   const stableSystemSections = [
     settings.systemPrompt.trim() || 'You are a helpful assistant.',
@@ -653,8 +908,11 @@ async function streamAssistantResponse(
   const sessionId = promptCacheEnabled ? conversationId : undefined;
 
   abortController = new AbortController();
+  const floatingStream = createFloatingStreamBridge();
+  floatingStream.start();
 
   const onToken = (token: string) => {
+    floatingStream.append(token);
     set((state) => {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
@@ -678,6 +936,9 @@ async function streamAssistantResponse(
 
   // 每发生一次工具调用，就把记录追加到当前 assistant 消息上，实时反映到 UI
   const appendToolInvocation = (inv: ToolInvocation) => {
+    if (inv.status === 'running' || inv.status === 'done') {
+      floatingStream.tool(inv.name, inv.status);
+    }
     set((state) => {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
@@ -778,6 +1039,7 @@ async function streamAssistantResponse(
     }
   } catch (err: any) {
     if (isAbortError(err)) {
+      floatingStream.cancel();
       set({ error: null });
       const finalMessages = get().messages;
       const lastMsg = finalMessages[finalMessages.length - 1];
@@ -789,10 +1051,12 @@ async function streamAssistantResponse(
         await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
       }
     } else {
+      floatingStream.error(err.message || '请求失败');
       set({ error: err.message || '请求失败' });
       await deleteTransientResponseMessages();
     }
   } finally {
+    floatingStream.close();
     set({ isStreaming: false });
     abortController = null;
 
@@ -801,7 +1065,7 @@ async function streamAssistantResponse(
     const msgs = get().messages;
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg?.role === 'assistant' && typeof lastMsg.content === 'string' && lastMsg.content) {
-      notifyReplyReady(lastMsg.content).catch(() => {});
+      notifyReplyReady(lastMsg.content, { showFloatingBall: false }).catch(() => {});
     }
   }
 }
@@ -871,6 +1135,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await insertMessage(conversationId, userMessage);
     await updateConversation(conversationId, { updatedAt: Date.now() });
     return userMessage;
+  },
+
+  addSystemMessage: async (content: string) => {
+    const { isStreaming } = get();
+    if (isStreaming) return null;
+
+    let { conversationId } = get();
+    const settings = useSettingsStore.getState();
+    if (!settings._hydrated) return null;
+    const config = settings.apiConfigs[settings.activeConfigIndex];
+
+    if (!conversationId) {
+      conversationId = randomUUID();
+      const now = Date.now();
+      const conv: Conversation = {
+        id: conversationId,
+        title: content.slice(0, 30) || 'System note',
+        systemPrompt: settings.systemPrompt,
+        model: config?.model || '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await createConversation(conv);
+      set({ conversationId, hasOlderMessages: false, messageFloorOffset: 0 });
+    }
+
+    const systemMessage: Message = {
+      id: randomUUID(),
+      role: 'system',
+      content,
+      createdAt: Date.now(),
+    };
+
+    set((state) => ({
+      messages: [...state.messages, systemMessage],
+      error: null,
+    }));
+
+    await insertMessage(conversationId, systemMessage);
+    await updateConversation(conversationId, { updatedAt: Date.now() });
+    return systemMessage;
   },
 
   // 插入一条可见系统消息，等待用户下一次点击发送时触发巡游。

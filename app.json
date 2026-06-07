@@ -70,7 +70,8 @@
           "remindersPermission": false
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-sharing"
     ],
     "extra": {
       "router": {},

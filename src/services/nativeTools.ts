@@ -2,6 +2,10 @@ import { NativeModules, Platform } from 'react-native';
 import * as Battery from 'expo-battery';
 import * as Calendar from 'expo-calendar';
 import * as Device from 'expo-device';
+import {
+  buildAndroidAccessibilityElementSummary,
+  buildAndroidAccessibilityScreenSummary,
+} from '../utils/androidAccessibilityControl';
 
 function toJson(data: unknown): string {
   return JSON.stringify(data, null, 2);
@@ -69,6 +73,34 @@ const AndroidSystemTools = NativeModules.AndroidSystemTools as
     }
   | undefined;
 
+const AccessibilityScreenContext = NativeModules.AccessibilityScreenContext as
+  | {
+      openAccessibilitySettings: () => Promise<boolean>;
+      isAccessibilityServiceEnabled: () => Promise<boolean>;
+      captureScreenContext: () => Promise<{ imageUri?: string | null; nodeTree: string }>;
+      tap: (x: number, y: number) => Promise<AccessibilityActionResult>;
+      tapRelative: (xRatio: number, yRatio: number) => Promise<AccessibilityActionResult>;
+      swipe: (
+        startX: number,
+        startY: number,
+        endX: number,
+        endY: number,
+        durationMs: number
+      ) => Promise<AccessibilityActionResult>;
+      clickNode: (nodeId: string) => Promise<AccessibilityActionResult>;
+      scrollNode: (nodeId: string, direction: string) => Promise<AccessibilityActionResult>;
+      performGlobalAction: (action: string) => Promise<AccessibilityActionResult>;
+    }
+  | undefined;
+
+interface AccessibilityActionResult {
+  success: boolean;
+  message: string;
+  nodeTree?: string | null;
+}
+
+const ACCESSIBILITY_TOOL_TIMEOUT_MS = 4200;
+
 function ensureAndroidSystemTools(): NonNullable<typeof AndroidSystemTools> {
   if (Platform.OS !== 'android') {
     throw new Error('该工具仅支持 Android');
@@ -77,6 +109,58 @@ function ensureAndroidSystemTools(): NonNullable<typeof AndroidSystemTools> {
     throw new Error('Android 原生模块未加载，请重新运行 npx expo run:android 安装包含原生模块的新包');
   }
   return AndroidSystemTools;
+}
+
+function ensureAccessibilityScreenContext(): NonNullable<typeof AccessibilityScreenContext> {
+  if (Platform.OS !== 'android') {
+    throw new Error('This tool only supports Android');
+  }
+  if (!AccessibilityScreenContext) {
+    throw new Error('Accessibility native module is not loaded. Rebuild the Android development app.');
+  }
+  return AccessibilityScreenContext;
+}
+
+function parseMaybeJson(value: string | null | undefined): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function asNumber(value: unknown, fallback: number): number {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function formatAccessibilityAction(result: AccessibilityActionResult): string {
+  const screen = parseMaybeJson(result.nodeTree);
+  return toJson({
+    success: result.success,
+    message: result.message,
+    interactiveElements: buildAndroidAccessibilityElementSummary(screen),
+    screenSummary: buildAndroidAccessibilityScreenSummary(screen),
+  });
+}
+
+async function withAccessibilityTimeout<T>(promise: Promise<T>, actionName: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${actionName} timed out waiting for Android accessibility service`));
+        }, ACCESSIBILITY_TOOL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function getTimeRangeArgs(args: Record<string, any>, defaultDays: number): { startDate: Date; endDate: Date } {
@@ -187,6 +271,95 @@ export async function openUsageAccessSettings(): Promise<string> {
   const module = ensureAndroidSystemTools();
   await module.openUsageAccessSettings();
   return toJson({ opened: true, target: 'usage_access_settings' });
+}
+
+export async function openAccessibilitySettings(): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  await module.openAccessibilitySettings();
+  return toJson({ opened: true, target: 'accessibility_settings' });
+}
+
+export async function readAccessibilityScreenContext(options: { includeFullTree?: boolean } = {}): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const context = await module.captureScreenContext();
+  const screen = parseMaybeJson(context.nodeTree);
+  const payload: Record<string, unknown> = {
+    imageUri: context.imageUri || null,
+    interactiveElements: buildAndroidAccessibilityElementSummary(screen),
+    screenSummary: buildAndroidAccessibilityScreenSummary(screen),
+  };
+  if (options.includeFullTree) {
+    payload.screen = screen;
+  }
+  return toJson(payload);
+}
+
+export async function isAccessibilityControlEnabled(): Promise<boolean> {
+  const module = ensureAccessibilityScreenContext();
+  return await module.isAccessibilityServiceEnabled();
+}
+
+export async function tapAccessibilityScreen(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const result = await withAccessibilityTimeout(
+    module.tap(
+      asNumber(getArg(args, 'x'), 0),
+      asNumber(getArg(args, 'y'), 0)
+    ),
+    'tap_android_screen'
+  );
+  return formatAccessibilityAction(result);
+}
+
+export async function tapAccessibilityScreenRelative(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const result = await withAccessibilityTimeout(
+    module.tapRelative(
+      asNumber(getArg(args, 'x_ratio', 'xRatio'), 0.5),
+      asNumber(getArg(args, 'y_ratio', 'yRatio'), 0.5)
+    ),
+    'tap_android_relative'
+  );
+  return formatAccessibilityAction(result);
+}
+
+export async function swipeAccessibilityScreen(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const result = await withAccessibilityTimeout(
+    module.swipe(
+      asNumber(getArg(args, 'start_x', 'startX'), 0),
+      asNumber(getArg(args, 'start_y', 'startY'), 0),
+      asNumber(getArg(args, 'end_x', 'endX'), 0),
+      asNumber(getArg(args, 'end_y', 'endY'), 0),
+      asNumber(getArg(args, 'duration_ms', 'durationMs'), 360)
+    ),
+    'swipe_android_screen'
+  );
+  return formatAccessibilityAction(result);
+}
+
+export async function clickAccessibilityNode(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const nodeId = String(getArg(args, 'node_id', 'nodeId', 'id') || '').trim();
+  if (!nodeId) throw new Error('Missing node_id');
+  const result = await withAccessibilityTimeout(module.clickNode(nodeId), 'click_android_node');
+  return formatAccessibilityAction(result);
+}
+
+export async function scrollAccessibilityNode(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const nodeId = String(getArg(args, 'node_id', 'nodeId', 'id') || '').trim();
+  if (!nodeId) throw new Error('Missing node_id');
+  const direction = String(getArg(args, 'direction') || 'forward');
+  const result = await withAccessibilityTimeout(module.scrollNode(nodeId, direction), 'scroll_android_node');
+  return formatAccessibilityAction(result);
+}
+
+export async function performAccessibilityGlobalAction(args: Record<string, any>): Promise<string> {
+  const module = ensureAccessibilityScreenContext();
+  const action = String(getArg(args, 'action') || 'back');
+  const result = await withAccessibilityTimeout(module.performGlobalAction(action), 'android_global_action');
+  return formatAccessibilityAction(result);
 }
 
 export async function listCalendarEvents(args: Record<string, any>): Promise<string> {

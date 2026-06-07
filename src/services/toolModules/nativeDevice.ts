@@ -1,11 +1,19 @@
 import {
+  clickAccessibilityNode,
   createCalendarEvent,
   deleteCalendarEvent,
   listCalendarEvents,
+  openAccessibilitySettings,
   openUsageAccessSettings,
+  performAccessibilityGlobalAction,
+  readAccessibilityScreenContext,
   readAppUsageStats,
   readBatteryStatus,
   readDeviceInfo,
+  scrollAccessibilityNode,
+  swipeAccessibilityScreen,
+  tapAccessibilityScreen,
+  tapAccessibilityScreenRelative,
   updateCalendarEvent,
 } from '../nativeTools';
 import { ToolDefinition, ToolModule } from './types';
@@ -51,6 +59,121 @@ const OPEN_USAGE_ACCESS_SETTINGS_TOOL: ToolDefinition = {
     name: 'open_usage_access_settings',
     description: '打开 Android 使用情况访问权限设置页。仅当 read_app_usage_stats 返回 permissionGranted=false 且用户需要授权时调用。',
     parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+const OPEN_ACCESSIBILITY_SETTINGS_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'open_android_accessibility_settings',
+    description: 'Open Android Accessibility settings when the YSClaude accessibility service is not enabled and the user needs to grant permission.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+const OBSERVE_ANDROID_SCREEN_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'observe_android_screen',
+    description: 'Read the current Android screen state through the YSClaude accessibility service. Returns a compact screenSummary and an interactiveElements list with reliable node ids. Use interactiveElements ids for clicks.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+const TAP_ANDROID_SCREEN_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'tap_android_screen',
+    description: 'Last-resort absolute coordinate tap on Android. Do NOT estimate coordinates from screenshots when an interactiveElements node id exists. Prefer click_android_node almost always. Returns the updated screen tree.',
+    parameters: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'Absolute screen x coordinate in pixels.' },
+        y: { type: 'number', description: 'Absolute screen y coordinate in pixels.' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+};
+
+const TAP_ANDROID_RELATIVE_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'tap_android_relative',
+    description: 'Tap a relative screen position on Android. Use this when no reliable accessibility node exists but the target is visible in the screenshot, such as a custom note card. x_ratio and y_ratio are 0..1 from left/top of the full screen. Prefer this over absolute pixel taps.',
+    parameters: {
+      type: 'object',
+      properties: {
+        x_ratio: { type: 'number', description: 'Horizontal position from 0.0 left to 1.0 right.' },
+        y_ratio: { type: 'number', description: 'Vertical position from 0.0 top to 1.0 bottom.' },
+      },
+      required: ['x_ratio', 'y_ratio'],
+    },
+  },
+};
+
+const SWIPE_ANDROID_SCREEN_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'swipe_android_screen',
+    description: 'Swipe from one absolute screen coordinate to another on Android. Use for scrolling or gesture navigation. Returns the updated accessibility screen tree.',
+    parameters: {
+      type: 'object',
+      properties: {
+        start_x: { type: 'number', description: 'Swipe start x coordinate in pixels.' },
+        start_y: { type: 'number', description: 'Swipe start y coordinate in pixels.' },
+        end_x: { type: 'number', description: 'Swipe end x coordinate in pixels.' },
+        end_y: { type: 'number', description: 'Swipe end y coordinate in pixels.' },
+        duration_ms: { type: 'number', description: 'Gesture duration in milliseconds. Defaults to 360.' },
+      },
+      required: ['start_x', 'start_y', 'end_x', 'end_y'],
+    },
+  },
+};
+
+const CLICK_ANDROID_NODE_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'click_android_node',
+    description: 'Click a reliable node id from the interactiveElements list returned by the screen context or observe_android_screen, for example w0.2.1. Prefer this over tap_android_screen. If the node itself is not clickable, YSClaude will try clickable parents. Returns the updated screen tree.',
+    parameters: {
+      type: 'object',
+      properties: {
+        node_id: { type: 'string', description: 'Accessibility node id from the screen tree.' },
+      },
+      required: ['node_id'],
+    },
+  },
+};
+
+const SCROLL_ANDROID_NODE_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'scroll_android_node',
+    description: 'Ask a scrollable node to scroll forward or backward through accessibility actions. Use swipe_android_screen if node scrolling fails.',
+    parameters: {
+      type: 'object',
+      properties: {
+        node_id: { type: 'string', description: 'Scrollable accessibility node id from the screen tree.' },
+        direction: { type: 'string', enum: ['forward', 'backward', 'up', 'down', 'left', 'right'], description: 'Scroll direction.' },
+      },
+      required: ['node_id'],
+    },
+  },
+};
+
+const ANDROID_GLOBAL_ACTION_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'android_global_action',
+    description: 'Perform a safe Android global accessibility action: back, home, recents, notifications, or quick_settings. Returns the updated accessibility screen tree.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['back', 'home', 'recents', 'notifications', 'quick_settings'] },
+      },
+      required: ['action'],
+    },
   },
 };
 
@@ -151,6 +274,18 @@ export const nativeDeviceTool: ToolModule = {
     if (config.nativeTools?.appUsageStatsEnabled) {
       tools.push(APP_USAGE_STATS_TOOL, OPEN_USAGE_ACCESS_SETTINGS_TOOL);
     }
+    if (config.nativeTools?.accessibilityControlEnabled) {
+      tools.push(
+        OPEN_ACCESSIBILITY_SETTINGS_TOOL,
+        OBSERVE_ANDROID_SCREEN_TOOL,
+        TAP_ANDROID_SCREEN_TOOL,
+        TAP_ANDROID_RELATIVE_TOOL,
+        SWIPE_ANDROID_SCREEN_TOOL,
+        CLICK_ANDROID_NODE_TOOL,
+        SCROLL_ANDROID_NODE_TOOL,
+        ANDROID_GLOBAL_ACTION_TOOL
+      );
+    }
     if (config.nativeTools?.calendarEnabled) {
       tools.push(
         CALENDAR_LIST_EVENTS_TOOL,
@@ -171,6 +306,22 @@ export const nativeDeviceTool: ToolModule = {
         return await readAppUsageStats(args);
       case 'open_usage_access_settings':
         return await openUsageAccessSettings();
+      case 'open_android_accessibility_settings':
+        return await openAccessibilitySettings();
+      case 'observe_android_screen':
+        return await readAccessibilityScreenContext();
+      case 'tap_android_screen':
+        return await tapAccessibilityScreen(args);
+      case 'tap_android_relative':
+        return await tapAccessibilityScreenRelative(args);
+      case 'swipe_android_screen':
+        return await swipeAccessibilityScreen(args);
+      case 'click_android_node':
+        return await clickAccessibilityNode(args);
+      case 'scroll_android_node':
+        return await scrollAccessibilityNode(args);
+      case 'android_global_action':
+        return await performAccessibilityGlobalAction(args);
       case 'calendar_list_events':
         return await listCalendarEvents(args);
       case 'calendar_create_event':

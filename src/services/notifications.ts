@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { useSettingsStore } from '../stores/settings';
-import { hideFloatingBallMessage, showFloatingBallMessage } from './floatingBall';
+import { hideFloatingBallMessage, isFloatingBallShowing, showFloatingBallMessage } from './floatingBall';
 
 // ─── 前后台状态追踪 ───────────────────────────────────────────
 let currentAppState: AppStateStatus = AppState.currentState;
@@ -81,13 +81,31 @@ export async function ensurePermission(): Promise<boolean> {
 // ─── 发送通知 ─────────────────────────────────────────────────
 const BODY_MAX_LENGTH = 200;
 
+interface NotifyReplyReadyOptions {
+  showFloatingBall?: boolean;
+  speakFloatingBall?: boolean;
+}
+
+async function shouldSkipNotificationForFloatingBall(): Promise<boolean> {
+  if (!useSettingsStore.getState().floatingBallConfig.enabled) return false;
+  try {
+    return await isFloatingBallShowing();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * AI 回复完成时发送本地通知。
  * 若应用在前台、权限被拒或发送失败，则静默无操作，绝不影响聊天流程。
  */
-export async function notifyReplyReady(replyText: string): Promise<void> {
+export async function notifyReplyReady(
+  replyText: string,
+  options: NotifyReplyReadyOptions = {}
+): Promise<void> {
   try {
     if (!isAppBackgrounded()) return; // 用户正在看应用
+    if (await shouldSkipNotificationForFloatingBall()) return;
     if (!(await ensurePermission())) return; // 无权限
 
     const trimmed = replyText.trim();
@@ -98,8 +116,8 @@ export async function notifyReplyReady(replyText: string): Promise<void> {
         ? trimmed.slice(0, BODY_MAX_LENGTH) + '…'
         : trimmed;
 
-    if (useSettingsStore.getState().floatingBallConfig.enabled) {
-      showFloatingBallMessage(body).catch(() => {});
+    if (options.showFloatingBall !== false && useSettingsStore.getState().floatingBallConfig.enabled) {
+      showFloatingBallMessage(body, { speak: options.speakFloatingBall !== false }).catch(() => {});
     }
 
     if (!(await ensurePermission())) return;

@@ -1,7 +1,9 @@
 package com.ysclaude.app
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
+import android.graphics.Path
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
@@ -21,6 +23,12 @@ class FloatingAccessibilityService : AccessibilityService() {
   data class ScreenContext(
     val imageUri: String?,
     val nodeTree: String
+  )
+
+  data class ActionResult(
+    val success: Boolean,
+    val message: String,
+    val nodeTree: String? = null
   )
 
   override fun onServiceConnected() {
@@ -43,6 +51,11 @@ class FloatingAccessibilityService : AccessibilityService() {
     val payload = JSONObject()
     payload.put("capturedAt", System.currentTimeMillis())
     payload.put("activePackage", root?.packageName?.toString() ?: "")
+    payload.put("display", JSONObject()
+      .put("width", resources.displayMetrics.widthPixels)
+      .put("height", resources.displayMetrics.heightPixels)
+      .put("density", resources.displayMetrics.density)
+      .put("densityDpi", resources.displayMetrics.densityDpi))
     payload.put("windows", JSONArray().also { windowsArray ->
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
         windows.forEachIndexed { index, window ->
@@ -86,11 +99,20 @@ class FloatingAccessibilityService : AccessibilityService() {
       .put("right", bounds.right)
       .put("bottom", bounds.bottom)
       .put("width", bounds.width())
-      .put("height", bounds.height()))
+      .put("height", bounds.height())
+      .put("centerX", bounds.centerX())
+      .put("centerY", bounds.centerY()))
     objectValue.put("clickable", node.isClickable)
     objectValue.put("longClickable", node.isLongClickable)
     objectValue.put("scrollable", node.isScrollable)
     objectValue.put("editable", if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) node.isEditable else false)
+    objectValue.put(
+      "actionable",
+      node.isClickable ||
+        node.isLongClickable ||
+        node.isScrollable ||
+        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2 && node.isEditable)
+    )
     objectValue.put("enabled", node.isEnabled)
     objectValue.put("visibleToUser", if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) node.isVisibleToUser else true)
     objectValue.put("focused", node.isFocused)
@@ -109,6 +131,148 @@ class FloatingAccessibilityService : AccessibilityService() {
     }
 
     return objectValue
+  }
+
+  private fun findNodeByPath(path: String): AccessibilityNodeInfo? {
+    val parts = path.split(".")
+    if (parts.isEmpty()) return null
+
+    val windowIndex = parts.first().removePrefix("w").toIntOrNull() ?: return null
+    val root = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      windows.getOrNull(windowIndex)?.root
+    } else {
+      rootInActiveWindow
+    } ?: return null
+
+    var current = root
+    for (part in parts.drop(1)) {
+      val childIndex = part.toIntOrNull()
+      if (childIndex == null || childIndex < 0 || childIndex >= current.childCount) {
+        if (current !== root) current.recycle()
+        root.recycle()
+        return null
+      }
+      val child = current.getChild(childIndex)
+      if (current !== root) current.recycle()
+      current = child ?: run {
+        root.recycle()
+        return null
+      }
+    }
+    return current
+  }
+
+  private fun runNodeAction(path: String, action: Int): ActionResult {
+    val node = findNodeByPath(path)
+      ?: return ActionResult(false, "Node not found: $path", collectNodeTree())
+    return try {
+      var target: AccessibilityNodeInfo? = node
+      while (target != null) {
+        if (target.performAction(action)) {
+          return ActionResult(true, "Action performed on ${target.className ?: path}", collectNodeTree())
+        }
+        val parent = target.parent
+        if (target !== node) target.recycle()
+        target = parent
+      }
+      ActionResult(false, "Node and parents did not accept action: $path", collectNodeTree())
+    } finally {
+      node.recycle()
+    }
+  }
+
+  private fun collectNodeTreeOrNull(): String? {
+    return runCatching { collectNodeTree() }.getOrNull()
+  }
+
+  private fun dispatchGestureWithTimeout(
+    gesture: GestureDescription,
+    successMessage: String,
+    cancelledMessage: String,
+    timeoutMessage: String,
+    callback: (Result<ActionResult>) -> Unit
+  ) {
+    var finished = false
+    lateinit var timeoutRunnable: Runnable
+
+    fun finish(success: Boolean, message: String) {
+      if (finished) return
+      finished = true
+      mainHandler.removeCallbacks(timeoutRunnable)
+      callback(Result.success(ActionResult(success, message, collectNodeTreeOrNull())))
+    }
+
+    timeoutRunnable = Runnable {
+      finish(false, timeoutMessage)
+    }
+
+    mainHandler.postDelayed(timeoutRunnable, GESTURE_TIMEOUT_MS)
+    val dispatched = runCatching {
+      dispatchGesture(gesture, object : GestureResultCallback() {
+        override fun onCompleted(gestureDescription: GestureDescription?) {
+          finish(true, successMessage)
+        }
+
+        override fun onCancelled(gestureDescription: GestureDescription?) {
+          finish(false, cancelledMessage)
+        }
+      }, mainHandler)
+    }.getOrElse { error ->
+      finish(false, "Gesture dispatch failed: ${error.message ?: "unknown error"}")
+      return
+    }
+
+    if (!dispatched) {
+      finish(false, "Gesture dispatch was rejected by Android")
+    }
+  }
+
+  private fun runTap(x: Float, y: Float, callback: (Result<ActionResult>) -> Unit) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+      callback(Result.failure(IllegalStateException("Gestures require Android 7.0 or newer")))
+      return
+    }
+
+    val path = Path().apply { moveTo(x, y) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, 90))
+      .build()
+    dispatchGestureWithTimeout(
+      gesture = gesture,
+      successMessage = "Tapped at ${x.toInt()},${y.toInt()}",
+      cancelledMessage = "Tap cancelled",
+      timeoutMessage = "Tap timed out",
+      callback = callback
+    )
+  }
+
+  private fun runSwipe(
+    startX: Float,
+    startY: Float,
+    endX: Float,
+    endY: Float,
+    durationMs: Long,
+    callback: (Result<ActionResult>) -> Unit
+  ) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+      callback(Result.failure(IllegalStateException("Gestures require Android 7.0 or newer")))
+      return
+    }
+
+    val path = Path().apply {
+      moveTo(startX, startY)
+      lineTo(endX, endY)
+    }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(80, 2000)))
+      .build()
+    dispatchGestureWithTimeout(
+      gesture = gesture,
+      successMessage = "Swiped from ${startX.toInt()},${startY.toInt()} to ${endX.toInt()},${endY.toInt()}",
+      cancelledMessage = "Swipe cancelled",
+      timeoutMessage = "Swipe timed out",
+      callback = callback
+    )
   }
 
   private fun saveBitmap(bitmap: Bitmap): String {
@@ -156,6 +320,7 @@ class FloatingAccessibilityService : AccessibilityService() {
   companion object {
     private const val MAX_NODE_DEPTH = 12
     private const val MAX_NODE_COUNT = 320
+    private const val GESTURE_TIMEOUT_MS = 2800L
 
     @Volatile
     private var instance: FloatingAccessibilityService? = null
@@ -170,6 +335,96 @@ class FloatingAccessibilityService : AccessibilityService() {
       }
       service.mainHandler.post {
         service.captureScreenContext(callback)
+      }
+    }
+
+    fun tap(x: Float, y: Float, callback: (Result<ActionResult>) -> Unit) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      service.mainHandler.post {
+        service.runTap(x, y, callback)
+      }
+    }
+
+    fun tapRelative(xRatio: Float, yRatio: Float, callback: (Result<ActionResult>) -> Unit) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      service.mainHandler.post {
+        val width = service.resources.displayMetrics.widthPixels
+        val height = service.resources.displayMetrics.heightPixels
+        val x = xRatio.coerceIn(0f, 1f) * width
+        val y = yRatio.coerceIn(0f, 1f) * height
+        service.runTap(x, y, callback)
+      }
+    }
+
+    fun swipe(
+      startX: Float,
+      startY: Float,
+      endX: Float,
+      endY: Float,
+      durationMs: Long,
+      callback: (Result<ActionResult>) -> Unit
+    ) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      service.mainHandler.post {
+        service.runSwipe(startX, startY, endX, endY, durationMs, callback)
+      }
+    }
+
+    fun clickNode(path: String, callback: (Result<ActionResult>) -> Unit) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      service.mainHandler.post {
+        callback(Result.success(service.runNodeAction(path, AccessibilityNodeInfo.ACTION_CLICK)))
+      }
+    }
+
+    fun scrollNode(path: String, direction: String, callback: (Result<ActionResult>) -> Unit) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      val action = when (direction.lowercase()) {
+        "backward", "up", "left", "previous" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        else -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+      }
+      service.mainHandler.post {
+        callback(Result.success(service.runNodeAction(path, action)))
+      }
+    }
+
+    fun globalAction(action: String, callback: (Result<ActionResult>) -> Unit) {
+      val service = instance
+      if (service == null) {
+        callback(Result.failure(IllegalStateException("Please enable the YSClaude accessibility service first")))
+        return
+      }
+      val actionId = when (action.lowercase()) {
+        "back" -> GLOBAL_ACTION_BACK
+        "home" -> GLOBAL_ACTION_HOME
+        "recents" -> GLOBAL_ACTION_RECENTS
+        "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
+        "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
+        else -> GLOBAL_ACTION_BACK
+      }
+      service.mainHandler.post {
+        val success = service.performGlobalAction(actionId)
+        callback(Result.success(ActionResult(success, "Global action: $action", service.collectNodeTree())))
       }
     }
   }

@@ -39,4 +39,71 @@ class AccessibilityScreenContextModule(
         .onFailure { error -> promise.reject("CAPTURE_SCREEN_CONTEXT_FAILED", error) }
     }
   }
+
+  @ReactMethod
+  fun tap(x: Double, y: Double, promise: Promise) {
+    FloatingAccessibilityService.tap(x.toFloat(), y.toFloat()) { result ->
+      result
+        .onSuccess { action -> promise.resolve(actionToMap(action)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_TAP_FAILED", error) }
+    }
+  }
+
+  @ReactMethod
+  fun tapRelative(xRatio: Double, yRatio: Double, promise: Promise) {
+    FloatingAccessibilityService.tapRelative(xRatio.toFloat(), yRatio.toFloat()) { result ->
+      result
+        .onSuccess { action -> promise.resolve(actionToMap(action)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_TAP_RELATIVE_FAILED", error) }
+    }
+  }
+
+  @ReactMethod
+  fun swipe(startX: Double, startY: Double, endX: Double, endY: Double, durationMs: Double, promise: Promise) {
+    FloatingAccessibilityService.swipe(
+      startX.toFloat(),
+      startY.toFloat(),
+      endX.toFloat(),
+      endY.toFloat(),
+      durationMs.toLong()
+    ) { result ->
+      result
+        .onSuccess { action -> promise.resolve(actionToMap(action)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_SWIPE_FAILED", error) }
+    }
+  }
+
+  @ReactMethod
+  fun clickNode(nodeId: String, promise: Promise) {
+    FloatingAccessibilityService.clickNode(nodeId) { result ->
+      result
+        .onSuccess { action -> promise.resolve(actionToMap(action)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_CLICK_NODE_FAILED", error) }
+    }
+  }
+
+  @ReactMethod
+  fun scrollNode(nodeId: String, direction: String, promise: Promise) {
+    FloatingAccessibilityService.scrollNode(nodeId, direction) { result ->
+      result
+        .onSuccess { action -> promise.resolve(actionToMap(action)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_SCROLL_NODE_FAILED", error) }
+    }
+  }
+
+  @ReactMethod
+  fun performGlobalAction(action: String, promise: Promise) {
+    FloatingAccessibilityService.globalAction(action) { result ->
+      result
+        .onSuccess { actionResult -> promise.resolve(actionToMap(actionResult)) }
+        .onFailure { error -> promise.reject("ACCESSIBILITY_GLOBAL_ACTION_FAILED", error) }
+    }
+  }
+
+  private fun actionToMap(action: FloatingAccessibilityService.ActionResult) =
+    Arguments.createMap().apply {
+      putBoolean("success", action.success)
+      putString("message", action.message)
+      putString("nodeTree", action.nodeTree)
+    }
 }

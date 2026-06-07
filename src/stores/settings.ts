@@ -105,6 +105,7 @@ export interface NativeToolConfig {
   batteryStatusEnabled: boolean;
   appUsageStatsEnabled: boolean;
   calendarEnabled: boolean;
+  accessibilityControlEnabled?: boolean;
 }
 
 export interface ShizukuFileRoot {
@@ -420,6 +421,7 @@ export const useSettingsStore = create<SettingsState>()(
         batteryStatusEnabled: false,
         appUsageStatsEnabled: false,
         calendarEnabled: false,
+        accessibilityControlEnabled: false,
       },
       shizukuFileConfig: {
         enabled: false,

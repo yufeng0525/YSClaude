@@ -371,6 +371,12 @@ export default function ChatScreen() {
     }, 1800);
   }, []);
 
+  const clearEnteringMessageAnimations = useCallback(() => {
+    enteringMessageTimersRef.current.forEach((timer) => clearTimeout(timer));
+    enteringMessageTimersRef.current.clear();
+    setEnteringMessageIds((current) => (current.size === 0 ? current : new Set()));
+  }, []);
+
   const handleEnableWebCruise = useCallback(async () => {
     if (!hotboardConfig?.enabled) {
       showToast('请先在 Tool 设置中开启 AI 网页巡游热榜');
@@ -416,16 +422,24 @@ export default function ChatScreen() {
   }, [finishInitialPositioning, isInitialPositioning]);
 
   const handleScreenTouchStart = useCallback(() => {
+    const shouldKeepBottom = shouldStickToBottomRef.current;
     floorVisibleAtTouchStartRef.current = visibleFloorMessageId !== null;
     if (visibleFloorMessageId !== null) {
       setVisibleFloorMessageId(null);
+      if (shouldKeepBottom) {
+        scheduleScrollToEnd(24, true);
+      }
     }
-  }, [visibleFloorMessageId]);
+  }, [scheduleScrollToEnd, visibleFloorMessageId]);
 
   const handleBubblePress = useCallback((messageId: string) => {
     if (floorVisibleAtTouchStartRef.current) return;
+    const shouldKeepBottom = shouldStickToBottomRef.current;
     setVisibleFloorMessageId(messageId);
-  }, []);
+    if (shouldKeepBottom) {
+      scheduleScrollToEnd(24, true);
+    }
+  }, [scheduleScrollToEnd]);
 
   useEffect(() => {
     const nextIds = messages.map((message) => message.id);
@@ -499,10 +513,11 @@ export default function ChatScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      clearEnteringMessageAnimations();
       if (!pendingScrollMessageId && messageIdsRef.current.length > 0 && shouldStickToBottomRef.current) {
         scheduleScrollToEnd(32, true);
       }
-    }, [conversationId, pendingScrollMessageId, scheduleScrollToEnd])
+    }, [clearEnteringMessageAnimations, conversationId, pendingScrollMessageId, scheduleScrollToEnd])
   );
 
   const handleInputLayout = useCallback((event: LayoutChangeEvent) => {
