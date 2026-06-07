@@ -72,6 +72,7 @@ interface ChatState {
   isLoadingOlderMessages: boolean;
   messageFloorOffset: number;
   pendingScrollMessageId: string | null;
+  openToBottomRequestId: number;
   isStreaming: boolean;
   error: string | null;
 
@@ -1128,6 +1129,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoadingOlderMessages: false,
   messageFloorOffset: 0,
   pendingScrollMessageId: null,
+  openToBottomRequestId: 0,
   isStreaming: false,
   error: null,
 
@@ -1389,6 +1391,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isLoadingOlderMessages: false,
       messageFloorOffset: page.floorOffset,
       pendingScrollMessageId: null,
+      openToBottomRequestId: get().openToBottomRequestId + 1,
       error: null,
     });
   },

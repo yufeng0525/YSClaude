@@ -172,6 +172,7 @@ export default function ChatScreen() {
     isLoadingOlderMessages,
     messageFloorOffset,
     pendingScrollMessageId,
+    openToBottomRequestId,
     isStreaming,
     error,
     addUserMessage,
@@ -216,6 +217,8 @@ export default function ChatScreen() {
   const messageIdsRef = useRef<string[]>([]);
   const conversationIdRef = useRef<string | null>(null);
   const initialPositioningConversationRef = useRef<string | null>(null);
+  const isInitialPositioningRef = useRef(false);
+  const handledOpenToBottomRequestRef = useRef(0);
   const hasListLaidOutRef = useRef(false);
   const floorVisibleAtTouchStartRef = useRef(false);
 
@@ -390,20 +393,6 @@ export default function ChatScreen() {
     await enableWebCruise();
   }, [enableWebCruise, hotboardConfig, showToast]);
 
-  useLayoutEffect(() => {
-    if (!conversationId || messages.length === 0 || pendingScrollMessageId) {
-      setIsInitialPositioning(false);
-      initialPositioningConversationRef.current = conversationId;
-      return;
-    }
-
-    if (conversationId !== initialPositioningConversationRef.current) {
-      initialPositioningConversationRef.current = conversationId;
-      shouldStickToBottomRef.current = true;
-      setIsInitialPositioning(true);
-    }
-  }, [conversationId, messages.length, pendingScrollMessageId]);
-
   const finishInitialPositioning = useCallback(() => {
     if (initialPositioningTimerRef.current !== null) {
       clearTimeout(initialPositioningTimerRef.current);
@@ -411,9 +400,68 @@ export default function ChatScreen() {
     scrollToEnd(false);
     initialPositioningTimerRef.current = setTimeout(() => {
       initialPositioningTimerRef.current = null;
+      isInitialPositioningRef.current = false;
       setIsInitialPositioning(false);
     }, 40);
   }, [scrollToEnd]);
+
+  const beginInitialPositioning = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollSettleTimerRef.current !== null) {
+      clearTimeout(scrollSettleTimerRef.current);
+      scrollSettleTimerRef.current = null;
+    }
+    if (scrollFollowUpTimerRef.current !== null) {
+      clearTimeout(scrollFollowUpTimerRef.current);
+      scrollFollowUpTimerRef.current = null;
+    }
+    if (initialPositioningTimerRef.current !== null) {
+      clearTimeout(initialPositioningTimerRef.current);
+      initialPositioningTimerRef.current = null;
+    }
+
+    contentHeightRef.current = 0;
+    shouldStickToBottomRef.current = true;
+    isInitialPositioningRef.current = true;
+    setIsInitialPositioning(true);
+
+    initialPositioningTimerRef.current = setTimeout(() => {
+      finishInitialPositioning();
+    }, 180);
+  }, [finishInitialPositioning]);
+
+  useLayoutEffect(() => {
+    if (!conversationId || messages.length === 0 || pendingScrollMessageId) {
+      if (initialPositioningTimerRef.current !== null) {
+        clearTimeout(initialPositioningTimerRef.current);
+        initialPositioningTimerRef.current = null;
+      }
+      isInitialPositioningRef.current = false;
+      setIsInitialPositioning(false);
+      initialPositioningConversationRef.current = conversationId;
+      return;
+    }
+
+    const conversationChanged = conversationId !== initialPositioningConversationRef.current;
+    const hasOpenRequest = openToBottomRequestId > handledOpenToBottomRequestRef.current;
+
+    if (conversationChanged || hasOpenRequest) {
+      if (hasOpenRequest) {
+        handledOpenToBottomRequestRef.current = openToBottomRequestId;
+      }
+      initialPositioningConversationRef.current = conversationId;
+      beginInitialPositioning();
+    }
+  }, [
+    beginInitialPositioning,
+    conversationId,
+    messages.length,
+    openToBottomRequestId,
+    pendingScrollMessageId,
+  ]);
 
   useEffect(() => {
     if (!isInitialPositioning) return;
@@ -461,6 +509,7 @@ export default function ChatScreen() {
 
     if (!pendingScrollMessageId && appended) {
       shouldStickToBottomRef.current = true;
+      if (isInitialPositioningRef.current) return;
       if (!conversationChanged && prevIds.length > 0) {
         const enteringIds = nextIds.slice(prevIds.length);
         setEnteringMessageIds((current) => {
@@ -490,7 +539,12 @@ export default function ChatScreen() {
   }, [conversationId, messages, pendingScrollMessageId, scheduleScrollToEnd]);
 
   useEffect(() => {
-    if (!pendingScrollMessageId && messageIdsRef.current.length > 0 && shouldStickToBottomRef.current) {
+    if (
+      !isInitialPositioningRef.current &&
+      !pendingScrollMessageId &&
+      messageIdsRef.current.length > 0 &&
+      shouldStickToBottomRef.current
+    ) {
       scheduleScrollToEnd(32, true);
     }
   }, [inputBarHeight, pendingScrollMessageId, scheduleScrollToEnd]);
@@ -515,7 +569,12 @@ export default function ChatScreen() {
   useFocusEffect(
     useCallback(() => {
       clearEnteringMessageAnimations();
-      if (!pendingScrollMessageId && messageIdsRef.current.length > 0 && shouldStickToBottomRef.current) {
+      if (
+        !isInitialPositioningRef.current &&
+        !pendingScrollMessageId &&
+        messageIdsRef.current.length > 0 &&
+        shouldStickToBottomRef.current
+      ) {
         scheduleScrollToEnd(32, true);
       }
     }, [clearEnteringMessageAnimations, conversationId, pendingScrollMessageId, scheduleScrollToEnd])
@@ -534,19 +593,19 @@ export default function ChatScreen() {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
     if (nextHeight > 0 && Math.abs(listHeightRef.current - nextHeight) > 1) {
       listHeightRef.current = nextHeight;
-      if (!isInitialPositioning && (!hasListLaidOutRef.current || shouldStickToBottomRef.current)) {
+      if (!isInitialPositioningRef.current && (!hasListLaidOutRef.current || shouldStickToBottomRef.current)) {
         scheduleScrollToEnd(24);
       }
       hasListLaidOutRef.current = true;
     }
-  }, [isInitialPositioning, scheduleScrollToEnd]);
+  }, [scheduleScrollToEnd]);
 
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
     const nextHeight = Math.ceil(height);
     const heightChanged = Math.abs(contentHeightRef.current - nextHeight) > 1;
     contentHeightRef.current = nextHeight;
 
-    if (isInitialPositioning && nextHeight > 0 && listHeightRef.current > 0) {
+    if (isInitialPositioningRef.current && nextHeight > 0 && listHeightRef.current > 0) {
       finishInitialPositioning();
       return;
     }
@@ -554,9 +613,10 @@ export default function ChatScreen() {
     if (heightChanged && shouldStickToBottomRef.current) {
       scheduleScrollToEnd(24);
     }
-  }, [finishInitialPositioning, isInitialPositioning, scheduleScrollToEnd]);
+  }, [finishInitialPositioning, scheduleScrollToEnd]);
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (isInitialPositioningRef.current) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceToBottom =
       contentSize.height - (contentOffset.y + layoutMeasurement.height);

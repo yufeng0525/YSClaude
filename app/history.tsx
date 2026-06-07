@@ -81,8 +81,8 @@ export default function HistoryScreen() {
     return () => clearTimeout(timer);
   }, [conversationId, searchScope, searchText]);
 
-  function handleOpen(conv: Conversation) {
-    loadConversation(conv.id);
+  async function handleOpen(conv: Conversation) {
+    await loadConversation(conv.id);
     router.back();
   }
 
