@@ -716,7 +716,6 @@ export default function ChatScreen() {
         {chatBackgroundImageUri && (
           <>
             <Image source={{ uri: chatBackgroundImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-            <View pointerEvents="none" style={styles.backgroundImageOverlay} />
           </>
         )}
       </BlurTargetView>
@@ -970,16 +969,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     bottom: 0,
     left: 0,
     backgroundColor: colors.background,
-  },
-  backgroundImageOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: colors.background === '#12100D'
-      ? 'rgba(18,16,13,0.26)'
-      : 'rgba(250,249,245,0.18)',
   },
   header: {
     flexDirection: 'row',
