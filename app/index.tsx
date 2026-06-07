@@ -167,6 +167,7 @@ export default function ChatScreen() {
     conversationId,
     messages,
     hiddenRanges,
+    hiddenMessageIds,
     hasOlderMessages,
     isLoadingOlderMessages,
     messageFloorOffset,
@@ -597,6 +598,11 @@ export default function ChatScreen() {
     return set;
   }, [hiddenRanges]);
 
+  const hiddenMessageIdSet = useMemo(
+    () => new Set(hiddenMessageIds),
+    [hiddenMessageIds]
+  );
+
   const animatedMessageStyle = useAnimatedStyle(() => {
     const kbHeight = keyboard.height.value;
     const lift = kbHeight > 0 ? Math.max(kbHeight - insets.bottom, 0) : 0;
@@ -620,7 +626,9 @@ export default function ChatScreen() {
         (!prev || item.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS) &&
         !dismissedDividers.has(item.id);
       const floor = floorMap.get(item.id);
-      const isHidden = floor !== undefined && hiddenFloorSet.has(floor);
+      const isHidden =
+        hiddenMessageIdSet.has(item.id) ||
+        (floor !== undefined && hiddenFloorSet.has(floor));
 
       return (
         <>
@@ -656,7 +664,7 @@ export default function ChatScreen() {
         </>
       );
     },
-    [dismissedDividers, enteringMessageIds, floorMap, handleBubblePress, hiddenFloorSet, latestAssistantMessageId, messages, visibleFloorMessageId]
+    [dismissedDividers, enteringMessageIds, floorMap, handleBubblePress, hiddenFloorSet, hiddenMessageIdSet, latestAssistantMessageId, messages, visibleFloorMessageId]
   );
 
   const renderOlderMessagesHeader = useCallback(() => {

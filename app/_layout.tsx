@@ -106,6 +106,10 @@ export default function RootLayout() {
           options={{ animation: 'slide_from_right', presentation: 'modal' }}
         />
         <Stack.Screen
+          name="chat-diagnostics"
+          options={{ animation: 'slide_from_right', presentation: 'modal' }}
+        />
+        <Stack.Screen
           name="music"
           options={{ animation: 'slide_from_right', presentation: 'modal' }}
         />

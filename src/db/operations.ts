@@ -18,6 +18,21 @@ import {
   FocusSessionStatus,
   ToolCall,
 } from '../types';
+import {
+  ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX,
+  ANDROID_SCREENSHOT_CAPTURE_NOTICE_PREFIX,
+} from '../utils/androidAccessibilityControl';
+import {
+  APP_EVENT_PREFIX,
+  FOCUS_EVENT_PREFIX,
+} from '../utils/focusEvents';
+import {
+  RADIO_CALL_IN_MARKER,
+  RADIO_CONTINUE_MARKER,
+  RADIO_END_MARKER,
+  RADIO_START_MARKER,
+} from '../utils/radioMarkers';
+import { WEB_CRUISE_NOTICE_TEXT } from '../utils/webCruise';
 
 interface MessageRow {
   id: string;
@@ -45,11 +60,64 @@ export interface ChatSearchResult {
   createdAt: number;
 }
 
+export interface ChatDiagnosticsConversation {
+  id: string;
+  title: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  hiddenRanges: HiddenRange[];
+  hiddenMessageIds: string[];
+  pendingResponseBoundaryMessageId: string | null | undefined;
+  totalMessageCount: number;
+  floorMessageCount: number;
+  systemMessageCount: number;
+  toolMessageCount: number;
+  emptyAssistantCount: number;
+  duplicateTimestampGroupCount: number;
+  duplicateTimestampMessageCount: number;
+  latestMessageRole: Message['role'] | null;
+  latestMessageCreatedAt: number | null;
+  issueCount: number;
+}
+
+export interface ChatDiagnosticsMessage {
+  id: string;
+  role: Message['role'];
+  content: string;
+  toolCallsRaw: string | null;
+  toolCallId: string | null;
+  toolInvocationsRaw: string | null;
+  imageUri: string | null;
+  createdAt: number;
+  databaseIndex: number;
+  floorNumber: number | null;
+  isHidden: boolean;
+  isHiddenByMessageId: boolean;
+  isHiddenFromAi: boolean;
+  duplicateTimestampCount: number;
+  isPendingResponseBoundary: boolean;
+  aiVisibility: 'history' | 'runtime-context' | 'ui-only';
+  aiVisibilityLabel: string;
+  issues: string[];
+}
+
+export interface ChatDiagnosticsDuplicateGroup {
+  createdAt: number;
+  count: number;
+  ids: string[];
+}
+
+export interface ChatDiagnosticsDetail extends ChatDiagnosticsConversation {
+  duplicateTimestampGroups: ChatDiagnosticsDuplicateGroup[];
+  messages: ChatDiagnosticsMessage[];
+}
+
 export async function createConversation(conv: Conversation): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT INTO conversations (id, title, system_prompt, model, created_at, updated_at, hidden_ranges)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO conversations (id, title, system_prompt, model, created_at, updated_at, hidden_ranges, hidden_message_ids)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       conv.id,
       conv.title,
@@ -58,6 +126,7 @@ export async function createConversation(conv: Conversation): Promise<void> {
       conv.createdAt,
       conv.updatedAt,
       JSON.stringify(conv.hiddenRanges ?? []),
+      JSON.stringify(conv.hiddenMessageIds ?? []),
     ]
   );
 }
@@ -97,6 +166,7 @@ export async function getAllConversations(): Promise<Conversation[]> {
     created_at: number;
     updated_at: number;
     hidden_ranges: string | null;
+    hidden_message_ids: string | null;
   }>('SELECT * FROM conversations ORDER BY created_at DESC');
 
   return rows.map((row) => ({
@@ -107,6 +177,7 @@ export async function getAllConversations(): Promise<Conversation[]> {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     hiddenRanges: parseHiddenRanges(row.hidden_ranges),
+    hiddenMessageIds: parseStringArray(row.hidden_message_ids),
   }));
 }
 
@@ -121,6 +192,17 @@ function parseHiddenRanges(raw: string | null | undefined): HiddenRange[] {
     return parsed.filter(
       (r) => r && typeof r.from === 'number' && typeof r.to === 'number'
     );
+  } catch {
+    return [];
+  }
+}
+
+function parseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((value) => typeof value === 'string' && value.trim()))];
   } catch {
     return [];
   }
@@ -142,6 +224,51 @@ export async function updateHiddenRanges(
   const db = await getDatabase();
   await db.runAsync('UPDATE conversations SET hidden_ranges = ? WHERE id = ?', [
     JSON.stringify(ranges),
+    conversationId,
+  ]);
+}
+
+export async function getHiddenMessageIds(conversationId: string): Promise<string[]> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ hidden_message_ids: string | null }>(
+    'SELECT hidden_message_ids FROM conversations WHERE id = ?',
+    [conversationId]
+  );
+  return parseStringArray(row?.hidden_message_ids);
+}
+
+export async function updateHiddenMessageIds(
+  conversationId: string,
+  messageIds: string[]
+): Promise<void> {
+  const db = await getDatabase();
+  const normalized = [...new Set(messageIds.filter((id) => id.trim()))];
+  await db.runAsync('UPDATE conversations SET hidden_message_ids = ? WHERE id = ?', [
+    JSON.stringify(normalized),
+    conversationId,
+  ]);
+}
+
+export async function setChatDiagnosticsMessageHidden(
+  conversationId: string,
+  messageId: string,
+  hidden: boolean
+): Promise<void> {
+  const db = await getDatabase();
+  const conversation = await db.getFirstAsync<{ hidden_message_ids: string | null }>(
+    'SELECT hidden_message_ids FROM conversations WHERE id = ?',
+    [conversationId]
+  );
+  if (!conversation) return;
+  const current = new Set(parseStringArray(conversation.hidden_message_ids));
+  if (hidden) {
+    current.add(messageId);
+  } else {
+    current.delete(messageId);
+  }
+  await db.runAsync('UPDATE conversations SET hidden_message_ids = ?, updated_at = ? WHERE id = ?', [
+    JSON.stringify([...current]),
+    Date.now(),
     conversationId,
   ]);
 }
@@ -203,6 +330,22 @@ export async function updateMessageContent(id: string, content: string): Promise
   await db.runAsync('UPDATE messages SET content = ? WHERE id = ?', [content, id]);
 }
 
+export async function updateChatDiagnosticsMessageContent(
+  conversationId: string,
+  messageId: string,
+  content: string
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    'UPDATE messages SET content = ? WHERE conversation_id = ? AND id = ?',
+    [content, conversationId, messageId]
+  );
+  await db.runAsync('UPDATE conversations SET updated_at = ? WHERE id = ?', [
+    Date.now(),
+    conversationId,
+  ]);
+}
+
 // 把某条消息的工具调用记录落库（流式收尾时调用）。空数组写 null。
 export async function updateMessageToolInvocations(
   id: string,
@@ -218,6 +361,72 @@ export async function updateMessageToolInvocations(
 export async function deleteMessage(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM messages WHERE id = ?', [id]);
+}
+
+export async function deleteChatDiagnosticsMessage(
+  conversationId: string,
+  messageId: string
+): Promise<void> {
+  const db = await getDatabase();
+  const target = await db.getFirstAsync<{
+    id: string;
+    role: string;
+    created_at: number;
+  }>(
+    'SELECT id, role, created_at FROM messages WHERE conversation_id = ? AND id = ?',
+    [conversationId, messageId]
+  );
+  if (!target) return;
+
+  const isFloorMessage = target.role === 'user' || target.role === 'assistant';
+  let nextHiddenRanges: HiddenRange[] | null = null;
+  if (isFloorMessage) {
+    const floorRow = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count
+         FROM messages
+        WHERE conversation_id = ?
+          AND role IN ('user', 'assistant')
+          AND (created_at < ? OR (created_at = ? AND id <= ?))`,
+      [conversationId, target.created_at, target.created_at, target.id]
+    );
+    const deletedFloor = floorRow?.count ?? 0;
+    const conversation = await db.getFirstAsync<{ hidden_ranges: string | null }>(
+      'SELECT hidden_ranges FROM conversations WHERE id = ?',
+      [conversationId]
+    );
+    nextHiddenRanges = shiftHiddenRangesAfterDeletedFloor(
+      parseHiddenRanges(conversation?.hidden_ranges),
+      deletedFloor
+    );
+  }
+
+  await db.runAsync('DELETE FROM messages WHERE conversation_id = ? AND id = ?', [
+    conversationId,
+    messageId,
+  ]);
+
+  const hiddenIdsRow = await db.getFirstAsync<{ hidden_message_ids: string | null }>(
+    'SELECT hidden_message_ids FROM conversations WHERE id = ?',
+    [conversationId]
+  );
+  const nextHiddenMessageIds = parseStringArray(hiddenIdsRow?.hidden_message_ids).filter(
+    (id) => id !== messageId
+  );
+
+  if (nextHiddenRanges) {
+    await db.runAsync('UPDATE conversations SET hidden_ranges = ?, hidden_message_ids = ?, updated_at = ? WHERE id = ?', [
+      JSON.stringify(nextHiddenRanges),
+      JSON.stringify(nextHiddenMessageIds),
+      Date.now(),
+      conversationId,
+    ]);
+  } else {
+    await db.runAsync('UPDATE conversations SET hidden_message_ids = ?, updated_at = ? WHERE id = ?', [
+      JSON.stringify(nextHiddenMessageIds),
+      Date.now(),
+      conversationId,
+    ]);
+  }
 }
 
 function parseJsonArray<T>(raw: string | null | undefined): T[] | undefined {
@@ -411,6 +620,144 @@ export async function getConversationMessageDates(conversationId: string): Promi
   return [...dates];
 }
 
+export async function getChatDiagnosticsConversations(): Promise<ChatDiagnosticsConversation[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    id: string;
+    title: string;
+    model: string;
+    created_at: number;
+    updated_at: number;
+    hidden_ranges: string | null;
+    hidden_message_ids: string | null;
+    pending_response_boundary_message_id: string | null;
+    total_message_count: number | null;
+    floor_message_count: number | null;
+    system_message_count: number | null;
+    tool_message_count: number | null;
+    empty_assistant_count: number | null;
+    latest_message_role: string | null;
+    latest_message_created_at: number | null;
+  }>(`
+    SELECT
+      c.id,
+      c.title,
+      c.model,
+      c.created_at,
+      c.updated_at,
+      c.hidden_ranges,
+      c.hidden_message_ids,
+      c.pending_response_boundary_message_id,
+      COUNT(m.id) as total_message_count,
+      SUM(CASE WHEN m.role IN ('user', 'assistant') THEN 1 ELSE 0 END) as floor_message_count,
+      SUM(CASE WHEN m.role = 'system' THEN 1 ELSE 0 END) as system_message_count,
+      SUM(CASE WHEN m.role = 'tool' THEN 1 ELSE 0 END) as tool_message_count,
+      SUM(
+        CASE
+          WHEN m.role = 'assistant'
+            AND TRIM(COALESCE(m.content, '')) = ''
+            AND (m.tool_invocations IS NULL OR m.tool_invocations = '' OR m.tool_invocations = '[]')
+          THEN 1 ELSE 0
+        END
+      ) as empty_assistant_count,
+      (
+        SELECT lm.role
+          FROM messages lm
+         WHERE lm.conversation_id = c.id
+         ORDER BY lm.created_at DESC, lm.id DESC
+         LIMIT 1
+      ) as latest_message_role,
+      (
+        SELECT lm.created_at
+          FROM messages lm
+         WHERE lm.conversation_id = c.id
+         ORDER BY lm.created_at DESC, lm.id DESC
+         LIMIT 1
+      ) as latest_message_created_at
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+     GROUP BY c.id
+     ORDER BY c.updated_at DESC
+  `);
+  const duplicateStats = await getDuplicateTimestampStats();
+
+  return rows.map((row) => {
+    const duplicate = duplicateStats.get(row.id);
+    return buildChatDiagnosticsConversation(row, {
+      duplicateTimestampGroupCount: duplicate?.groupCount ?? 0,
+      duplicateTimestampMessageCount: duplicate?.messageCount ?? 0,
+    });
+  });
+}
+
+export async function getChatDiagnosticsConversation(
+  conversationId: string
+): Promise<ChatDiagnosticsDetail | null> {
+  const conversations = await getChatDiagnosticsConversations();
+  const conversation = conversations.find((item) => item.id === conversationId);
+  if (!conversation) return null;
+
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<MessageRow>(
+    `SELECT *
+       FROM messages
+      WHERE conversation_id = ?
+      ORDER BY created_at ASC, id ASC`,
+    [conversationId]
+  );
+  const duplicateTimestampGroups = await getDuplicateTimestampGroups(conversationId);
+  const duplicateCounts = new Map<number, number>();
+  duplicateTimestampGroups.forEach((group) => {
+    duplicateCounts.set(group.createdAt, group.count);
+  });
+
+  let floorNumber = 0;
+  const hiddenFloorSet = hiddenRangesToSet(conversation.hiddenRanges);
+  const hiddenMessageIdSet = new Set(conversation.hiddenMessageIds);
+  const messages = rows.map((row, index) => {
+    const role = row.role as Message['role'];
+    const isFloorMessage = role === 'user' || role === 'assistant';
+    const nextFloorNumber = isFloorMessage ? ++floorNumber : null;
+    const duplicateTimestampCount = duplicateCounts.get(row.created_at) ?? 1;
+    const aiVisibility = getMessageAiVisibility(row);
+    const issues = getChatMessageIssues(row, {
+      duplicateTimestampCount,
+      floorNumber: nextFloorNumber,
+      hiddenFloorSet,
+    });
+
+    return {
+      id: row.id,
+      role,
+      content: row.content,
+      toolCallsRaw: row.tool_calls,
+      toolCallId: row.tool_call_id,
+      toolInvocationsRaw: row.tool_invocations,
+      imageUri: row.image_uri,
+      createdAt: row.created_at,
+      databaseIndex: index + 1,
+      floorNumber: nextFloorNumber,
+      isHidden: nextFloorNumber !== null && hiddenFloorSet.has(nextFloorNumber),
+      isHiddenByMessageId: hiddenMessageIdSet.has(row.id),
+      isHiddenFromAi:
+        hiddenMessageIdSet.has(row.id) ||
+        (nextFloorNumber !== null && hiddenFloorSet.has(nextFloorNumber)),
+      duplicateTimestampCount,
+      isPendingResponseBoundary:
+        conversation.pendingResponseBoundaryMessageId === row.id,
+      aiVisibility: aiVisibility.status,
+      aiVisibilityLabel: aiVisibility.label,
+      issues,
+    };
+  });
+
+  return {
+    ...conversation,
+    duplicateTimestampGroups,
+    messages,
+  };
+}
+
 export async function getFirstMessageInDateRange(
   conversationId: string,
   startAt: number,
@@ -444,6 +791,280 @@ async function getConversationFloorOffset(
     [conversationId, beforeCreatedAt]
   );
   return row?.count ?? 0;
+}
+
+function buildChatDiagnosticsConversation(
+  row: {
+    id: string;
+    title: string;
+    model: string;
+    created_at: number;
+    updated_at: number;
+    hidden_ranges: string | null;
+    hidden_message_ids: string | null;
+    pending_response_boundary_message_id: string | null;
+    total_message_count: number | null;
+    floor_message_count: number | null;
+    system_message_count: number | null;
+    tool_message_count: number | null;
+    empty_assistant_count: number | null;
+    latest_message_role: string | null;
+    latest_message_created_at: number | null;
+  },
+  stats: {
+    duplicateTimestampGroupCount: number;
+    duplicateTimestampMessageCount: number;
+  }
+): ChatDiagnosticsConversation {
+  const emptyAssistantCount = row.empty_assistant_count ?? 0;
+  const issueCount = emptyAssistantCount + stats.duplicateTimestampGroupCount;
+
+  return {
+    id: row.id,
+    title: row.title,
+    model: row.model,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    hiddenRanges: parseHiddenRanges(row.hidden_ranges),
+    hiddenMessageIds: parseStringArray(row.hidden_message_ids),
+    pendingResponseBoundaryMessageId:
+      row.pending_response_boundary_message_id === null
+        ? undefined
+        : row.pending_response_boundary_message_id || null,
+    totalMessageCount: row.total_message_count ?? 0,
+    floorMessageCount: row.floor_message_count ?? 0,
+    systemMessageCount: row.system_message_count ?? 0,
+    toolMessageCount: row.tool_message_count ?? 0,
+    emptyAssistantCount,
+    duplicateTimestampGroupCount: stats.duplicateTimestampGroupCount,
+    duplicateTimestampMessageCount: stats.duplicateTimestampMessageCount,
+    latestMessageRole: row.latest_message_role as Message['role'] | null,
+    latestMessageCreatedAt: row.latest_message_created_at ?? null,
+    issueCount,
+  };
+}
+
+async function getDuplicateTimestampStats(): Promise<Map<string, { groupCount: number; messageCount: number }>> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    conversation_id: string;
+    duplicate_timestamp_group_count: number;
+    duplicate_timestamp_message_count: number;
+  }>(`
+    SELECT
+      conversation_id,
+      COUNT(*) as duplicate_timestamp_group_count,
+      SUM(timestamp_count) as duplicate_timestamp_message_count
+      FROM (
+        SELECT conversation_id, created_at, COUNT(*) as timestamp_count
+          FROM messages
+         GROUP BY conversation_id, created_at
+        HAVING COUNT(*) > 1
+      )
+     GROUP BY conversation_id
+  `);
+
+  return new Map(
+    rows.map((row) => [
+      row.conversation_id,
+      {
+        groupCount: row.duplicate_timestamp_group_count,
+        messageCount: row.duplicate_timestamp_message_count,
+      },
+    ])
+  );
+}
+
+async function getDuplicateTimestampGroups(
+  conversationId: string
+): Promise<ChatDiagnosticsDuplicateGroup[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    created_at: number;
+    count: number;
+    ids: string | null;
+  }>(
+    `SELECT created_at, COUNT(*) as count, GROUP_CONCAT(id, ',') as ids
+       FROM messages
+      WHERE conversation_id = ?
+      GROUP BY created_at
+     HAVING COUNT(*) > 1
+      ORDER BY created_at ASC`,
+    [conversationId]
+  );
+
+  return rows.map((row) => ({
+    createdAt: row.created_at,
+    count: row.count,
+    ids: row.ids ? row.ids.split(',') : [],
+  }));
+}
+
+function hiddenRangesToSet(ranges: HiddenRange[]): Set<number> {
+  const set = new Set<number>();
+  for (const range of ranges) {
+    for (let floor = range.from; floor <= range.to; floor++) {
+      set.add(floor);
+    }
+  }
+  return set;
+}
+
+function shiftHiddenRangesAfterDeletedFloor(
+  ranges: HiddenRange[],
+  deletedFloor: number
+): HiddenRange[] {
+  const next: HiddenRange[] = [];
+
+  for (const range of ranges) {
+    if (deletedFloor < range.from) {
+      next.push({ from: range.from - 1, to: range.to - 1 });
+      continue;
+    }
+
+    if (deletedFloor > range.to) {
+      next.push({ ...range });
+      continue;
+    }
+
+    if (range.from <= deletedFloor - 1) {
+      next.push({ from: range.from, to: deletedFloor - 1 });
+    }
+    if (deletedFloor + 1 <= range.to) {
+      next.push({ from: deletedFloor, to: range.to - 1 });
+    }
+  }
+
+  return normalizeHiddenRanges(next);
+}
+
+function normalizeHiddenRanges(ranges: HiddenRange[]): HiddenRange[] {
+  const sorted = ranges
+    .filter((range) => range.from > 0 && range.from <= range.to)
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  const merged: HiddenRange[] = [];
+
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || range.from > last.to + 1) {
+      merged.push({ ...range });
+    } else {
+      last.to = Math.max(last.to, range.to);
+    }
+  }
+
+  return merged;
+}
+
+function getMessageAiVisibility(row: MessageRow): {
+  status: ChatDiagnosticsMessage['aiVisibility'];
+  label: string;
+} {
+  if (row.role === 'user' || row.role === 'assistant') {
+    return {
+      status: 'history',
+      label: 'Sent as chat history unless hidden by hidden_ranges',
+    };
+  }
+
+  if (row.role === 'system') {
+    const content = row.content.trim();
+    if (content === WEB_CRUISE_NOTICE_TEXT) {
+      return {
+        status: 'runtime-context',
+        label: 'Triggers AI web cruise runtime context on the next reply',
+      };
+    }
+    if (
+      content.startsWith(ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX) ||
+      content.startsWith(ANDROID_SCREENSHOT_CAPTURE_NOTICE_PREFIX)
+    ) {
+      return {
+        status: 'runtime-context',
+        label: 'Android capture marker; screen context is sent for that reply when available',
+      };
+    }
+    if (
+      content.includes(RADIO_START_MARKER) ||
+      content.includes(RADIO_CALL_IN_MARKER) ||
+      content.includes(RADIO_CONTINUE_MARKER) ||
+      content.includes(RADIO_END_MARKER)
+    ) {
+      return {
+        status: 'runtime-context',
+        label: 'AI radio marker included in runtime context',
+      };
+    }
+    if (content.startsWith(FOCUS_EVENT_PREFIX) || content.startsWith(APP_EVENT_PREFIX)) {
+      return {
+        status: 'runtime-context',
+        label: 'Focus/app event included in runtime context',
+      };
+    }
+    if (content.startsWith('已附带当前网页：')) {
+      return {
+        status: 'runtime-context',
+        label: 'Current WebView notice; page context is sent for the same reply',
+      };
+    }
+    return {
+      status: 'ui-only',
+      label: 'Stored system message; not sent as chat history',
+    };
+  }
+
+  return {
+    status: 'ui-only',
+    label: 'Tool-role rows are not sent by the normal chat history filter',
+  };
+}
+
+function getChatMessageIssues(
+  row: MessageRow,
+  options: {
+    duplicateTimestampCount: number;
+    floorNumber: number | null;
+    hiddenFloorSet: Set<number>;
+  }
+): string[] {
+  const issues: string[] = [];
+  const role = row.role as Message['role'];
+
+  if (options.duplicateTimestampCount > 1) {
+    issues.push(`same timestamp x${options.duplicateTimestampCount}`);
+  }
+  if (role !== 'user' && role !== 'assistant') {
+    issues.push('no floor');
+  }
+  if (
+    role === 'assistant' &&
+    row.content.trim() === '' &&
+    (!row.tool_invocations || row.tool_invocations === '[]')
+  ) {
+    issues.push('empty assistant');
+  }
+  if (options.floorNumber !== null && options.hiddenFloorSet.has(options.floorNumber)) {
+    issues.push('hidden floor');
+  }
+  if (row.tool_calls && !isJsonArray(row.tool_calls)) {
+    issues.push('invalid tool_calls JSON');
+  }
+  if (row.tool_invocations && !isJsonArray(row.tool_invocations)) {
+    issues.push('invalid tool_invocations JSON');
+  }
+  if (!Number.isFinite(row.created_at)) {
+    issues.push('invalid created_at');
+  }
+
+  return issues;
+}
+
+function isJsonArray(raw: string): boolean {
+  try {
+    return Array.isArray(JSON.parse(raw));
+  } catch {
+    return false;
+  }
 }
 
 function likePattern(value: string): string {

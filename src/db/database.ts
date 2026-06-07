@@ -56,7 +56,8 @@ async function initTables(database: SQLite.SQLiteDatabase) {
       model TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      pending_response_boundary_message_id TEXT
+      pending_response_boundary_message_id TEXT,
+      hidden_message_ids TEXT NOT NULL DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -410,6 +411,15 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   }
   if (version < 12) {
     await database.execAsync('PRAGMA user_version = 12;');
+  }
+
+  if (!(await hasColumn(database, 'conversations', 'hidden_message_ids'))) {
+    await database.execAsync(
+      `ALTER TABLE conversations ADD COLUMN hidden_message_ids TEXT NOT NULL DEFAULT '[]';`
+    );
+  }
+  if (version < 13) {
+    await database.execAsync('PRAGMA user_version = 13;');
   }
 }
 

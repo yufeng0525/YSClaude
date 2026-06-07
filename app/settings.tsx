@@ -1580,6 +1580,7 @@ function FloatingBallTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 /* ==================== API 配置 Tab ==================== */
 
 function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
+  const router = useRouter();
   const { _hydrated, apiConfigs, activeConfigIndex, saveAPIConfig, removeAPIConfig, setActiveConfig } = useSettingsStore();
 
   const [name, setName] = useState('');
@@ -1886,6 +1887,12 @@ function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
             )}
           </Pressable>
         </View>
+        <Pressable
+          style={styles.diagnosticsButton}
+          onPress={() => router.push('/chat-diagnostics')}
+        >
+          <Text style={styles.diagnosticsButtonText}>打开聊天数据库诊断</Text>
+        </Pressable>
       </View>
 
       {/* Model picker modal */}
@@ -1933,10 +1940,12 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     messages,
     conversationId,
     hiddenRanges,
+    hiddenMessageIds,
     messageFloorOffset,
     addHiddenRange,
     restoreHiddenRange,
     removeHiddenRange,
+    setMessageHidden,
     loadConversation,
   } = useChatStore();
   const [fromStr, setFromStr] = useState('');
@@ -1947,6 +1956,17 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 
   // 仅取 user/assistant 消息作为「楼层」序列（1-based）
   const floorMessages = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  const hiddenMessageRows = hiddenMessageIds.map((id) => {
+    const message = messages.find((item) => item.id === id) ?? null;
+    const localFloorIndex = message
+      ? floorMessages.findIndex((item) => item.id === id)
+      : -1;
+    return {
+      id,
+      message,
+      floor: localFloorIndex >= 0 ? messageFloorOffset + localFloorIndex + 1 : null,
+    };
+  });
 
   function handleAddRange() {
     const range = parseInputRange();
@@ -1994,7 +2014,10 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   })();
 
   function roleLabel(role: string) {
-    return role === 'user' ? '你' : 'AI';
+    if (role === 'user') return '你';
+    if (role === 'assistant') return 'AI';
+    if (role === 'system') return '系统';
+    return '工具';
   }
 
   function snippet(text: string) {
@@ -2101,6 +2124,33 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
                   <Text style={styles.rangeText}>第 {r.from} 条 ~ 第 {r.to} 条</Text>
                   <Pressable onPress={() => removeHiddenRange(i)}>
                     <Text style={styles.rangeDelete}>×</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {hiddenMessageRows.length > 0 && (
+            <View style={styles.rangeList}>
+              <Text style={styles.previewHint}>单条隐藏消息</Text>
+              {hiddenMessageRows.map((row) => (
+                <View key={row.id} style={styles.rangeItem}>
+                  <View style={styles.hiddenMessageText}>
+                    <Text style={styles.rangeText}>
+                      {row.floor !== null
+                        ? `第 ${row.floor} 条`
+                        : row.message
+                          ? roleLabel(row.message.role)
+                          : '未加载消息'}
+                    </Text>
+                    <Text style={styles.previewText} numberOfLines={2}>
+                      {row.message
+                        ? `${roleLabel(row.message.role)}：${snippet(row.message.content) || '（空消息）'}`
+                        : row.id}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => setMessageHidden(row.id, false)}>
+                    <Text style={styles.rangeDelete}>恢复</Text>
                   </Pressable>
                 </View>
               ))}
@@ -3543,6 +3593,21 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontWeight: '600',
     color: colors.danger,
   },
+  diagnosticsButton: {
+    marginTop: 12,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  diagnosticsButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
   testButton: {
     flex: 1, paddingVertical: 14, borderRadius: 12,
     borderWidth: 1.5, borderColor: colors.primary,
@@ -3890,6 +3955,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   rangeText: { fontSize: 14, color: colors.text },
   rangeDelete: { fontSize: 20, color: colors.danger, paddingHorizontal: 8 },
+  hiddenMessageText: { flex: 1, minWidth: 0, paddingRight: 10 },
   rangeInputRow: {
     flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 20,
   },

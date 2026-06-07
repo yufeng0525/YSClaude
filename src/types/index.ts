@@ -42,6 +42,7 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   hiddenRanges?: HiddenRange[];
+  hiddenMessageIds?: string[];
 }
 
 export interface Diary {
