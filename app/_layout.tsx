@@ -13,6 +13,8 @@ import {
 } from '../src/services/notifications';
 import { WebViewPanel } from '../src/components/WebViewPanel';
 import { useSettingsStore } from '../src/stores/settings';
+import { useLicenseStore } from '../src/stores/license';
+import { InviteGate } from '../src/components/InviteGate';
 import {
   addFloatingBallToolActionListener,
   hideFloatingBall,
@@ -39,7 +41,17 @@ export default function RootLayout() {
     'TiemposText-Bold': require('../assets/TiemposText-bold.otf'),
   });
   const settingsHydrated = useSettingsStore((state) => state._hydrated);
+  const licenseHydrated = useLicenseStore((state) => state._hydrated);
+  const licenseGrant = useLicenseStore((state) => state.grant);
   const floatingBallEnabled = useSettingsStore((state) => state.floatingBallConfig.enabled);
+  const floatingBallNormalImageUrisKey = useSettingsStore((state) =>
+    (state.floatingBallConfig.normalImageUris || []).join('|') || state.floatingBallConfig.normalImageUri || ''
+  );
+  const floatingBallEdgeImageUrisKey = useSettingsStore((state) =>
+    (state.floatingBallConfig.edgeImageUris || []).join('|') || state.floatingBallConfig.edgeImageUri || ''
+  );
+  const floatingBallAssetAutoSwitchEnabled = useSettingsStore((state) => !!state.floatingBallConfig.assetAutoSwitchEnabled);
+  const floatingBallAssetAutoSwitchIntervalSeconds = useSettingsStore((state) => state.floatingBallConfig.assetAutoSwitchIntervalSeconds || 8);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -48,14 +60,28 @@ export default function RootLayout() {
   }, [fontsLoaded]);
 
   useEffect(() => {
-    if (!settingsHydrated) return;
+    if (!settingsHydrated || !licenseHydrated) return;
+
+    if (!licenseGrant) {
+      hideFloatingBall().catch(() => undefined);
+      return;
+    }
 
     if (floatingBallEnabled) {
       showFloatingBall().catch(() => undefined);
     } else {
       hideFloatingBall().catch(() => undefined);
     }
-  }, [settingsHydrated, floatingBallEnabled]);
+  }, [
+    settingsHydrated,
+    licenseHydrated,
+    licenseGrant,
+    floatingBallEnabled,
+    floatingBallNormalImageUrisKey,
+    floatingBallEdgeImageUrisKey,
+    floatingBallAssetAutoSwitchEnabled,
+    floatingBallAssetAutoSwitchIntervalSeconds,
+  ]);
 
   useEffect(() => {
     const sub = addFloatingBallToolActionListener((action) => {
@@ -95,58 +121,60 @@ export default function RootLayout() {
   return (
     <>
       <StatusBar style={statusBarStyle} />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen
-          name="history"
-          options={{ animation: 'slide_from_left', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="settings"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="chat-diagnostics"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="music"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="music-playlists"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="focus"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="reading/index"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="reading/[id]"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="game/index"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="game/[id]"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="m5stack"
-          options={{ animation: 'slide_from_right', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="chat/[id]"
-          options={{ animation: 'slide_from_right' }}
-        />
-      </Stack>
-      <WebViewPanel />
+      <InviteGate>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen
+            name="history"
+            options={{ animation: 'slide_from_left', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="settings"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="chat-diagnostics"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="music"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="music-playlists"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="focus"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="reading/index"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="reading/[id]"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="game/index"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="game/[id]"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="m5stack"
+            options={{ animation: 'slide_from_right', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="chat/[id]"
+            options={{ animation: 'slide_from_right' }}
+          />
+        </Stack>
+        <WebViewPanel />
+      </InviteGate>
     </>
   );
 }

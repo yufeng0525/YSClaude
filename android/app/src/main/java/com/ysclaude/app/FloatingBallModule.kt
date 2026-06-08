@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
@@ -64,7 +63,7 @@ class FloatingBallModule(
 
   private val mainHandler = Handler(Looper.getMainLooper())
   private val windowManager = reactContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-  private val defaultBallImageSize = readAssetPixelSize(NORMAL_IDLE)
+  private val defaultBallSize = ImageSize(dp(64), dp(64))
   private val touchTargetSize = dp(96)
   private val toolSize = dp(38)
   private val expandedWidth = dp(238)
@@ -94,8 +93,14 @@ class FloatingBallModule(
   private var inputParams: WindowManager.LayoutParams? = null
   private var toolbarViews: List<View> = emptyList()
   private var layoutParams: WindowManager.LayoutParams? = null
-  private var ballWidth = defaultBallImageSize.width
-  private var ballHeight = defaultBallImageSize.height
+  private var ballWidth = defaultBallSize.width
+  private var ballHeight = defaultBallSize.height
+  private var customNormalImageUris: List<String> = emptyList()
+  private var customEdgeImageUris: List<String> = emptyList()
+  private var currentNormalImageUri = ""
+  private var currentEdgeImageUri = ""
+  private var assetAutoSwitchEnabled = false
+  private var assetAutoSwitchIntervalMs = 8000L
   private var isExpanded = false
   private var isEdgeHanging = false
   private var edgeSide = EdgeSide.RIGHT
@@ -176,6 +181,45 @@ class FloatingBallModule(
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("OPEN_OVERLAY_SETTINGS_FAILED", error)
+    }
+  }
+
+  private val assetAutoSwitchRunnable = object : Runnable {
+    override fun run() {
+      if (rootView != null && !isExpanded && assetAutoSwitchEnabled) {
+        val hasPool = if (isEdgeHanging) customEdgeImageUris.size > 1 else customNormalImageUris.size > 1
+        if (hasPool) {
+          loadState(if (isEdgeHanging) EDGE_IDLE else NORMAL_IDLE, true)
+        }
+      }
+      scheduleAssetAutoSwitch()
+    }
+  }
+
+  @ReactMethod
+  fun configureAssets(
+    normalUris: ReadableArray?,
+    edgeUris: ReadableArray?,
+    autoSwitchEnabled: Boolean,
+    autoSwitchIntervalSeconds: Double,
+    promise: Promise
+  ) {
+    mainHandler.post {
+      try {
+        customNormalImageUris = readableArrayToStringList(normalUris)
+        customEdgeImageUris = readableArrayToStringList(edgeUris)
+        assetAutoSwitchEnabled = autoSwitchEnabled
+        assetAutoSwitchIntervalMs = (autoSwitchIntervalSeconds.coerceIn(1.0, 3600.0) * 1000).toLong()
+        currentNormalImageUri = if (currentNormalImageUri in customNormalImageUris) currentNormalImageUri else ""
+        currentEdgeImageUri = if (currentEdgeImageUri in customEdgeImageUris) currentEdgeImageUri else ""
+        if (rootView != null) {
+          loadState(if (isEdgeHanging) EDGE_IDLE else NORMAL_IDLE)
+        }
+        scheduleAssetAutoSwitch()
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("CONFIGURE_FLOATING_BALL_ASSETS_FAILED", error)
+      }
     }
   }
 
@@ -479,12 +523,14 @@ class FloatingBallModule(
     FloatingBallForegroundService.start(reactContext)
     loadState(NORMAL_IDLE)
     scheduleRandomState()
+    scheduleAssetAutoSwitch()
   }
 
   private fun hideInternal() {
     mainHandler.removeCallbacks(longPressRunnable)
     mainHandler.removeCallbacks(returnToIdleRunnable)
     mainHandler.removeCallbacks(randomStateRunnable)
+    mainHandler.removeCallbacks(assetAutoSwitchRunnable)
     mainHandler.removeCallbacks(hideMessageRunnable)
     hideMessageInternal()
     hideTextInputInternal()
@@ -576,7 +622,7 @@ class FloatingBallModule(
       return
     }
     currentNormalIndex = (currentNormalIndex + 1).floorMod(NORMAL_CLICK_STATES.size)
-    loadState(NORMAL_CLICK_STATES[currentNormalIndex])
+    loadState(NORMAL_CLICK_STATES[currentNormalIndex], true)
     mainHandler.removeCallbacks(returnToIdleRunnable)
     mainHandler.postDelayed(returnToIdleRunnable, 3200)
   }
@@ -742,7 +788,7 @@ class FloatingBallModule(
       params.x = if (edgeSide == EdgeSide.LEFT) 0 else width - collapsedWidth()
       params.y = params.y.coerceIn(0, screenHeight() - collapsedHeight())
       windowManager.updateViewLayout(root, params)
-      loadState(EDGE_IDLE)
+      loadState(EDGE_IDLE, true)
       updateMessagePosition()
       return
     }
@@ -1088,6 +1134,18 @@ class FloatingBallModule(
     }
   }
 
+  private fun defaultBallDrawable(isEdgeState: Boolean): GradientDrawable {
+    val colors = if (isEdgeState) {
+      intArrayOf(Color.rgb(245, 247, 255), Color.rgb(152, 168, 232))
+    } else {
+      intArrayOf(Color.rgb(255, 251, 242), Color.rgb(232, 176, 116))
+    }
+    return GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
+      shape = GradientDrawable.OVAL
+      setStroke(dp(1), Color.argb(150, 255, 255, 255))
+    }
+  }
+
   private fun roundedDrawable(color: Int, radius: Int): GradientDrawable {
     return GradientDrawable().apply {
       shape = GradientDrawable.RECTANGLE
@@ -1105,23 +1163,58 @@ class FloatingBallModule(
     }
   }
 
-  private fun loadState(assetName: String) {
+  private fun loadState(assetName: String, forceRandom: Boolean = false) {
     val image = ballView ?: return
-    val actualAsset = if (assetName.startsWith("clawd-edge-") && !EDGE_ALL_STATES.contains(assetName)) {
-      EDGE_IDLE
-    } else {
-      assetName
+    val isEdgeState = assetName.startsWith("edge-") || isEdgeHanging
+    val customUris = if (isEdgeState) customEdgeImageUris else customNormalImageUris
+    val currentUri = if (isEdgeState) currentEdgeImageUri else currentNormalImageUri
+    val customUri = when {
+      forceRandom || currentUri.isBlank() -> pickRandomBallUri(customUris).also {
+        if (isEdgeState) {
+          currentEdgeImageUri = it
+        } else {
+          currentNormalImageUri = it
+        }
+      }
+      else -> currentUri
     }
-    applyBallImageSize(actualAsset)
+    applyBallImageSize(defaultBallSize)
     image.scaleX = if (isEdgeHanging && edgeSide == EdgeSide.LEFT) -1f else 1f
+    if (customUri.isBlank()) {
+      Glide.with(reactContext).clear(image)
+      image.setImageDrawable(null)
+      image.scaleType = ImageView.ScaleType.CENTER
+      image.background = defaultBallDrawable(isEdgeState)
+      return
+    }
+
+    image.background = null
+    image.scaleType = ImageView.ScaleType.FIT_CENTER
     Glide.with(reactContext)
-      .asGif()
-      .load("file:///android_asset/$actualAsset.gif")
+      .load(customUri)
       .into(image)
   }
 
-  private fun applyBallImageSize(assetName: String) {
-    val nextSize = readAssetPixelSize(assetName)
+  private fun pickRandomBallUri(uris: List<String>): String {
+    if (uris.isEmpty()) return ""
+    if (uris.size == 1) return uris[0]
+    return uris[Random.nextInt(uris.size)]
+  }
+
+  private fun readableArrayToStringList(array: ReadableArray?): List<String> {
+    if (array == null) return emptyList()
+    val values = mutableListOf<String>()
+    val seen = mutableSetOf<String>()
+    for (index in 0 until array.size()) {
+      val value = array.getString(index)?.trim().orEmpty()
+      if (value.isBlank() || seen.contains(value)) continue
+      seen.add(value)
+      values.add(value)
+    }
+    return values
+  }
+
+  private fun applyBallImageSize(nextSize: ImageSize) {
     if (nextSize.width == ballWidth && nextSize.height == ballHeight) return
 
     ballWidth = nextSize.width
@@ -1184,25 +1277,15 @@ class FloatingBallModule(
     return params?.topMargin ?: ballView?.top ?: 0
   }
 
-  private fun readAssetPixelSize(assetName: String): ImageSize {
-    val options = BitmapFactory.Options().apply {
-      inJustDecodeBounds = true
-    }
-    return runCatching {
-      reactContext.assets.open("$assetName.gif").use { stream ->
-        BitmapFactory.decodeStream(stream, null, options)
-      }
-      if (options.outWidth > 0 && options.outHeight > 0) {
-        ImageSize(options.outWidth, options.outHeight)
-      } else {
-        FALLBACK_IMAGE_SIZE
-      }
-    }.getOrDefault(FALLBACK_IMAGE_SIZE)
-  }
-
   private fun scheduleRandomState() {
     mainHandler.removeCallbacks(randomStateRunnable)
     mainHandler.postDelayed(randomStateRunnable, Random.nextLong(9000, 18000))
+  }
+
+  private fun scheduleAssetAutoSwitch() {
+    mainHandler.removeCallbacks(assetAutoSwitchRunnable)
+    if (!assetAutoSwitchEnabled || rootView == null) return
+    mainHandler.postDelayed(assetAutoSwitchRunnable, assetAutoSwitchIntervalMs)
   }
 
   private fun overlayType(): Int {
@@ -1230,8 +1313,6 @@ class FloatingBallModule(
   private data class ImageSize(val width: Int, val height: Int)
 
   companion object {
-    private val FALLBACK_IMAGE_SIZE = ImageSize(46, 44)
-
     private const val TOOL_ACTION_EVENT = "FloatingBallToolAction"
     private const val DESKTOP_LYRIC_ACTION_EVENT = "DesktopLyricAction"
     private const val ACTION_SCREEN_SHARE = "screen_share"
@@ -1241,46 +1322,17 @@ class FloatingBallModule(
     private const val ACTION_TOGGLE_MUSIC = "toggle_music"
     private const val ACTION_OPEN_APP = "open_app"
 
-    private const val NORMAL_IDLE = "clawd-idle"
-    private const val EDGE_IDLE = "clawd-edge-idle"
+    private const val NORMAL_IDLE = "normal-idle"
+    private const val EDGE_IDLE = "edge-idle"
 
     private val NORMAL_CLICK_STATES = listOf(
-      "clawd-building",
-      "clawd-bubble",
-      "clawd-carrying",
-      "clawd-conducting",
-      "clawd-debugger",
-      "clawd-error",
-      "clawd-happy",
-      "clawd-headphones-groove",
-      "clawd-idle-reading",
-      "clawd-juggling",
-      "clawd-notification",
-      "clawd-react-annoyed",
-      "clawd-react-double-jump",
-      "clawd-sleeping",
-      "clawd-sweeping",
-      "clawd-thinking",
-      "clawd-typing"
+      "normal-active"
     )
 
     private val NORMAL_RANDOM_STATES = NORMAL_CLICK_STATES
 
-    private val EDGE_ALL_STATES = setOf(
-      "clawd-edge-alert",
-      "clawd-edge-crabwalk",
-      "clawd-edge-enter",
-      "clawd-edge-happy",
-      "clawd-edge-idle",
-      "clawd-edge-peek"
-    )
-
     private val EDGE_RANDOM_STATES = listOf(
-      "clawd-edge-alert",
-      "clawd-edge-crabwalk",
-      "clawd-edge-enter",
-      "clawd-edge-happy",
-      "clawd-edge-peek"
+      "edge-active"
     )
   }
 }

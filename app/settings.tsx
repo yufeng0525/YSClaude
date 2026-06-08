@@ -38,6 +38,7 @@ import {
   hideFloatingBall,
   openFloatingBallPermissionSettings,
   showFloatingBall,
+  syncFloatingBallAssets,
 } from '../src/services/floatingBall';
 import { createAndShareBackup, pickBackupFile, restoreBackup, type PickedBackup } from '../src/services/backup';
 import { useKeyboardHeight } from '../src/hooks/useKeyboardHeight';
@@ -58,6 +59,10 @@ const CUSTOM_BACKGROUND_MAX_SIDE = 6000;
 const CUSTOM_STICKER_MAX_BYTES = 5 * 1024 * 1024;
 const CUSTOM_STICKER_MIN_SIDE = 32;
 const CUSTOM_STICKER_MAX_SIDE = 4096;
+const CUSTOM_FLOATING_BALL_MAX_BYTES = 8 * 1024 * 1024;
+const CUSTOM_FLOATING_BALL_MIN_SIDE = 24;
+const CUSTOM_FLOATING_BALL_MAX_SIDE = 2048;
+const CUSTOM_FLOATING_BALL_SELECTION_LIMIT = 12;
 const CHAT_INPUT_ICON_ITEMS: Array<{ key: ChatInputIconKey; label: string }> = [
   { key: 'options', label: '左侧菜单' },
   { key: 'sticker', label: '贴纸' },
@@ -145,11 +150,13 @@ function topBarIconExtension(asset: ImagePicker.ImagePickerAsset): string {
   const mimeType = asset.mimeType?.toLowerCase();
   if (mimeType === 'image/png') return '.png';
   if (mimeType === 'image/webp') return '.webp';
+  if (mimeType === 'image/gif') return '.gif';
   if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') return '.jpg';
 
   const cleanUri = asset.uri.split('?')[0].toLowerCase();
   if (cleanUri.endsWith('.png')) return '.png';
   if (cleanUri.endsWith('.webp')) return '.webp';
+  if (cleanUri.endsWith('.gif')) return '.gif';
   if (cleanUri.endsWith('.jpeg')) return '.jpg';
   if (cleanUri.endsWith('.jpg')) return '.jpg';
   return '.png';
@@ -177,6 +184,39 @@ async function copyAppearanceImage(
   const destination = new File(dir, `${prefix}-${randomUUID()}${topBarIconExtension(asset)}`);
   await source.copy(destination, { overwrite: true });
   return destination.uri;
+}
+
+function validateFloatingBallAsset(asset: ImagePicker.ImagePickerAsset): string | null {
+  const mimeType = asset.mimeType?.toLowerCase();
+  const extension = topBarIconExtension(asset);
+  const isAllowedType =
+    mimeType === 'image/png' ||
+    mimeType === 'image/jpeg' ||
+    mimeType === 'image/jpg' ||
+    mimeType === 'image/gif' ||
+    ['.png', '.jpg', '.gif'].includes(extension);
+
+  if (!isAllowedType) {
+    return '只支持 PNG、JPG 或 GIF';
+  }
+  if (asset.fileSize && asset.fileSize > CUSTOM_FLOATING_BALL_MAX_BYTES) {
+    return '图片不能超过 8MB';
+  }
+  if (asset.width < CUSTOM_FLOATING_BALL_MIN_SIDE || asset.height < CUSTOM_FLOATING_BALL_MIN_SIDE) {
+    return `图片边长至少 ${CUSTOM_FLOATING_BALL_MIN_SIDE}px`;
+  }
+  if (asset.width > CUSTOM_FLOATING_BALL_MAX_SIDE || asset.height > CUSTOM_FLOATING_BALL_MAX_SIDE) {
+    return `图片边长不能超过 ${CUSTOM_FLOATING_BALL_MAX_SIDE}px`;
+  }
+  return null;
+}
+
+async function copyFloatingBallImage(asset: ImagePicker.ImagePickerAsset, prefix: string): Promise<string> {
+  return copyAppearanceImage(asset, 'floating-ball-assets', prefix);
+}
+
+function mergeUniqueUris(existing: string[], next: string[]): string[] {
+  return Array.from(new Set([...existing, ...next].map((uri) => uri.trim()).filter(Boolean)));
 }
 
 function validateTopBarIconAsset(asset: ImagePicker.ImagePickerAsset): string | null {
@@ -605,6 +645,7 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const userFontSize = appearanceConfig?.userFontSize ?? 16;
   const assistantFontSize = appearanceConfig?.assistantFontSize ?? 16;
   const assistantTextStrokeWidth = appearanceConfig?.assistantTextStrokeWidth ?? 0;
+  const customGreetings = appearanceConfig?.customGreetings || '';
 
   useEffect(() => {
     setUserBubbleColorInput(appearanceConfig?.userBubbleColor || colors.userBubble);
@@ -867,6 +908,18 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
       <Pressable style={styles.appearanceClearButton} onPress={handleResetAppearanceConfig}>
         <Text style={styles.appearanceClearText}>一键清空，恢复原始默认</Text>
       </Pressable>
+
+      <Text style={styles.sectionTitle}>欢迎语</Text>
+      <Text style={styles.hint}>每行一条，聊天页空状态刷新时会随机抽取一条。留空时显示 What shall we think through?</Text>
+      <TextInput
+        style={[styles.input, styles.multilineInput, styles.greetingInput]}
+        value={customGreetings}
+        onChangeText={(value) => setAppearanceConfig({ customGreetings: value })}
+        multiline
+        placeholder={'What shall we think through?\n今天想拆哪件事？'}
+        placeholderTextColor={colors.textTertiary}
+        textAlignVertical="top"
+      />
 
       <Pressable
         style={styles.appearanceThemeToggle}
@@ -1623,6 +1676,70 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 function FloatingBallTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const { floatingBallConfig, setFloatingBallConfig, ttsConfig } = useSettingsStore();
   const [busy, setBusy] = useState(false);
+  const [pickingBallImage, setPickingBallImage] = useState<'normal' | 'edge' | null>(null);
+  const normalImageUris = mergeUniqueUris(
+    floatingBallConfig.normalImageUris || [],
+    floatingBallConfig.normalImageUri ? [floatingBallConfig.normalImageUri] : []
+  );
+  const edgeImageUris = mergeUniqueUris(
+    floatingBallConfig.edgeImageUris || [],
+    floatingBallConfig.edgeImageUri ? [floatingBallConfig.edgeImageUri] : []
+  );
+  const assetAutoSwitchEnabled = !!floatingBallConfig.assetAutoSwitchEnabled;
+  const assetAutoSwitchIntervalSeconds = floatingBallConfig.assetAutoSwitchIntervalSeconds || 8;
+
+  async function handlePickFloatingBallImage(kind: 'normal' | 'edge') {
+    if (pickingBallImage) return;
+    setPickingBallImage(kind);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: CUSTOM_FLOATING_BALL_SELECTION_LIMIT,
+        allowsEditing: false,
+        quality: 1,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+
+      const validationError = result.assets
+        .map(validateFloatingBallAsset)
+        .find((error): error is string => !!error);
+      if (validationError) {
+        Alert.alert('悬浮球素材不可用', validationError);
+        return;
+      }
+
+      const copiedUris = await Promise.all(
+        result.assets.map((asset) => copyFloatingBallImage(asset, kind === 'normal' ? 'normal' : 'edge'))
+      );
+      const nextUris = mergeUniqueUris(kind === 'normal' ? normalImageUris : edgeImageUris, copiedUris);
+      setFloatingBallConfig(
+        kind === 'normal'
+          ? { normalImageUris: nextUris, normalImageUri: nextUris[0] }
+          : { edgeImageUris: nextUris, edgeImageUri: nextUris[0] }
+      );
+      if (floatingBallConfig.enabled) {
+        syncFloatingBallAssets().catch(() => undefined);
+      }
+      showToast(kind === 'normal' ? '正常态素材已更新' : '贴边态素材已更新');
+    } catch (error: any) {
+      Alert.alert('选择悬浮球素材失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingBallImage(null);
+    }
+  }
+
+  function handleClearFloatingBallImage(kind: 'normal' | 'edge') {
+    setFloatingBallConfig(
+      kind === 'normal'
+        ? { normalImageUris: [], normalImageUri: undefined }
+        : { edgeImageUris: [], edgeImageUri: undefined }
+    );
+    if (floatingBallConfig.enabled) {
+      syncFloatingBallAssets().catch(() => undefined);
+    }
+    showToast(kind === 'normal' ? '正常态已恢复默认球形' : '贴边态已恢复默认球形');
+  }
 
   async function handleToggle(value: boolean) {
     if (busy) return;
@@ -1684,6 +1801,79 @@ function FloatingBallTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
           disabled={busy}
           trackColor={{ false: colors.border, true: colors.primary }}
           thumbColor="#FFFFFF"
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>悬浮球素材</Text>
+      <Text style={styles.hint}>支持 PNG、JPG、GIF。正常态用于平时显示，贴边态用于吸附屏幕边缘；未上传时显示默认球形。</Text>
+      <Text style={styles.hint}>正常态 {normalImageUris.length} 个，贴边态 {edgeImageUris.length} 个</Text>
+      {([
+        { kind: 'normal' as const, label: '正常态', uri: floatingBallConfig.normalImageUri },
+        { kind: 'edge' as const, label: '贴边态', uri: floatingBallConfig.edgeImageUri },
+      ]).map((item) => {
+        const isPicking = pickingBallImage === item.kind;
+        return (
+          <View key={item.kind} style={styles.appearanceAssetRow}>
+            <View style={styles.floatingBallPreview}>
+              {item.uri ? (
+                <Image source={{ uri: item.uri }} style={styles.appearanceImageThumb} resizeMode="contain" />
+              ) : (
+                <View style={styles.defaultFloatingBallPreview} />
+              )}
+            </View>
+            <View style={styles.appearanceIconText}>
+              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.hint}>{item.uri ? '已使用自定义素材' : '使用默认球形'}</Text>
+            </View>
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
+                onPress={() => handlePickFloatingBallImage(item.kind)}
+                disabled={!!pickingBallImage}
+              >
+                {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !item.uri && styles.smallActionButtonDisabled]}
+                onPress={() => handleClearFloatingBallImage(item.kind)}
+                disabled={!item.uri}
+              >
+                <Text style={[styles.smallActionText, !item.uri && styles.smallActionTextDisabled]}>默认</Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })}
+
+      <View style={styles.switchRow}>
+        <View style={styles.nativeToolText}>
+          <Text style={styles.label}>素材自动切换</Text>
+          <Text style={styles.hint}>开启后按当前状态，从正常态或贴边态素材池随机切换。</Text>
+        </View>
+        <Switch
+          value={assetAutoSwitchEnabled}
+          onValueChange={(value) => {
+            setFloatingBallConfig({ assetAutoSwitchEnabled: value });
+            showToast(value ? '素材自动切换已开启' : '素材自动切换已关闭');
+          }}
+          trackColor={{ false: colors.border, true: colors.primary }}
+          thumbColor="#FFFFFF"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>切换间隔（秒）</Text>
+        <TextInput
+          style={styles.input}
+          value={String(assetAutoSwitchIntervalSeconds)}
+          onChangeText={(value) => {
+            setFloatingBallConfig({
+              assetAutoSwitchIntervalSeconds: parseAppearanceNumber(value, 8, 1, 3600),
+            });
+          }}
+          keyboardType="number-pad"
+          placeholder="8"
+          placeholderTextColor={colors.textTertiary}
         />
       </View>
 
@@ -3903,6 +4093,10 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     minHeight: 110,
     marginBottom: 12,
   },
+  greetingInput: {
+    minHeight: 116,
+    marginBottom: 14,
+  },
   appearanceClearButton: {
     minHeight: 40,
     borderRadius: 12,
@@ -4033,6 +4227,25 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
+  },
+  floatingBallPreview: {
+    width: 58,
+    height: 58,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 29,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  defaultFloatingBallPreview: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.78)',
   },
   appearanceImageThumb: {
     width: '100%',

@@ -5,6 +5,12 @@ import { playTTS, stopTTS } from './tts';
 interface FloatingBallModule {
   canDrawOverlays: () => Promise<boolean>;
   openOverlaySettings: () => Promise<boolean>;
+  configureAssets?: (
+    normalUris: string[],
+    edgeUris: string[],
+    autoSwitchEnabled: boolean,
+    autoSwitchIntervalSeconds: number
+  ) => Promise<boolean>;
   show: () => Promise<boolean>;
   hide: () => Promise<boolean>;
   isShowing: () => Promise<boolean>;
@@ -83,7 +89,9 @@ export async function openFloatingBallPermissionSettings(): Promise<void> {
 }
 
 export async function showFloatingBall(): Promise<void> {
-  await ensureFloatingBall().show();
+  const floatingBall = ensureFloatingBall();
+  await configureFloatingBallAssets(floatingBall);
+  await floatingBall.show();
 }
 
 export async function hideFloatingBall(): Promise<void> {
@@ -187,6 +195,10 @@ export async function captureFloatingBallScreen(): Promise<string | null> {
   return ensureFloatingBall().captureScreen();
 }
 
+export async function syncFloatingBallAssets(): Promise<void> {
+  await configureFloatingBallAssets(ensureFloatingBall());
+}
+
 export function addFloatingBallToolActionListener(
   listener: (action: FloatingBallToolAction) => void
 ): { remove: () => void } {
@@ -207,6 +219,24 @@ function playFloatingBallTTS(text: string): void {
   if (!floatingBallConfig.ttsEnabled) return;
 
   playTTS(speakableText, ttsConfig).catch(() => {});
+}
+
+async function configureFloatingBallAssets(floatingBall: FloatingBallModule): Promise<void> {
+  if (!floatingBall.configureAssets) return;
+  const { floatingBallConfig } = useSettingsStore.getState();
+  await floatingBall.configureAssets(
+    normalizeBallAssetUris(floatingBallConfig.normalImageUris, floatingBallConfig.normalImageUri),
+    normalizeBallAssetUris(floatingBallConfig.edgeImageUris, floatingBallConfig.edgeImageUri),
+    !!floatingBallConfig.assetAutoSwitchEnabled,
+    floatingBallConfig.assetAutoSwitchIntervalSeconds || 8
+  );
+}
+
+function normalizeBallAssetUris(uris?: string[], legacyUri?: string): string[] {
+  const merged = [...(uris || []), ...(legacyUri ? [legacyUri] : [])]
+    .map((uri) => uri.trim())
+    .filter(Boolean);
+  return Array.from(new Set(merged));
 }
 
 function sanitizeFloatingBallTTS(text: string): string {

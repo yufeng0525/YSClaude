@@ -19,6 +19,7 @@ export interface AppearanceThemeSnapshot {
   topBarIconUris: Partial<Record<TopBarIconKey, string>>;
   topBarIconsHidden?: boolean;
   topBarFadeHidden?: boolean;
+  customGreetings?: string;
   chatBackgroundImageUri?: string;
   userBubbleColor?: string;
   userBubbleTransparent?: boolean;
@@ -144,6 +145,12 @@ export interface FloatingBallConfig {
   enabled: boolean;
   ttsEnabled: boolean;
   autoReplyOnScreenshotShare?: boolean;
+  normalImageUri?: string;
+  edgeImageUri?: string;
+  normalImageUris?: string[];
+  edgeImageUris?: string[];
+  assetAutoSwitchEnabled?: boolean;
+  assetAutoSwitchIntervalSeconds?: number;
 }
 
 export interface PeriodConfig {
@@ -257,9 +264,40 @@ function normalizeStickerConfig(config?: StickerConfig): StickerConfig {
   };
 }
 
+function normalizeFloatingBallConfig(config?: FloatingBallConfig): FloatingBallConfig {
+  const normalImageUris =
+    (config?.normalImageUris && config.normalImageUris.length > 0)
+      ? Array.from(new Set(config.normalImageUris.filter(Boolean)))
+      : config?.normalImageUri
+        ? [config.normalImageUri]
+        : [];
+  const edgeImageUris =
+    (config?.edgeImageUris && config.edgeImageUris.length > 0)
+      ? Array.from(new Set(config.edgeImageUris.filter(Boolean)))
+      : config?.edgeImageUri
+        ? [config.edgeImageUri]
+        : [];
+
+  return {
+    enabled: config?.enabled ?? false,
+    ttsEnabled: config?.ttsEnabled ?? false,
+    autoReplyOnScreenshotShare: config?.autoReplyOnScreenshotShare ?? false,
+    normalImageUri: config?.normalImageUri || normalImageUris[0],
+    edgeImageUri: config?.edgeImageUri || edgeImageUris[0],
+    normalImageUris,
+    edgeImageUris,
+    assetAutoSwitchEnabled: config?.assetAutoSwitchEnabled ?? false,
+    assetAutoSwitchIntervalSeconds: Math.min(
+      3600,
+      Math.max(1, config?.assetAutoSwitchIntervalSeconds ?? 8)
+    ),
+  };
+}
+
 const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
   topBarIconUris: {},
   topBarIconsHidden: false,
+  customGreetings: '',
   messageAvatarsVisible: false,
   messageMetaVisible: true,
   messageAvatarRadius: 18,
@@ -295,6 +333,7 @@ function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSna
     topBarIconUris: { ...(source.topBarIconUris || {}) },
     topBarIconsHidden: source.topBarIconsHidden,
     topBarFadeHidden: source.topBarFadeHidden,
+    customGreetings: source.customGreetings,
     chatBackgroundImageUri: source.chatBackgroundImageUri,
     userBubbleColor: source.userBubbleColor,
     userBubbleTransparent: source.userBubbleTransparent,
@@ -465,6 +504,12 @@ export const useSettingsStore = create<SettingsState>()(
         enabled: false,
         ttsEnabled: false,
         autoReplyOnScreenshotShare: false,
+        normalImageUri: undefined,
+        edgeImageUri: undefined,
+        normalImageUris: [],
+        edgeImageUris: [],
+        assetAutoSwitchEnabled: false,
+        assetAutoSwitchIntervalSeconds: 8,
       },
       periodConfig: {
         sendToAI: false,
@@ -745,6 +790,7 @@ export const useSettingsStore = create<SettingsState>()(
         useSettingsStore.setState({
           _hydrated: true,
           stickerConfig: normalizeStickerConfig(state?.stickerConfig),
+          floatingBallConfig: normalizeFloatingBallConfig(state?.floatingBallConfig),
         });
       },
     }

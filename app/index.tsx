@@ -1009,7 +1009,8 @@ export default function ChatScreen() {
 }
 
 function EmptyState() {
-  const greeting = useMemo(() => pickGreeting(), []);
+  const customGreetings = useSettingsStore((state) => state.appearanceConfig?.customGreetings);
+  const greeting = useMemo(() => pickGreeting(customGreetings), [customGreetings]);
   return (
     <View style={styles.emptyContainer}>
       <Image source={require('../assets/claudelogo.png')} style={styles.emptyLogo} resizeMode="contain" />
