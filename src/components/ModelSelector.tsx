@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, Pressable, Modal, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Modal, StyleSheet, ScrollView } from 'react-native';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { fonts } from '../theme/fonts';
@@ -25,23 +25,29 @@ export function ModelSelector({ onClose }: Props) {
           {apiConfigs.length === 0 && (
             <Text style={styles.optionSub}>暂无配置，请先在设置中添加</Text>
           )}
-          {apiConfigs.map((config, index) => (
-            <Pressable
-              key={index}
-              style={[styles.option, index === activeConfigIndex && styles.optionActive]}
-              onPress={() => {
-                setActiveConfig(index);
-                onClose();
-              }}
-            >
-              <Text style={[styles.optionText, index === activeConfigIndex && styles.optionTextActive]}>
-                {config.name || config.model || `配置 ${index + 1}`}
-              </Text>
-              <Text style={styles.optionSub} numberOfLines={1}>
-                {config.model}
-              </Text>
-            </Pressable>
-          ))}
+          <ScrollView style={styles.optionList} showsVerticalScrollIndicator>
+            {apiConfigs.map((config, index) => (
+              <Pressable
+                key={index}
+                style={[styles.option, index === activeConfigIndex && styles.optionActive]}
+                onPress={() => {
+                  setActiveConfig(index);
+                  onClose();
+                }}
+              >
+                <Text
+                  style={[styles.optionText, index === activeConfigIndex && styles.optionTextActive]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {config.name || config.model || `配置 ${index + 1}`}
+                </Text>
+                <Text style={styles.optionSub} numberOfLines={1} ellipsizeMode="tail">
+                  {config.model}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </View>
       </Pressable>
     </Modal>
@@ -62,6 +68,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     width: '80%',
     maxHeight: '60%',
   },
+  optionList: {
+    maxHeight: 360,
+  },
   dropdownTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -73,6 +82,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 10,
     marginBottom: 4,
+    overflow: 'hidden',
   },
   optionActive: {
     backgroundColor: colors.surface,
@@ -81,6 +91,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     color: colors.text,
+    width: '100%',
   },
   optionTextActive: {
     color: colors.primary,

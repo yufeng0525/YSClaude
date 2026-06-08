@@ -3616,6 +3616,7 @@ function DiaryTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
             value={summaryText}
             onChangeText={setSummaryText}
             multiline
+            scrollEnabled
             placeholder="AI 总结内容将显示在这里..."
             placeholderTextColor={colors.textTertiary}
           />
@@ -3678,10 +3679,11 @@ function DiaryTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
               placeholderTextColor={colors.textTertiary}
             />
             <TextInput
-              style={styles.summaryContentInput}
+              style={[styles.summaryContentInput, styles.diaryModalContentInput]}
               value={editContent}
               onChangeText={setEditContent}
               multiline
+              scrollEnabled
               placeholder="日记内容"
               placeholderTextColor={colors.textTertiary}
             />
@@ -3710,10 +3712,11 @@ function DiaryTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
               placeholderTextColor={colors.textTertiary}
             />
             <TextInput
-              style={styles.summaryContentInput}
+              style={[styles.summaryContentInput, styles.diaryModalContentInput]}
               value={createContent}
               onChangeText={setCreateContent}
               multiline
+              scrollEnabled
               placeholder="日记内容"
               placeholderTextColor={colors.textTertiary}
             />
@@ -4408,7 +4411,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   summaryContentInput: {
     backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder,
     borderRadius: 10, padding: 12, fontSize: 14, color: colors.text,
-    minHeight: 140, textAlignVertical: 'top', marginBottom: 10,
+    minHeight: 140, maxHeight: 220, textAlignVertical: 'top', marginBottom: 10,
+  },
+  diaryModalContentInput: {
+    height: 180,
+    flexShrink: 1,
   },
   diaryItem: {
     flexDirection: 'row', alignItems: 'flex-start',

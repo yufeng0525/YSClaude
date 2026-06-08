@@ -256,6 +256,7 @@ export function ChatInput({
           submitBehavior="submit"
           returnKeyType="send"
           maxLength={10000}
+          scrollEnabled
           editable={!disabled}
           onFocus={() => setIsInputFocused(true)}
           onBlur={() => setIsInputFocused(false)}
@@ -461,11 +462,15 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 6,
     marginLeft: 8,
     maxWidth: 180,
+    minWidth: 0,
+    flexShrink: 1,
+    overflow: 'hidden',
   },
   modelText: {
     fontSize: 13,
     fontWeight: '500',
     color: colors.text,
+    width: '100%',
   },
   rightButtons: {
     flexDirection: 'row',
