@@ -29,6 +29,25 @@ interface FloatingBallModule {
     isPlaying: boolean,
     backgroundUri: string
   ) => Promise<boolean>;
+  showDesktopLyricTimeline?: (
+    text: string,
+    lyricProgress: number,
+    title: string,
+    artist: string,
+    artworkUrl: string,
+    songProgress: number,
+    isPlaying: boolean,
+    backgroundUri: string,
+    panelMode: string,
+    radioStatus: string,
+    radioScript: string,
+    radioTrack: string,
+    radioActionLabel: string,
+    radioActionEnabled: boolean,
+    lyrics: Array<{ timeMs: number; durationMs?: number; text: string }>,
+    currentTimeMs: number,
+    durationMs: number
+  ) => Promise<boolean>;
   showDesktopLyricPanel?: (
     text: string,
     lyricProgress: number,
@@ -54,6 +73,12 @@ interface FloatingBallMessageOptions {
   speak?: boolean;
   showWhileAppActive?: boolean;
 }
+
+export type DesktopLyricTimelineLine = {
+  timeMs: number;
+  durationMs?: number;
+  text: string;
+};
 
 export type FloatingBallToolAction =
   | 'screen_share'
@@ -161,9 +186,35 @@ export async function showDesktopLyric(
   radioScript = '',
   radioTrack = '',
   radioActionLabel = '',
-  radioActionEnabled = false
+  radioActionEnabled = false,
+  lyrics: DesktopLyricTimelineLine[] = [],
+  currentTimeMs = 0,
+  durationMs = 0
 ): Promise<void> {
   const floatingBall = ensureFloatingBall();
+  const showTimeline = floatingBall.showDesktopLyricTimeline;
+  if (showTimeline) {
+    await showTimeline(
+      text,
+      lyricProgress,
+      title,
+      artist,
+      artworkUrl,
+      songProgress,
+      isPlaying,
+      backgroundUri,
+      panelMode,
+      radioStatus,
+      radioScript,
+      radioTrack,
+      radioActionLabel,
+      radioActionEnabled,
+      lyrics,
+      currentTimeMs,
+      durationMs
+    );
+    return;
+  }
   const showEnhanced = floatingBall.showDesktopLyricPanel;
   if (showEnhanced) {
     await showEnhanced(

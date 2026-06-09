@@ -24,6 +24,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.content.pm.ServiceInfo
 import android.text.TextUtils
@@ -46,6 +47,7 @@ import com.bumptech.glide.Glide
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -56,6 +58,28 @@ import java.io.FileOutputStream
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.random.Random
+
+private data class DesktopLyricLine(
+  val timeMs: Long,
+  val durationMs: Long,
+  val text: String
+)
+
+private fun ReadableMap.safeString(key: String): String {
+  return if (hasKey(key) && !isNull(key)) {
+    runCatching { getString(key).orEmpty() }.getOrDefault("")
+  } else {
+    ""
+  }
+}
+
+private fun ReadableMap.safeDouble(key: String): Double {
+  return if (hasKey(key) && !isNull(key)) {
+    runCatching { getDouble(key) }.getOrDefault(0.0)
+  } else {
+    0.0
+  }
+}
 
 class FloatingBallModule(
   private val reactContext: ReactApplicationContext
@@ -393,6 +417,59 @@ class FloatingBallModule(
           radioTrack,
           radioActionLabel,
           radioActionEnabled
+        )
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("SHOW_DESKTOP_LYRIC_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun showDesktopLyricTimeline(
+    text: String,
+    lyricProgress: Double,
+    title: String,
+    artist: String,
+    artworkUrl: String,
+    songProgress: Double,
+    isPlaying: Boolean,
+    backgroundUri: String,
+    panelMode: String,
+    radioStatus: String,
+    radioScript: String,
+    radioTrack: String,
+    radioActionLabel: String,
+    radioActionEnabled: Boolean,
+    lyrics: ReadableArray?,
+    currentTimeMs: Double,
+    durationMs: Double,
+    promise: Promise
+  ) {
+    mainHandler.post {
+      try {
+        if (!canDrawOverlays()) {
+          promise.reject("OVERLAY_PERMISSION_REQUIRED", "Desktop lyric overlay permission is not granted")
+          return@post
+        }
+        showDesktopLyricInternal(
+          text,
+          lyricProgress,
+          title,
+          artist,
+          artworkUrl,
+          songProgress,
+          isPlaying,
+          backgroundUri,
+          panelMode,
+          radioStatus,
+          radioScript,
+          radioTrack,
+          radioActionLabel,
+          radioActionEnabled,
+          readableArrayToLyricLines(lyrics),
+          currentTimeMs.toLong(),
+          durationMs.toLong()
         )
         promise.resolve(true)
       } catch (error: Exception) {
@@ -998,7 +1075,10 @@ class FloatingBallModule(
     rawRadioScript: String,
     rawRadioTrack: String,
     rawRadioActionLabel: String,
-    radioActionEnabled: Boolean
+    radioActionEnabled: Boolean,
+    lyrics: List<DesktopLyricLine> = emptyList(),
+    currentTimeMs: Long = 0L,
+    durationMs: Long = 0L
   ) {
     val text = normalizeDesktopLyricText(rawText)
     if (text.isBlank()) {
@@ -1030,7 +1110,10 @@ class FloatingBallModule(
       normalizeDesktopLyricText(rawRadioScript),
       normalizeDesktopLyricText(rawRadioTrack),
       normalizeDesktopLyricText(rawRadioActionLabel),
-      radioActionEnabled
+      radioActionEnabled,
+      lyrics,
+      currentTimeMs,
+      durationMs
     )
     if (lyric.parent == null) {
       val width = (screenWidth() * 0.7f).toInt()
@@ -1231,6 +1314,20 @@ class FloatingBallModule(
       values.add(value)
     }
     return values
+  }
+
+  private fun readableArrayToLyricLines(array: ReadableArray?): List<DesktopLyricLine> {
+    if (array == null) return emptyList()
+    val values = mutableListOf<DesktopLyricLine>()
+    for (index in 0 until array.size()) {
+      val line = runCatching { array.getMap(index) }.getOrNull() ?: continue
+      val text = normalizeDesktopLyricText(line.safeString("text"))
+      if (text.isBlank()) continue
+      val timeMs = line.safeDouble("timeMs").toLong().coerceAtLeast(0L)
+      val durationMs = line.safeDouble("durationMs").toLong().coerceAtLeast(0L)
+      values.add(DesktopLyricLine(timeMs, durationMs, text))
+    }
+    return values.sortedBy { it.timeMs }
   }
 
   private fun ballSizeFromDp(sizeDp: Double): ImageSize {
@@ -1598,7 +1695,10 @@ private class DesktopLyricCardView(
     radioScript: String,
     radioTrack: String,
     radioActionLabel: String,
-    radioActionEnabled: Boolean
+    radioActionEnabled: Boolean,
+    lyrics: List<DesktopLyricLine>,
+    currentTimeMs: Long,
+    durationMs: Long
   ) {
     panelMode = if (nextPanelMode == "radio") "radio" else "lyrics"
     val isRadioMode = panelMode == "radio"
@@ -1608,11 +1708,15 @@ private class DesktopLyricCardView(
       .joinToString("\n")
       .ifBlank { lyric }
     lyricText.textSize = if (isRadioMode) 14f else 17f
-    lyricText.setLyricText(if (isRadioMode) radioHeader else lyric)
-    lyricText.setLyricProgress(if (isRadioMode) 0f else lyricProgress)
+    if (isRadioMode || lyrics.isEmpty()) {
+      lyricText.setLyricText(if (isRadioMode) radioHeader else lyric)
+      lyricText.setLyricProgress(if (isRadioMode) 0f else lyricProgress)
+    } else {
+      lyricText.setPlaybackTimeline(lyrics, currentTimeMs, durationMs, isPlaying, lyric)
+    }
     titleView.text = title
     artistView.text = if (isRadioMode) radioStatus else artist.ifBlank { "Unknown Artist" }
-    progressView.setProgress(songProgress)
+    progressView.setPlaybackState(currentTimeMs, durationMs, isPlaying, songProgress)
     playPauseButton.text = if (isPlaying) "II" else ">"
     viewToggleButton.text = if (isRadioMode) "Ly" else "FM"
     infoRow.visibility = if (isRadioMode) View.GONE else View.VISIBLE
@@ -1764,8 +1868,73 @@ private class DesktopMusicProgressView(context: Context) : View(context) {
     color = Color.rgb(20, 20, 20)
   }
   private var progress = 0f
+  private val clockHandler = Handler(Looper.getMainLooper())
+  private var basePositionMs = 0L
+  private var baseElapsedMs = 0L
+  private var durationMs = 0L
+  private var isPlaying = false
+  private val clockRunnable = object : Runnable {
+    override fun run() {
+      refreshPlaybackProgress()
+      scheduleClock()
+    }
+  }
 
   fun setProgress(nextProgress: Float) {
+    stopClock()
+    val boundedProgress = nextProgress.coerceIn(0f, 1f)
+    if (abs(progress - boundedProgress) < 0.001f) return
+    progress = boundedProgress
+    invalidate()
+  }
+
+  fun setPlaybackState(
+    currentTimeMs: Long,
+    nextDurationMs: Long,
+    nextIsPlaying: Boolean,
+    fallbackProgress: Float
+  ) {
+    durationMs = nextDurationMs.coerceAtLeast(0L)
+    if (durationMs <= 0L) {
+      setProgress(fallbackProgress)
+      return
+    }
+
+    basePositionMs = currentTimeMs.coerceIn(0L, durationMs)
+    baseElapsedMs = SystemClock.elapsedRealtime()
+    isPlaying = nextIsPlaying
+    refreshPlaybackProgress()
+    if (isPlaying) {
+      scheduleClock()
+    } else {
+      stopClock()
+    }
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    if (isPlaying) scheduleClock()
+  }
+
+  override fun onDetachedFromWindow() {
+    stopClock()
+    super.onDetachedFromWindow()
+  }
+
+  private fun scheduleClock() {
+    if (!isAttachedToWindow || !isPlaying || durationMs <= 0L) return
+    clockHandler.removeCallbacks(clockRunnable)
+    clockHandler.postDelayed(clockRunnable, PROGRESS_TICK_MS)
+  }
+
+  private fun stopClock() {
+    clockHandler.removeCallbacks(clockRunnable)
+  }
+
+  private fun refreshPlaybackProgress() {
+    val elapsedMs = if (isPlaying) SystemClock.elapsedRealtime() - baseElapsedMs else 0L
+    val currentMs = (basePositionMs + elapsedMs).coerceIn(0L, durationMs)
+    val nextProgress = if (durationMs > 0L) currentMs.toFloat() / durationMs.toFloat() else 0f
     val boundedProgress = nextProgress.coerceIn(0f, 1f)
     if (abs(progress - boundedProgress) < 0.001f) return
     progress = boundedProgress
@@ -1780,6 +1949,10 @@ private class DesktopMusicProgressView(context: Context) : View(context) {
     canvas.drawRoundRect(0f, centerY - radius, width.toFloat(), centerY + radius, radius, radius, trackPaint)
     canvas.drawRoundRect(0f, centerY - radius, width * progress, centerY + radius, radius, radius, fillPaint)
   }
+
+  companion object {
+    private const val PROGRESS_TICK_MS = 500L
+  }
 }
 
 private class DesktopLyricTextView(context: Context) : TextView(context) {
@@ -1787,8 +1960,26 @@ private class DesktopLyricTextView(context: Context) : TextView(context) {
   private var lyricProgress = 0f
   private var displayedLyric = ""
   private var progressAnimator: ValueAnimator? = null
+  private val timelineHandler = Handler(Looper.getMainLooper())
+  private var timelineLines: List<DesktopLyricLine> = emptyList()
+  private var timelineSignature = ""
+  private var timelineBasePositionMs = 0L
+  private var timelineBaseElapsedMs = 0L
+  private var timelineDurationMs = 0L
+  private var timelineIsPlaying = false
+  private var timelineFallbackText = ""
+  private val timelineRunnable = object : Runnable {
+    override fun run() {
+      applyTimelineFrame()
+      scheduleTimelineTick()
+    }
+  }
 
   fun setLyricText(nextText: String) {
+    stopTimelineTick()
+    timelineLines = emptyList()
+    timelineSignature = ""
+    timelineIsPlaying = false
     if (displayedLyric == nextText) return
     displayedLyric = nextText
     progressAnimator?.cancel()
@@ -1811,6 +2002,55 @@ private class DesktopLyricTextView(context: Context) : TextView(context) {
       }
       start()
     }
+  }
+
+  fun setPlaybackTimeline(
+    lines: List<DesktopLyricLine>,
+    currentTimeMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean,
+    fallbackText: String
+  ) {
+    val nextLines = lines.filter { it.text.isNotBlank() }.sortedBy { it.timeMs }
+    if (nextLines.isEmpty()) {
+      setLyricText(fallbackText)
+      setLyricProgress(0f)
+      return
+    }
+
+    val nextSignature = buildTimelineSignature(nextLines, fallbackText)
+    val timelineChanged = nextSignature != timelineSignature
+    timelineLines = nextLines
+    timelineSignature = nextSignature
+    timelineFallbackText = fallbackText
+    timelineDurationMs = durationMs.coerceAtLeast(0L)
+    val upperBoundMs = if (timelineDurationMs > 0L) timelineDurationMs else Long.MAX_VALUE
+    timelineBasePositionMs = currentTimeMs.coerceIn(0L, upperBoundMs)
+    timelineBaseElapsedMs = SystemClock.elapsedRealtime()
+    timelineIsPlaying = isPlaying
+    progressAnimator?.cancel()
+    progressAnimator = null
+
+    applyTimelineFrame(forceText = timelineChanged)
+    if (timelineIsPlaying) {
+      scheduleTimelineTick()
+    } else {
+      stopTimelineTick()
+    }
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    if (timelineIsPlaying && timelineLines.isNotEmpty()) {
+      scheduleTimelineTick()
+    }
+  }
+
+  override fun onDetachedFromWindow() {
+    stopTimelineTick()
+    progressAnimator?.cancel()
+    progressAnimator = null
+    super.onDetachedFromWindow()
   }
 
   override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
@@ -1860,9 +2100,80 @@ private class DesktopLyricTextView(context: Context) : TextView(context) {
     )
   }
 
+  private fun scheduleTimelineTick() {
+    if (!isAttachedToWindow || !timelineIsPlaying || timelineLines.isEmpty()) return
+    timelineHandler.removeCallbacks(timelineRunnable)
+    timelineHandler.postDelayed(timelineRunnable, TIMELINE_TICK_MS)
+  }
+
+  private fun stopTimelineTick() {
+    timelineHandler.removeCallbacks(timelineRunnable)
+  }
+
+  private fun applyTimelineFrame(forceText: Boolean = false) {
+    if (timelineLines.isEmpty()) return
+    val positionMs = currentTimelinePositionMs()
+    val lineIndex = currentTimelineLineIndex(positionMs)
+    val currentLine = timelineLines.getOrNull(lineIndex)
+    val nextLine = timelineLines.getOrNull(lineIndex + 1)
+    val nextText = currentLine?.text ?: timelineFallbackText
+    if (forceText || displayedLyric != nextText) {
+      displayedLyric = nextText
+      text = nextText
+    }
+
+    lyricProgress = if (currentLine == null) {
+      boundedProgress(positionMs, 0L, timelineDurationMs)
+    } else {
+      val endMs = when {
+        currentLine.durationMs > 0L -> currentLine.timeMs + currentLine.durationMs
+        nextLine != null -> nextLine.timeMs
+        timelineDurationMs > currentLine.timeMs -> timelineDurationMs
+        else -> currentLine.timeMs + DEFAULT_LINE_DURATION_MS
+      }
+      boundedProgress(positionMs, currentLine.timeMs, endMs)
+    }
+    invalidate()
+  }
+
+  private fun currentTimelinePositionMs(): Long {
+    val elapsedMs = if (timelineIsPlaying) SystemClock.elapsedRealtime() - timelineBaseElapsedMs else 0L
+    val currentMs = timelineBasePositionMs + elapsedMs
+    return if (timelineDurationMs > 0L) {
+      currentMs.coerceIn(0L, timelineDurationMs)
+    } else {
+      currentMs.coerceAtLeast(0L)
+    }
+  }
+
+  private fun currentTimelineLineIndex(positionMs: Long): Int {
+    var index = -1
+    for (lineIndex in timelineLines.indices) {
+      if (timelineLines[lineIndex].timeMs <= positionMs) {
+        index = lineIndex
+      } else {
+        break
+      }
+    }
+    return index
+  }
+
+  private fun boundedProgress(positionMs: Long, startMs: Long, endMs: Long): Float {
+    val durationMs = (endMs - startMs).coerceAtLeast(1L)
+    return ((positionMs - startMs).toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+  }
+
+  private fun buildTimelineSignature(lines: List<DesktopLyricLine>, fallbackText: String): String {
+    val first = lines.firstOrNull()
+    val last = lines.lastOrNull()
+    return "${lines.size}:${first?.timeMs ?: 0}:${last?.timeMs ?: 0}:${last?.text.orEmpty()}:$fallbackText"
+  }
+
   companion object {
     private val PLAYED_TEXT_COLOR = Color.rgb(0, 128, 245)
     private const val PROGRESS_ANIMATION_MS = 180L
+    private const val TIMELINE_TICK_MS = 180L
+    private const val DEFAULT_LINE_DURATION_MS = 4000L
   }
 }
 

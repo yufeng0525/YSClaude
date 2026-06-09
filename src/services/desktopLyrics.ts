@@ -4,6 +4,7 @@ import {
   hideDesktopLyric,
   showDesktopLyric,
   type DesktopLyricAction,
+  type DesktopLyricTimelineLine,
 } from './floatingBall';
 import { useMusicStore } from '../stores/music';
 import { useRadioStore } from '../stores/radio';
@@ -19,10 +20,20 @@ let queuedState: DesktopLyricNativeState | null = null;
 let queuedTimer: ReturnType<typeof setTimeout> | null = null;
 let lastDispatchAt = 0;
 let panelMode: 'lyrics' | 'radio' = 'lyrics';
+let lastPlaybackAnchor: PlaybackAnchor | null = null;
 
 const DESKTOP_LYRIC_MIN_UPDATE_INTERVAL_MS = 320;
+const DESKTOP_LYRIC_SEEK_DRIFT_MS = 1500;
+
+type PlaybackAnchor = {
+  trackId: string;
+  currentTimeMs: number;
+  sentAtMs: number;
+  isPlaying: boolean;
+};
 
 type DesktopLyricNativeState = {
+  trackId: string;
   text: string;
   lyricProgress: number;
   title: string;
@@ -37,6 +48,9 @@ type DesktopLyricNativeState = {
   radioTrack: string;
   radioActionLabel: string;
   radioActionEnabled: boolean;
+  lyrics: DesktopLyricTimelineLine[];
+  currentTimeMs: number;
+  durationMs: number;
 };
 
 export function startDesktopLyricSync(): () => void {
@@ -44,7 +58,7 @@ export function startDesktopLyricSync(): () => void {
 
   actionSubscription = addDesktopLyricActionListener(handleDesktopLyricAction);
   appStateSubscription = AppState.addEventListener('change', (state) => {
-    if (state === 'active' || state === 'background' || state === 'inactive') {
+    if (state === 'active') {
       refreshDesktopLyric();
     }
   });
@@ -66,6 +80,7 @@ export function stopDesktopLyricSync(): void {
   appStateSubscription = null;
   lastSignature = '';
   inFlightSignature = '';
+  lastPlaybackAnchor = null;
   clearQueuedDesktopLyricUpdate();
   hideDesktopLyric().catch(() => undefined);
 }
@@ -73,6 +88,7 @@ export function stopDesktopLyricSync(): void {
 export function refreshDesktopLyric(): void {
   lastSignature = '';
   inFlightSignature = '';
+  lastPlaybackAnchor = null;
   lastDispatchAt = 0;
   clearQueuedDesktopLyricUpdate();
   syncDesktopLyric();
@@ -94,11 +110,7 @@ function syncDesktopLyric(): void {
 
   const nextState = getDesktopLyricState();
   const signature = getDesktopLyricSignature(nextState);
-  if (
-    signature === lastSignature ||
-    signature === inFlightSignature ||
-    signature === queuedSignature
-  ) {
+  if (!shouldDispatchDesktopLyricUpdate(nextState, signature)) {
     return;
   }
   queueDesktopLyricUpdate(nextState, signature);
@@ -149,11 +161,20 @@ function dispatchQueuedDesktopLyricUpdate(): void {
     nextState.radioScript,
     nextState.radioTrack,
     nextState.radioActionLabel,
-    nextState.radioActionEnabled
+    nextState.radioActionEnabled,
+    nextState.lyrics,
+    nextState.currentTimeMs,
+    nextState.durationMs
   ).then(() => {
     if (inFlightSignature === signature) {
       lastSignature = signature;
       inFlightSignature = '';
+      lastPlaybackAnchor = {
+        trackId: nextState.trackId,
+        currentTimeMs: nextState.currentTimeMs,
+        sentAtMs: Date.now(),
+        isPlaying: nextState.isPlaying,
+      };
     }
   }).catch((error) => {
     if (inFlightSignature === signature) {
@@ -174,14 +195,15 @@ function clearQueuedDesktopLyricUpdate(): void {
 
 function getDesktopLyricSignature(nextState: DesktopLyricNativeState): string {
   return [
+    nextState.trackId,
     nextState.text,
-    Math.round(nextState.lyricProgress * 100),
     nextState.title,
     nextState.artist,
     nextState.artworkUrl,
     nextState.backgroundUri,
-    Math.round(nextState.songProgress * 100),
     nextState.isPlaying ? '1' : '0',
+    nextState.durationMs,
+    getLyricsSignature(nextState.lyrics),
     nextState.panelMode,
     nextState.radioStatus,
     nextState.radioScript,
@@ -189,6 +211,37 @@ function getDesktopLyricSignature(nextState: DesktopLyricNativeState): string {
     nextState.radioActionLabel,
     nextState.radioActionEnabled ? '1' : '0',
   ].join('|');
+}
+
+function shouldDispatchDesktopLyricUpdate(
+  nextState: DesktopLyricNativeState,
+  signature: string
+): boolean {
+  if (signature === queuedSignature || signature === inFlightSignature) {
+    return false;
+  }
+
+  if (signature !== lastSignature) {
+    return true;
+  }
+
+  const anchor = lastPlaybackAnchor;
+  if (!anchor || anchor.trackId !== nextState.trackId) return true;
+
+  const elapsedMs = anchor.isPlaying ? Date.now() - anchor.sentAtMs : 0;
+  const predictedTimeMs = anchor.currentTimeMs + elapsedMs;
+  const driftMs = Math.abs(nextState.currentTimeMs - predictedTimeMs);
+
+  if (nextState.isPlaying) {
+    return driftMs >= DESKTOP_LYRIC_SEEK_DRIFT_MS;
+  }
+
+  return Math.abs(nextState.currentTimeMs - anchor.currentTimeMs) >= 250;
+}
+
+function getLyricsSignature(lyrics: DesktopLyricTimelineLine[]): string {
+  if (lyrics.length === 0) return '';
+  return `${lyrics.length}:${lyrics[0]?.timeMs ?? 0}:${lyrics[lyrics.length - 1]?.timeMs ?? 0}:${lyrics[lyrics.length - 1]?.text ?? ''}`;
 }
 
 function handleDesktopLyricAction(action: DesktopLyricAction): void {
@@ -229,6 +282,7 @@ function getDesktopLyricState(): DesktopLyricNativeState {
   const radioAction = getRadioActionState();
   if (!track) {
     return {
+      trackId: panelMode === 'radio' ? 'radio' : 'empty',
       text: panelMode === 'radio' ? radioState.text : '暂无播放歌曲',
       lyricProgress: 0,
       title: panelMode === 'radio' ? radio.title : '暂无播放歌曲',
@@ -243,6 +297,9 @@ function getDesktopLyricState(): DesktopLyricNativeState {
       radioTrack: radio.currentTrackLabel,
       radioActionLabel: radioAction.label,
       radioActionEnabled: radioAction.enabled,
+      lyrics: [],
+      currentTimeMs: 0,
+      durationMs: 0,
     };
   }
 
@@ -255,6 +312,7 @@ function getDesktopLyricState(): DesktopLyricNativeState {
     : getBoundedProgress(state.currentTimeMs, 0, state.durationMs);
 
   return {
+    trackId: track.id,
     text: panelMode === 'radio' ? radioState.text : lyric || `${track.title} - ${track.artist}`,
     lyricProgress,
     title: panelMode === 'radio' ? radio.title : track.title,
@@ -269,6 +327,9 @@ function getDesktopLyricState(): DesktopLyricNativeState {
     radioTrack: radio.currentTrackLabel || `${track.title} - ${track.artist}`,
     radioActionLabel: radioAction.label,
     radioActionEnabled: radioAction.enabled,
+    lyrics: panelMode === 'radio' ? [] : track.lyrics,
+    currentTimeMs: state.currentTimeMs,
+    durationMs: state.durationMs,
   };
 }
 
