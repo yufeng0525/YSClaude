@@ -1010,6 +1010,7 @@ export default function ChatScreen() {
 
 function EmptyState() {
   const customGreetings = useSettingsStore((state) => state.appearanceConfig?.customGreetings);
+  const welcomeLogoImageUri = useSettingsStore((state) => state.appearanceConfig?.welcomeLogoImageUri);
   const useDefaultGreetings = useSettingsStore((state) => state.appearanceConfig?.useDefaultGreetings);
   const defaultGreetingName = useSettingsStore((state) => state.appearanceConfig?.defaultGreetingName);
   const greeting = useMemo(
@@ -1022,7 +1023,11 @@ function EmptyState() {
   );
   return (
     <View style={styles.emptyContainer}>
-      <Image source={require('../assets/claudelogo.png')} style={styles.emptyLogo} resizeMode="contain" />
+      <Image
+        source={welcomeLogoImageUri ? { uri: welcomeLogoImageUri } : require('../assets/claudelogo.png')}
+        style={styles.emptyLogo}
+        resizeMode="contain"
+      />
       <Text style={styles.emptyText}>{greeting}</Text>
     </View>
   );

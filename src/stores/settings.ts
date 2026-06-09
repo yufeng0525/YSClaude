@@ -20,6 +20,7 @@ export interface AppearanceThemeSnapshot {
   topBarIconsHidden?: boolean;
   topBarFadeHidden?: boolean;
   customGreetings?: string;
+  welcomeLogoImageUri?: string;
   chatBackgroundImageUri?: string;
   userBubbleColor?: string;
   userBubbleTransparent?: boolean;
@@ -139,6 +140,40 @@ export interface McpToolSnapshot {
   enabled?: boolean;
 }
 
+export interface McpResourceSnapshot {
+  uri: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  enabled?: boolean;
+  pinned?: boolean;
+}
+
+export interface McpResourceTemplateSnapshot {
+  uriTemplate: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  enabled?: boolean;
+}
+
+export interface McpPromptArgumentSnapshot {
+  name: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface McpPromptSnapshot {
+  name: string;
+  title?: string;
+  description?: string;
+  arguments?: McpPromptArgumentSnapshot[];
+  enabled?: boolean;
+}
+
 export interface McpServerConfig {
   id: string;
   name: string;
@@ -146,6 +181,9 @@ export interface McpServerConfig {
   authorization: string;
   enabled: boolean;
   tools: McpToolSnapshot[];
+  resources?: McpResourceSnapshot[];
+  resourceTemplates?: McpResourceTemplateSnapshot[];
+  prompts?: McpPromptSnapshot[];
   updatedAt: number;
 }
 
@@ -153,6 +191,7 @@ export interface McpToolConfig {
   enabled: boolean;
   servers: McpServerConfig[];
   maxToolCalls: number;
+  resourceToolsEnabled?: boolean;
 }
 
 export interface ToolSettingsUiConfig {
@@ -296,6 +335,7 @@ const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
   topBarIconUris: {},
   topBarIconsHidden: false,
   customGreetings: '',
+  welcomeLogoImageUri: undefined,
   useDefaultGreetings: false,
   defaultGreetingName: '',
   messageAvatarsVisible: false,
@@ -789,6 +829,7 @@ export const useSettingsStore = create<SettingsState>()(
               ...DEFAULT_APPEARANCE_CONFIG,
               ...theme.config,
               customGreetings: current.customGreetings,
+              welcomeLogoImageUri: current.welcomeLogoImageUri,
               useDefaultGreetings: current.useDefaultGreetings,
               defaultGreetingName: current.defaultGreetingName,
               topBarIconUris: { ...(theme.config.topBarIconUris || {}) },
@@ -816,6 +857,7 @@ export const useSettingsStore = create<SettingsState>()(
           appearanceConfig: {
             ...createDefaultAppearanceConfig(),
             customGreetings: state.appearanceConfig?.customGreetings || '',
+            welcomeLogoImageUri: state.appearanceConfig?.welcomeLogoImageUri,
             useDefaultGreetings: state.appearanceConfig?.useDefaultGreetings ?? false,
             defaultGreetingName: state.appearanceConfig?.defaultGreetingName || '',
           },

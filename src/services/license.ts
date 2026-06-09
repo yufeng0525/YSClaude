@@ -26,8 +26,23 @@ interface LicenseServerResponse {
 
 function getLicenseServiceUrl(): string {
   const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
-  const url = typeof extra?.licenseServiceUrl === 'string' ? extra.licenseServiceUrl.trim() : '';
+  const endpoint = decodeEndpoint(extra?.licenseServiceEndpoint);
+  const legacyUrl = typeof extra?.licenseServiceUrl === 'string' ? extra.licenseServiceUrl.trim() : '';
+  const url = endpoint || legacyUrl;
   return url.replace(/\/+$/, '');
+}
+
+function decodeEndpoint(value: unknown): string {
+  if (!Array.isArray(value)) return '';
+  const chars = value.map((part, index) => {
+    if (typeof part !== 'number' || !Number.isFinite(part)) return '';
+    return String.fromCharCode((part ^ endpointMask(index)) & 0xff);
+  });
+  return chars.join('').trim();
+}
+
+function endpointMask(index: number): number {
+  return (71 + index * 31) & 0xff;
 }
 
 function getAppVersion(): string {

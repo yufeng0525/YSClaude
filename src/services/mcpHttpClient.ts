@@ -1,4 +1,10 @@
-import type { McpToolSnapshot } from '../stores/settings';
+import type {
+  McpPromptArgumentSnapshot,
+  McpPromptSnapshot,
+  McpResourceSnapshot,
+  McpResourceTemplateSnapshot,
+  McpToolSnapshot,
+} from '../stores/settings';
 
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const MCP_TIMEOUT_MS = 20000;
@@ -41,12 +47,59 @@ export interface McpCallToolResult {
   [key: string]: any;
 }
 
+export interface McpServerCapabilitiesSnapshot {
+  tools: McpToolSnapshot[];
+  resources: McpResourceSnapshot[];
+  resourceTemplates: McpResourceTemplateSnapshot[];
+  prompts: McpPromptSnapshot[];
+}
+
+export interface McpReadResourceResult {
+  contents?: McpCallResultContent[];
+  [key: string]: any;
+}
+
+export interface McpGetPromptResult {
+  description?: string;
+  messages?: Array<{
+    role?: string;
+    content?: McpCallResultContent | McpCallResultContent[] | string;
+    [key: string]: any;
+  }>;
+  [key: string]: any;
+}
+
+type McpPromptMessageContent = NonNullable<McpGetPromptResult['messages']>[number]['content'];
+
 export async function listMcpTools(config: McpServerConnectionConfig): Promise<McpToolSnapshot[]> {
   const session = await initializeMcpSession(config);
-  const result = await sendMcpRequest<{ tools?: any[] }>(config, session, 'tools/list', {});
-  return (result.tools || [])
+  const tools = await listMcpItems(config, session, 'tools/list', 'tools');
+  return tools
     .map(normalizeMcpTool)
     .filter((tool): tool is McpToolSnapshot => !!tool);
+}
+
+export async function listMcpCapabilities(
+  config: McpServerConnectionConfig
+): Promise<McpServerCapabilitiesSnapshot> {
+  const tools = await listMcpTools(config);
+  const session = await initializeMcpSession(config);
+  const [resources, resourceTemplates, prompts] = await Promise.all([
+    safeListMcpItems(config, session, 'resources/list', 'resources'),
+    safeListMcpItems(config, session, 'resources/templates/list', 'resourceTemplates'),
+    safeListMcpItems(config, session, 'prompts/list', 'prompts'),
+  ]);
+
+  return {
+    tools: tools.map(normalizeMcpTool).filter((tool): tool is McpToolSnapshot => !!tool),
+    resources: resources
+      .map(normalizeMcpResource)
+      .filter((resource): resource is McpResourceSnapshot => !!resource),
+    resourceTemplates: resourceTemplates
+      .map(normalizeMcpResourceTemplate)
+      .filter((template): template is McpResourceTemplateSnapshot => !!template),
+    prompts: prompts.map(normalizeMcpPrompt).filter((prompt): prompt is McpPromptSnapshot => !!prompt),
+  };
 }
 
 export async function callMcpTool(
@@ -57,6 +110,26 @@ export async function callMcpTool(
   const session = await initializeMcpSession(config);
   return await sendMcpRequest<McpCallToolResult>(config, session, 'tools/call', {
     name: toolName,
+    arguments: args || {},
+  });
+}
+
+export async function readMcpResource(
+  config: McpServerConnectionConfig,
+  uri: string
+): Promise<McpReadResourceResult> {
+  const session = await initializeMcpSession(config);
+  return await sendMcpRequest<McpReadResourceResult>(config, session, 'resources/read', { uri });
+}
+
+export async function getMcpPrompt(
+  config: McpServerConnectionConfig,
+  name: string,
+  args?: Record<string, any>
+): Promise<McpGetPromptResult> {
+  const session = await initializeMcpSession(config);
+  return await sendMcpRequest<McpGetPromptResult>(config, session, 'prompts/get', {
+    name,
     arguments: args || {},
   });
 }
@@ -87,6 +160,35 @@ export function formatMcpCallResult(result: McpCallToolResult): string {
   return text || formatJsonForTool(result);
 }
 
+export function formatMcpResourceResult(result: McpReadResourceResult): string {
+  const lines: string[] = [];
+  for (const item of result.contents || []) {
+    if (item.type === 'text') {
+      lines.push(String(item.text || ''));
+    } else if (item.type === 'blob') {
+      lines.push(`[binary resource ${item.mimeType || 'unknown'} omitted]`);
+    } else {
+      lines.push(formatJsonForTool(item));
+    }
+  }
+  return lines.map((line) => line.trim()).filter(Boolean).join('\n\n') || formatJsonForTool(result);
+}
+
+export function formatMcpPromptResult(result: McpGetPromptResult): string {
+  const lines: string[] = [];
+  if (result.description) {
+    lines.push(result.description);
+  }
+  for (const message of result.messages || []) {
+    const role = message.role || 'user';
+    const content = formatMcpPromptContent(message.content);
+    if (content) {
+      lines.push(`[${role}]\n${content}`);
+    }
+  }
+  return lines.map((line) => line.trim()).filter(Boolean).join('\n\n---\n\n') || formatJsonForTool(result);
+}
+
 async function initializeMcpSession(config: McpServerConnectionConfig): Promise<McpSession> {
   const session: McpSession = { nextId: 1 };
   await sendMcpRequest(config, session, 'initialize', {
@@ -99,6 +201,41 @@ async function initializeMcpSession(config: McpServerConnectionConfig): Promise<
   });
   await sendMcpNotification(config, session, 'notifications/initialized', {});
   return session;
+}
+
+async function safeListMcpItems(
+  config: McpServerConnectionConfig,
+  session: McpSession,
+  method: string,
+  resultKey: string
+): Promise<any[]> {
+  try {
+    return await listMcpItems(config, session, method, resultKey);
+  } catch (error: any) {
+    const message = String(error?.message || error || '').toLowerCase();
+    if (message.includes('method not found') || message.includes('not found') || message.includes('unsupported')) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function listMcpItems(
+  config: McpServerConnectionConfig,
+  session: McpSession,
+  method: string,
+  resultKey: string
+): Promise<any[]> {
+  const items: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const params = cursor ? { cursor } : {};
+    const result = await sendMcpRequest<Record<string, any>>(config, session, method, params);
+    const pageItems = Array.isArray(result[resultKey]) ? result[resultKey] : [];
+    items.push(...pageItems);
+    cursor = typeof result.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined;
+  } while (cursor);
+  return items;
 }
 
 async function sendMcpRequest<T>(
@@ -239,6 +376,64 @@ function normalizeMcpTool(raw: any): McpToolSnapshot | null {
   };
 }
 
+function normalizeMcpResource(raw: any): McpResourceSnapshot | null {
+  if (!raw || typeof raw.uri !== 'string' || !raw.uri.trim()) {
+    return null;
+  }
+  return {
+    uri: raw.uri.trim(),
+    name: typeof raw.name === 'string' ? raw.name : undefined,
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : undefined,
+    enabled: raw.enabled !== false,
+    pinned: raw.pinned === true,
+  };
+}
+
+function normalizeMcpResourceTemplate(raw: any): McpResourceTemplateSnapshot | null {
+  if (!raw || typeof raw.uriTemplate !== 'string' || !raw.uriTemplate.trim()) {
+    return null;
+  }
+  return {
+    uriTemplate: raw.uriTemplate.trim(),
+    name: typeof raw.name === 'string' ? raw.name : undefined,
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : undefined,
+    enabled: raw.enabled !== false,
+  };
+}
+
+function normalizeMcpPrompt(raw: any): McpPromptSnapshot | null {
+  if (!raw || typeof raw.name !== 'string' || !raw.name.trim()) {
+    return null;
+  }
+  return {
+    name: raw.name.trim(),
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    arguments: Array.isArray(raw.arguments)
+      ? raw.arguments
+          .map(normalizeMcpPromptArgument)
+          .filter((arg: McpPromptArgumentSnapshot | null): arg is McpPromptArgumentSnapshot => !!arg)
+      : [],
+    enabled: raw.enabled !== false,
+  };
+}
+
+function normalizeMcpPromptArgument(raw: any): McpPromptArgumentSnapshot | null {
+  if (!raw || typeof raw.name !== 'string' || !raw.name.trim()) {
+    return null;
+  }
+  return {
+    name: raw.name.trim(),
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    required: raw.required === true,
+  };
+}
+
 function normalizeMcpUrl(rawUrl: string): string {
   let parsed: URL;
   try {
@@ -266,4 +461,20 @@ function formatJsonForTool(value: any): string {
   } catch {
     return String(value);
   }
+}
+
+function formatMcpPromptContent(content: McpPromptMessageContent): string {
+  if (!content) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(formatMcpPromptContentItem).filter(Boolean).join('\n\n');
+  }
+  return formatMcpPromptContentItem(content);
+}
+
+function formatMcpPromptContentItem(item: McpCallResultContent): string {
+  if (item.type === 'text') return String(item.text || '');
+  if (item.type === 'image') return `[image ${item.mimeType || 'unknown'} omitted]`;
+  if (item.type === 'resource') return formatJsonForTool(item.resource ?? item);
+  return formatJsonForTool(item);
 }

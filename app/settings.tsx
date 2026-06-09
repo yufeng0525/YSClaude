@@ -28,7 +28,7 @@ import {
   requestShizukuPermission,
   type ShizukuStatus,
 } from '../src/services/shizukuFiles';
-import { listMcpTools } from '../src/services/mcpHttpClient';
+import { formatMcpPromptResult, getMcpPrompt, listMcpCapabilities } from '../src/services/mcpHttpClient';
 import { sanitizeMcpServerId } from '../src/services/toolModules/mcpRemote';
 import {
   DEFAULT_HOTBOARD_PLATFORM_TYPES,
@@ -49,7 +49,7 @@ import { mergeRanges } from '../src/utils/ranges';
 
 
 let colors = lightColors;
-const TABS = ['API 配置', '对话设置', 'TTS 配置', '工具设置', '日记', '悬浮球', '表情包', '欢迎语', '美化'] as const;
+const TABS = ['API 配置', '对话设置', 'TTS 配置', '工具设置', '日记', '悬浮球', '表情包', '欢迎页', '美化'] as const;
 type ToastFn = (message: string) => void;
 type SettingsTabProps = { showToast: ToastFn; keyboardBottomInset: number };
 const CUSTOM_TOP_BAR_ICON_MAX_BYTES = 2 * 1024 * 1024;
@@ -142,7 +142,7 @@ export default function SettingsScreen() {
       {activeTab === 4 && <DiaryTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 5 && <FloatingBallTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 6 && <StickerTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
-      {activeTab === 7 && <GreetingTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
+      {activeTab === 7 && <WelcomePageTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 8 && <AppearanceTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
 
       {toastMessage && (
@@ -154,11 +154,13 @@ export default function SettingsScreen() {
   );
 }
 
-/* ==================== 欢迎语 Tab ==================== */
+/* ==================== 欢迎页 Tab ==================== */
 
-function GreetingTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
+function WelcomePageTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const { appearanceConfig, setAppearanceConfig } = useSettingsStore();
+  const [pickingWelcomeLogo, setPickingWelcomeLogo] = useState(false);
   const customGreetings = appearanceConfig?.customGreetings || '';
+  const welcomeLogoImageUri = appearanceConfig?.welcomeLogoImageUri;
   const useDefaultGreetings = !!appearanceConfig?.useDefaultGreetings;
   const defaultGreetingName = appearanceConfig?.defaultGreetingName || '';
 
@@ -171,12 +173,79 @@ function GreetingTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     showToast(value ? '系统默认欢迎语已开启' : '系统默认欢迎语已关闭');
   }
 
+  async function handlePickWelcomeLogo() {
+    if (pickingWelcomeLogo) return;
+    setPickingWelcomeLogo(true);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]?.uri) return;
+
+      const asset = result.assets[0];
+      const validationError = validateTopBarIconAsset(asset);
+      if (validationError) {
+        Alert.alert('图片不适合作为欢迎页 Logo', validationError);
+        return;
+      }
+
+      const uri = await copyAppearanceImage(asset, 'welcome-logos', 'welcome-logo');
+      setAppearanceConfig({ welcomeLogoImageUri: uri });
+      showToast('欢迎页 Logo 已更新');
+    } catch (error: any) {
+      Alert.alert('选择欢迎页 Logo 失败', error?.message || '无法读取所选图片');
+    } finally {
+      setPickingWelcomeLogo(false);
+    }
+  }
+
+  function handleClearWelcomeLogo() {
+    setAppearanceConfig({ welcomeLogoImageUri: undefined });
+    showToast('已恢复默认欢迎页 Logo');
+  }
+
   return (
     <ScrollView
       style={styles.content}
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
+      <Text style={styles.sectionTitle}>中心 Logo</Text>
+      <View style={styles.appearanceAssetRow}>
+        <View style={styles.welcomeLogoPreview}>
+          <Image
+            source={welcomeLogoImageUri ? { uri: welcomeLogoImageUri } : require('../assets/claudelogo.png')}
+            style={styles.welcomeLogoImage}
+            resizeMode="contain"
+          />
+        </View>
+        <View style={styles.appearanceIconText}>
+          <Text style={styles.label}>欢迎页中心 Logo</Text>
+          <Text style={styles.hint}>显示在聊天页空状态欢迎语上方，建议使用正方形透明 PNG。</Text>
+        </View>
+        <View style={styles.appearanceIconActions}>
+          <Pressable
+            style={[styles.smallActionButton, pickingWelcomeLogo && styles.smallActionButtonDisabled]}
+            onPress={handlePickWelcomeLogo}
+            disabled={pickingWelcomeLogo}
+          >
+            <Text style={[styles.smallActionText, pickingWelcomeLogo && styles.smallActionTextDisabled]}>
+              {pickingWelcomeLogo ? '选择中' : '上传'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.smallActionButton, !welcomeLogoImageUri && styles.smallActionButtonDisabled]}
+            onPress={handleClearWelcomeLogo}
+            disabled={!welcomeLogoImageUri}
+          >
+            <Text style={[styles.smallActionText, !welcomeLogoImageUri && styles.smallActionTextDisabled]}>默认</Text>
+          </Pressable>
+        </View>
+      </View>
+
       <View style={styles.switchRow}>
         <View style={styles.switchText}>
           <Text style={styles.label}>系统默认欢迎语</Text>
@@ -3165,11 +3234,17 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const [mcpServerUrl, setMcpServerUrl] = useState('');
   const [mcpServerAuth, setMcpServerAuth] = useState('');
   const [mcpSyncingServerId, setMcpSyncingServerId] = useState<string | null>(null);
+  const [mcpResourceToolsEnabled, setMcpResourceToolsEnabled] = useState(!!mcpToolConfig?.resourceToolsEnabled);
   const builtInToolsExpanded = toolSettingsUiConfig?.builtInToolsExpanded ?? true;
   const customMcpExpanded = toolSettingsUiConfig?.customMcpExpanded ?? true;
   const [selectedBuiltInToolKey, setSelectedBuiltInToolKey] = useState<string | null>(null);
   const [selectedMcpServerId, setSelectedMcpServerId] = useState<string | null>(null);
   const [selectedMcpToolRef, setSelectedMcpToolRef] = useState<{ serverId: string; toolName: string } | null>(null);
+  const [selectedMcpResourceRef, setSelectedMcpResourceRef] = useState<{ serverId: string; uri: string } | null>(null);
+  const [selectedMcpPromptRef, setSelectedMcpPromptRef] = useState<{ serverId: string; promptName: string } | null>(null);
+  const [mcpPromptArgs, setMcpPromptArgs] = useState('{}');
+  const [mcpPromptApplying, setMcpPromptApplying] = useState(false);
+  const { addUserMessage } = useChatStore();
 
   // 设备原生工具本地 state
   const [deviceInfoEnabled, setDeviceInfoEnabled] = useState(!!nativeToolConfig?.deviceInfoEnabled);
@@ -3377,6 +3452,9 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         authorization: mcpServerAuth.trim(),
         enabled: true,
         tools: [],
+        resources: [],
+        resourceTemplates: [],
+        prompts: [],
         updatedAt: Date.now(),
       },
     ]);
@@ -3413,25 +3491,66 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     );
   }
 
+  function handleUpdateMcpServerResource(
+    serverId: string,
+    uri: string,
+    patch: { enabled?: boolean; pinned?: boolean }
+  ) {
+    setMcpServers((current) =>
+      current.map((server) => {
+        if (server.id !== serverId) return server;
+        return {
+          ...server,
+          resources: (server.resources || []).map((resource) =>
+            resource.uri === uri ? { ...resource, ...patch } : resource
+          ),
+          updatedAt: Date.now(),
+        };
+      })
+    );
+  }
+
   async function handleSyncMcpServer(serverId: string) {
     const server = mcpServers.find((item) => item.id === serverId);
     if (!server) return;
     setMcpSyncingServerId(serverId);
     try {
-      const tools = await listMcpTools({
+      const capabilities = await listMcpCapabilities({
         url: server.url,
         authorization: server.authorization,
       });
       const enabledByName = new Map((server.tools || []).map((tool) => [tool.name, tool.enabled !== false]));
+      const resourceStateByUri = new Map(
+        (server.resources || []).map((resource) => [
+          resource.uri,
+          { enabled: resource.enabled !== false, pinned: resource.pinned === true },
+        ])
+      );
+      const promptEnabledByName = new Map((server.prompts || []).map((prompt) => [prompt.name, prompt.enabled !== false]));
       handleUpdateMcpServer(serverId, {
-        tools: tools.map((tool) => ({
+        tools: capabilities.tools.map((tool) => ({
           ...tool,
           enabled: enabledByName.get(tool.name) ?? true,
         })),
+        resources: capabilities.resources.map((resource) => {
+          const previous = resourceStateByUri.get(resource.uri);
+          return {
+            ...resource,
+            enabled: previous?.enabled ?? true,
+            pinned: previous?.pinned ?? false,
+          };
+        }),
+        resourceTemplates: capabilities.resourceTemplates,
+        prompts: capabilities.prompts.map((prompt) => ({
+          ...prompt,
+          enabled: promptEnabledByName.get(prompt.name) ?? true,
+        })),
       });
-      showToast(`已同步 ${tools.length} 个 MCP 工具`);
+      showToast(
+        `已同步 ${capabilities.tools.length} 个工具、${capabilities.resources.length} 个资源、${capabilities.prompts.length} 个提示词`
+      );
     } catch (error: any) {
-      Alert.alert('同步失败', error?.message || '无法读取 MCP 工具');
+      Alert.alert('同步失败', error?.message || '无法读取 MCP 能力');
     } finally {
       setMcpSyncingServerId(null);
     }
@@ -3442,12 +3561,23 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     const hasEnabledMcpTool = mcpServers.some(
       (server) => server.enabled && (server.tools || []).some((tool) => tool.enabled !== false)
     );
+    const hasEnabledMcpResourceTool = mcpResourceToolsEnabled && mcpServers.some(
+      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false)
+    );
+    const hasPinnedMcpResource = mcpServers.some(
+      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false && resource.pinned)
+    );
     setMcpToolConfig({
-      enabled: hasEnabledMcpTool,
+      enabled: hasEnabledMcpTool || hasEnabledMcpResourceTool || hasPinnedMcpResource,
       maxToolCalls: isNaN(maxToolCalls) || maxToolCalls <= 0 ? 6 : maxToolCalls,
+      resourceToolsEnabled: mcpResourceToolsEnabled,
       servers: mcpServers,
     });
-    showToast(hasEnabledMcpTool ? 'MCP 工具已保存' : 'MCP 工具已保存，当前没有开启的 MCP 工具');
+    showToast(
+      hasEnabledMcpTool || hasEnabledMcpResourceTool || hasPinnedMcpResource
+        ? 'MCP 能力已保存'
+        : 'MCP 能力已保存，当前没有开启的 MCP 工具或资源'
+    );
   }
 
   function handleSaveNativeTools() {
@@ -3508,8 +3638,41 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const selectedMcpTool = selectedMcpToolServer && selectedMcpToolRef
     ? (selectedMcpToolServer.tools || []).find((tool) => tool.name === selectedMcpToolRef.toolName) || null
     : null;
+  const selectedMcpResourceServer = selectedMcpResourceRef
+    ? mcpServers.find((server) => server.id === selectedMcpResourceRef.serverId) || null
+    : null;
+  const selectedMcpResource = selectedMcpResourceServer && selectedMcpResourceRef
+    ? (selectedMcpResourceServer.resources || []).find((resource) => resource.uri === selectedMcpResourceRef.uri) || null
+    : null;
+  const selectedMcpPromptServer = selectedMcpPromptRef
+    ? mcpServers.find((server) => server.id === selectedMcpPromptRef.serverId) || null
+    : null;
+  const selectedMcpPrompt = selectedMcpPromptServer && selectedMcpPromptRef
+    ? (selectedMcpPromptServer.prompts || []).find((prompt) => prompt.name === selectedMcpPromptRef.promptName) || null
+    : null;
+
+  useEffect(() => {
+    if (selectedMcpPrompt) {
+      const args: Record<string, any> = {};
+      for (const arg of selectedMcpPrompt.arguments || []) {
+        if (arg.required) {
+          args[arg.name] = '';
+        }
+      }
+      setMcpPromptArgs(Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : '{}');
+    } else {
+      setMcpPromptArgs('{}');
+    }
+  }, [selectedMcpPrompt]);
+
   function getEnabledMcpToolCount(server: (typeof mcpServers)[number]) {
     return (server.tools || []).filter((tool) => tool.enabled !== false).length;
+  }
+  function getEnabledMcpResourceCount(server: (typeof mcpServers)[number]) {
+    return (server.resources || []).filter((resource) => resource.enabled !== false).length;
+  }
+  function getPinnedMcpResourceCount(server: (typeof mcpServers)[number]) {
+    return (server.resources || []).filter((resource) => resource.enabled !== false && resource.pinned).length;
   }
 
   function formatMcpToolInputSchema(tool: NonNullable<typeof selectedMcpTool>) {
@@ -3517,6 +3680,50 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
       return JSON.stringify(tool.inputSchema || { type: 'object', properties: {}, required: [] }, null, 2);
     } catch {
       return '无法格式化参数定义';
+    }
+  }
+
+  function formatMcpPromptArguments(prompt: NonNullable<typeof selectedMcpPrompt>) {
+    try {
+      return JSON.stringify(prompt.arguments || [], null, 2);
+    } catch {
+      return '无法格式化参数定义';
+    }
+  }
+
+  async function handleApplyMcpPrompt() {
+    if (!selectedMcpPromptServer || !selectedMcpPrompt) return;
+    setMcpPromptApplying(true);
+    try {
+      let parsedArgs: Record<string, any> = {};
+      if (mcpPromptArgs.trim()) {
+        parsedArgs = JSON.parse(mcpPromptArgs);
+      }
+      const result = await getMcpPrompt(
+        {
+          url: selectedMcpPromptServer.url,
+          authorization: selectedMcpPromptServer.authorization,
+        },
+        selectedMcpPrompt.name,
+        parsedArgs
+      );
+      const promptText = formatMcpPromptResult(result);
+      const draft = [
+        `MCP 提示词：${selectedMcpPrompt.title || selectedMcpPrompt.name}`,
+        `来源：${selectedMcpPromptServer.name}`,
+        '',
+        promptText,
+      ].join('\n');
+      const added = await addUserMessage(draft);
+      if (added) {
+        showToast('MCP 提示词已加入当前对话');
+      } else {
+        Alert.alert('应用失败', '无法把 MCP 提示词加入当前对话，请先确认 API 配置可用');
+      }
+    } catch (error: any) {
+      Alert.alert('应用失败', error?.message || '无法读取 MCP 提示词');
+    } finally {
+      setMcpPromptApplying(false);
     }
   }
 
@@ -3652,14 +3859,16 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   function renderMcpServerEditor() {
     if (!selectedMcpServer) return null;
     const enabledToolCount = getEnabledMcpToolCount(selectedMcpServer);
+    const enabledResourceCount = getEnabledMcpResourceCount(selectedMcpServer);
+    const pinnedResourceCount = getPinnedMcpResourceCount(selectedMcpServer);
     return (
       <>
-        <Text style={styles.toolModalDescription}>远程 HTTP MCP 服务。同步会读取并缓存工具列表。</Text>
+        <Text style={styles.toolModalDescription}>远程 HTTP MCP 服务。同步会读取并缓存 Tools、Resources 和 Prompts。</Text>
         <View style={styles.switchRow}>
           <View style={styles.switchText}>
             <Text style={styles.label}>启用此服务</Text>
             <Text style={styles.hint}>
-              {enabledToolCount} / {selectedMcpServer.tools.length} 个工具已开启 | {selectedMcpServer.enabled ? '服务已开启' : '服务已关闭'}
+              {enabledToolCount} / {selectedMcpServer.tools.length} 个工具已开启 | {enabledResourceCount} / {(selectedMcpServer.resources || []).length} 个资源可用 | {pinnedResourceCount} 个固定附加
             </Text>
           </View>
           <Switch
@@ -3701,6 +3910,19 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
             autoCapitalize="none"
           />
         </View>
+        <View style={styles.switchRow}>
+          <View style={styles.switchText}>
+            <Text style={styles.label}>允许 AI 主动读取资源</Text>
+            <Text style={styles.hint}>开启后会为每个有资源的 MCP 服务提供一个读取资源的通用工具；不会把所有资源全文自动塞进上下文。</Text>
+          </View>
+          <Switch
+            value={mcpResourceToolsEnabled}
+            onValueChange={setMcpResourceToolsEnabled}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor="#FFFFFF"
+          />
+        </View>
+        <Text style={styles.sectionTitle}>Tools</Text>
         <View style={styles.toolListPreview}>
           {selectedMcpServer.tools.length === 0 ? (
             <Text style={styles.emptyText}>尚未同步工具</Text>
@@ -3731,13 +3953,104 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
             ))
           )}
         </View>
+        <Text style={styles.sectionTitle}>Resources</Text>
+        <View style={styles.toolListPreview}>
+          {(selectedMcpServer.resources || []).length === 0 ? (
+            <Text style={styles.emptyText}>尚未同步资源</Text>
+          ) : (
+            (selectedMcpServer.resources || []).map((resource) => (
+              <View key={resource.uri} style={styles.toolListPreviewItem}>
+                <Pressable
+                  style={styles.toolListPreviewText}
+                  onPress={() => setSelectedMcpResourceRef({ serverId: selectedMcpServer.id, uri: resource.uri })}
+                >
+                  <Text style={styles.toolListPreviewName}>{resource.title || resource.name || resource.uri}</Text>
+                  {!!resource.description && (
+                    <Text style={styles.toolListPreviewDescription} numberOfLines={2}>
+                      {resource.description}
+                    </Text>
+                  )}
+                  <Text style={styles.toolListPreviewDescription} numberOfLines={1}>{resource.uri}</Text>
+                  <Text style={styles.toolListPreviewStatus}>查看详情</Text>
+                </Pressable>
+                <View style={styles.mcpResourceSwitches}>
+                  <View style={styles.mcpResourceSwitchRow}>
+                    <Text style={styles.mcpResourceSwitchLabel}>可读</Text>
+                    <Switch
+                      value={resource.enabled !== false}
+                      onValueChange={(value) =>
+                        handleUpdateMcpServerResource(selectedMcpServer.id, resource.uri, { enabled: value })
+                      }
+                      trackColor={{ false: colors.border, true: colors.primary }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                  <View style={styles.mcpResourceSwitchRow}>
+                    <Text style={styles.mcpResourceSwitchLabel}>固定</Text>
+                    <Switch
+                      value={resource.pinned === true}
+                      onValueChange={(value) =>
+                        handleUpdateMcpServerResource(selectedMcpServer.id, resource.uri, { pinned: value })
+                      }
+                      trackColor={{ false: colors.border, true: colors.primary }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+        {(selectedMcpServer.resourceTemplates || []).length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Resource Templates</Text>
+            <View style={styles.toolListPreview}>
+              {(selectedMcpServer.resourceTemplates || []).map((template) => (
+                <View key={template.uriTemplate} style={styles.toolListPreviewItem}>
+                  <View style={styles.toolListPreviewText}>
+                    <Text style={styles.toolListPreviewName}>{template.title || template.name || template.uriTemplate}</Text>
+                    {!!template.description && (
+                      <Text style={styles.toolListPreviewDescription} numberOfLines={2}>
+                        {template.description}
+                      </Text>
+                    )}
+                    <Text style={styles.toolListPreviewDescription} numberOfLines={1}>{template.uriTemplate}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+        <Text style={styles.sectionTitle}>Prompts</Text>
+        <View style={styles.toolListPreview}>
+          {(selectedMcpServer.prompts || []).length === 0 ? (
+            <Text style={styles.emptyText}>尚未同步提示词</Text>
+          ) : (
+            (selectedMcpServer.prompts || []).map((prompt) => (
+              <View key={prompt.name} style={styles.toolListPreviewItem}>
+                <Pressable
+                  style={styles.toolListPreviewText}
+                  onPress={() => setSelectedMcpPromptRef({ serverId: selectedMcpServer.id, promptName: prompt.name })}
+                >
+                  <Text style={styles.toolListPreviewName}>{prompt.title || prompt.name}</Text>
+                  {!!prompt.description && (
+                    <Text style={styles.toolListPreviewDescription} numberOfLines={2}>
+                      {prompt.description}
+                    </Text>
+                  )}
+                  <Text style={styles.toolListPreviewStatus}>查看并应用</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+        </View>
         <Pressable
           style={styles.testButton}
           onPress={() => handleSyncMcpServer(selectedMcpServer.id)}
           disabled={mcpSyncingServerId === selectedMcpServer.id}
         >
           <Text style={styles.testButtonText}>
-            {mcpSyncingServerId === selectedMcpServer.id ? '同步中' : '同步工具列表'}
+            {mcpSyncingServerId === selectedMcpServer.id ? '同步中' : '同步 MCP 能力'}
           </Text>
         </Pressable>
       </>
@@ -3750,11 +4063,13 @@ function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         <Pressable style={styles.toolGroupHeader} onPress={() => setToolSettingsUiConfig({ builtInToolsExpanded: !builtInToolsExpanded })}><View style={styles.switchText}><Text style={styles.toolGroupTitle}>内置工具</Text><Text style={styles.hint}>点击卡片查看和编辑详情；开关会先更新本页状态，保存后才写入配置。</Text></View><Text style={styles.platformToggleIcon}>{builtInToolsExpanded ? '↑' : '↓'}</Text></Pressable>
         {builtInToolsExpanded && <View style={styles.toolCardGrid}>{builtInToolCards.map((tool) => (<Pressable key={tool.key} style={[styles.toolCard, tool.enabled && styles.toolCardEnabled]} onPress={() => setSelectedBuiltInToolKey(tool.key)}><View style={styles.toolCardTop}><View style={styles.toolCardText}><Text style={styles.toolCardName} numberOfLines={1}>{tool.name}</Text><Text style={styles.toolCardMeta}>{tool.meta}</Text></View><Switch value={tool.enabled} onValueChange={tool.onValueChange} trackColor={{ false: colors.border, true: colors.primary }} thumbColor="#FFFFFF" /></View><Text style={styles.toolCardIntro} numberOfLines={3}>{tool.intro}</Text><Text style={[styles.toolCardStatus, tool.enabled && styles.toolCardStatusEnabled]}>{tool.enabled ? '已开启' : '已关闭'}</Text></Pressable>))}</View>}
         <Pressable style={styles.toolGroupHeader} onPress={() => setToolSettingsUiConfig({ customMcpExpanded: !customMcpExpanded })}><View style={styles.switchText}><Text style={styles.toolGroupTitle}>自定义 MCP</Text><Text style={styles.hint}>每个远程 MCP 服务都单独用卡片展示，点开后可以同步、编辑或删除。</Text></View><Text style={styles.platformToggleIcon}>{customMcpExpanded ? '↑' : '↓'}</Text></Pressable>
-        {customMcpExpanded && <><View style={styles.field}><Text style={styles.label}>每轮最大调用次数</Text><TextInput style={styles.input} value={mcpMaxCalls} onChangeText={setMcpMaxCalls} keyboardType="number-pad" placeholder="6" placeholderTextColor={colors.textTertiary} /></View><View style={styles.toolAddPanel}><Text style={styles.sectionTitle}>添加 MCP 服务</Text><TextInput style={styles.input} value={mcpServerName} onChangeText={setMcpServerName} placeholder="服务名称" placeholderTextColor={colors.textTertiary} /><TextInput style={styles.input} value={mcpServerUrl} onChangeText={setMcpServerUrl} placeholder="https://example.com/mcp" placeholderTextColor={colors.textTertiary} autoCapitalize="none" /><TextInput style={styles.input} value={mcpServerAuth} onChangeText={setMcpServerAuth} placeholder="授权信息，可选" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /><Pressable style={styles.addPathButton} onPress={handleAddMcpServer}><Text style={styles.addPathButtonText}>添加服务</Text></Pressable></View>{mcpServers.length === 0 ? <Text style={styles.emptyText}>尚未添加 MCP 服务</Text> : <View style={styles.toolCardGrid}>{mcpServers.map((server) => (<Pressable key={server.id} style={[styles.toolCard, server.enabled && styles.toolCardEnabled]} onPress={() => setSelectedMcpServerId(server.id)}><View style={styles.toolCardTop}><View style={styles.toolCardText}><Text style={styles.toolCardName} numberOfLines={1}>{server.name}</Text><Text style={styles.toolCardMeta}>{getEnabledMcpToolCount(server)} / {server.tools.length} 个工具已开启</Text></View><Switch value={server.enabled} onValueChange={(value) => handleUpdateMcpServer(server.id, { enabled: value })} trackColor={{ false: colors.border, true: colors.primary }} thumbColor="#FFFFFF" /></View><Text style={styles.toolCardIntro} numberOfLines={2}>{server.url}</Text><Text style={[styles.toolCardStatus, server.enabled && styles.toolCardStatusEnabled]}>{server.enabled ? '已开启' : '已关闭'}</Text></Pressable>))}</View>}<View style={styles.actions}><Pressable style={styles.saveButton} onPress={handleSaveMcpTools}><Text style={styles.saveButtonText}>保存 MCP 工具</Text></Pressable></View></>}
+        {customMcpExpanded && <><View style={styles.field}><Text style={styles.label}>每轮最大调用次数</Text><TextInput style={styles.input} value={mcpMaxCalls} onChangeText={setMcpMaxCalls} keyboardType="number-pad" placeholder="6" placeholderTextColor={colors.textTertiary} /></View><View style={styles.toolAddPanel}><Text style={styles.sectionTitle}>添加 MCP 服务</Text><TextInput style={styles.input} value={mcpServerName} onChangeText={setMcpServerName} placeholder="服务名称" placeholderTextColor={colors.textTertiary} /><TextInput style={styles.input} value={mcpServerUrl} onChangeText={setMcpServerUrl} placeholder="https://example.com/mcp" placeholderTextColor={colors.textTertiary} autoCapitalize="none" /><TextInput style={styles.input} value={mcpServerAuth} onChangeText={setMcpServerAuth} placeholder="授权信息，可选" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /><Pressable style={styles.addPathButton} onPress={handleAddMcpServer}><Text style={styles.addPathButtonText}>添加服务</Text></Pressable></View>{mcpServers.length === 0 ? <Text style={styles.emptyText}>尚未添加 MCP 服务</Text> : <View style={styles.toolCardGrid}>{mcpServers.map((server) => (<Pressable key={server.id} style={[styles.toolCard, server.enabled && styles.toolCardEnabled]} onPress={() => setSelectedMcpServerId(server.id)}><View style={styles.toolCardTop}><View style={styles.toolCardText}><Text style={styles.toolCardName} numberOfLines={1}>{server.name}</Text><Text style={styles.toolCardMeta}>工具 {getEnabledMcpToolCount(server)}/{server.tools.length} · 资源 {getEnabledMcpResourceCount(server)}/{(server.resources || []).length} · 提示词 {(server.prompts || []).length}</Text></View><Switch value={server.enabled} onValueChange={(value) => handleUpdateMcpServer(server.id, { enabled: value })} trackColor={{ false: colors.border, true: colors.primary }} thumbColor="#FFFFFF" /></View><Text style={styles.toolCardIntro} numberOfLines={2}>{server.url}</Text><Text style={[styles.toolCardStatus, server.enabled && styles.toolCardStatusEnabled]}>{server.enabled ? '已开启' : '已关闭'}</Text></Pressable>))}</View>}<View style={styles.actions}><Pressable style={styles.saveButton} onPress={handleSaveMcpTools}><Text style={styles.saveButtonText}>保存 MCP 能力</Text></Pressable></View></>}
       </ScrollView>
       <Modal visible={!!selectedBuiltInTool} transparent animationType="fade" onRequestClose={() => setSelectedBuiltInToolKey(null)}><View style={styles.overlay}><View style={[styles.modal, styles.toolModal]}><View style={styles.toolModalHeader}><View style={styles.switchText}><Text style={styles.modalTitle}>{selectedBuiltInTool?.name || '工具'}</Text>{!!selectedBuiltInTool && <Text style={styles.hint}>{selectedBuiltInTool.meta}</Text>}</View><Pressable style={styles.modalCancel} onPress={() => setSelectedBuiltInToolKey(null)}><Text style={styles.modalCancelText}>关闭</Text></Pressable></View><ScrollView style={styles.toolModalBody} keyboardShouldPersistTaps="handled">{!!selectedBuiltInTool && renderBuiltInToolEditor(selectedBuiltInTool.key)}</ScrollView>{!!selectedBuiltInTool && <View style={styles.toolModalActions}><Pressable style={styles.removeSmallButton} onPress={() => handleDisableBuiltInTool(selectedBuiltInTool.key)}><Text style={styles.removeSmallButtonText}>删除/关闭</Text></Pressable><Pressable style={styles.modalConfirm} onPress={() => { handleSaveBuiltInTool(selectedBuiltInTool.key); setSelectedBuiltInToolKey(null); }}><Text style={styles.modalConfirmText}>保存</Text></Pressable></View>}</View></View></Modal>
       <Modal visible={!!selectedMcpServer} transparent animationType="fade" onRequestClose={() => setSelectedMcpServerId(null)}><View style={styles.overlay}><View style={[styles.modal, styles.toolModal]}><View style={styles.toolModalHeader}><View style={styles.switchText}><Text style={styles.modalTitle}>{selectedMcpServer?.name || 'MCP 服务'}</Text>{!!selectedMcpServer && <Text style={styles.hint}>{selectedMcpServer.url}</Text>}</View><Pressable style={styles.modalCancel} onPress={() => setSelectedMcpServerId(null)}><Text style={styles.modalCancelText}>关闭</Text></Pressable></View><ScrollView style={styles.toolModalBody} keyboardShouldPersistTaps="handled">{renderMcpServerEditor()}</ScrollView>{!!selectedMcpServer && <View style={styles.toolModalActions}><Pressable style={styles.removeSmallButton} onPress={() => handleRemoveMcpServerFromModal(selectedMcpServer.id)}><Text style={styles.removeSmallButtonText}>删除</Text></Pressable><Pressable style={styles.modalConfirm} onPress={() => { handleSaveMcpTools(); setSelectedMcpServerId(null); }}><Text style={styles.modalConfirmText}>保存</Text></Pressable></View>}</View></View></Modal>
       <Modal visible={!!selectedMcpTool} transparent animationType="fade" onRequestClose={() => setSelectedMcpToolRef(null)}><View style={styles.overlay}><View style={[styles.modal, styles.toolModal]}><View style={styles.toolModalHeader}><View style={styles.switchText}><Text style={styles.modalTitle}>{selectedMcpTool?.title || selectedMcpTool?.name || 'MCP 工具'}</Text>{!!selectedMcpToolServer && <Text style={styles.hint}>{selectedMcpToolServer.name}</Text>}</View><Pressable style={styles.modalCancel} onPress={() => setSelectedMcpToolRef(null)}><Text style={styles.modalCancelText}>关闭</Text></Pressable></View>{!!selectedMcpTool && <ScrollView style={styles.toolModalBody} keyboardShouldPersistTaps="handled"><Text style={styles.label}>工具名称</Text><Text style={styles.toolDetailText}>{selectedMcpTool.name}</Text><Text style={styles.label}>启用状态</Text><Text style={styles.toolDetailText}>{selectedMcpTool.enabled !== false ? '已开启' : '已关闭'}</Text><Text style={styles.label}>简介</Text><Text style={styles.toolDetailText}>{selectedMcpTool.description || '暂无简介'}</Text><Text style={styles.label}>参数定义</Text><Text selectable style={styles.toolSchemaText}>{formatMcpToolInputSchema(selectedMcpTool)}</Text></ScrollView>}</View></View></Modal>
+      <Modal visible={!!selectedMcpResource} transparent animationType="fade" onRequestClose={() => setSelectedMcpResourceRef(null)}><View style={styles.overlay}><View style={[styles.modal, styles.toolModal]}><View style={styles.toolModalHeader}><View style={styles.switchText}><Text style={styles.modalTitle}>{selectedMcpResource?.title || selectedMcpResource?.name || 'MCP 资源'}</Text>{!!selectedMcpResourceServer && <Text style={styles.hint}>{selectedMcpResourceServer.name}</Text>}</View><Pressable style={styles.modalCancel} onPress={() => setSelectedMcpResourceRef(null)}><Text style={styles.modalCancelText}>关闭</Text></Pressable></View>{!!selectedMcpResource && <ScrollView style={styles.toolModalBody} keyboardShouldPersistTaps="handled"><Text style={styles.label}>URI</Text><Text selectable style={styles.toolDetailText}>{selectedMcpResource.uri}</Text><Text style={styles.label}>MIME 类型</Text><Text style={styles.toolDetailText}>{selectedMcpResource.mimeType || '未知'}</Text><Text style={styles.label}>状态</Text><Text style={styles.toolDetailText}>{selectedMcpResource.enabled !== false ? '允许读取' : '已关闭'} · {selectedMcpResource.pinned ? '固定附加到上下文' : '不自动附加'}</Text><Text style={styles.label}>简介</Text><Text style={styles.toolDetailText}>{selectedMcpResource.description || '暂无简介'}</Text></ScrollView>}</View></View></Modal>
+      <Modal visible={!!selectedMcpPrompt} transparent animationType="fade" onRequestClose={() => setSelectedMcpPromptRef(null)}><View style={styles.overlay}><View style={[styles.modal, styles.toolModal]}><View style={styles.toolModalHeader}><View style={styles.switchText}><Text style={styles.modalTitle}>{selectedMcpPrompt?.title || selectedMcpPrompt?.name || 'MCP 提示词'}</Text>{!!selectedMcpPromptServer && <Text style={styles.hint}>{selectedMcpPromptServer.name}</Text>}</View><Pressable style={styles.modalCancel} onPress={() => setSelectedMcpPromptRef(null)}><Text style={styles.modalCancelText}>关闭</Text></Pressable></View>{!!selectedMcpPrompt && <ScrollView style={styles.toolModalBody} keyboardShouldPersistTaps="handled"><Text style={styles.label}>提示词名称</Text><Text style={styles.toolDetailText}>{selectedMcpPrompt.name}</Text><Text style={styles.label}>简介</Text><Text style={styles.toolDetailText}>{selectedMcpPrompt.description || '暂无简介'}</Text><Text style={styles.label}>参数定义</Text><Text selectable style={styles.toolSchemaText}>{formatMcpPromptArguments(selectedMcpPrompt)}</Text><Text style={styles.label}>调用参数 JSON</Text><TextInput style={[styles.input, styles.multilineInput]} value={mcpPromptArgs} onChangeText={setMcpPromptArgs} multiline textAlignVertical="top" autoCapitalize="none" placeholder="{}" placeholderTextColor={colors.textTertiary} /><Pressable style={[styles.saveButton, mcpPromptApplying && styles.importButtonDisabled]} onPress={handleApplyMcpPrompt} disabled={mcpPromptApplying}><Text style={styles.saveButtonText}>{mcpPromptApplying ? '应用中' : '应用到当前对话'}</Text></Pressable></ScrollView>}</View></View></Modal>
     </>
   );
 
@@ -4365,6 +4680,21 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
   },
+  mcpResourceSwitches: {
+    flexShrink: 0,
+    gap: 6,
+  },
+  mcpResourceSwitchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  mcpResourceSwitchLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textTertiary,
+  },
   toolDetailText: {
     fontSize: 13,
     lineHeight: 18,
@@ -4838,6 +5168,21 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
+  },
+  welcomeLogoPreview: {
+    width: 58,
+    height: 58,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  welcomeLogoImage: {
+    width: 42,
+    height: 42,
   },
   defaultFloatingBallPreview: {
     width: 38,

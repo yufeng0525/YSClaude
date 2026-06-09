@@ -36,6 +36,7 @@ import {
   buildAndroidAccessibilityRuntimeContext,
   buildAndroidScreenshotRuntimeContext,
 } from '../utils/androidAccessibilityControl';
+import { collectPinnedMcpResourceContexts } from '../services/toolModules/mcpRemote';
 import { consumePendingAndroidAccessibilityContext } from '../services/androidAccessibilitySession';
 import {
   createConversation,
@@ -1131,6 +1132,15 @@ async function streamAssistantResponse(
 
   if (attachedWebViewContext) {
     runtimeSections.push(attachedWebViewContext.apiContent);
+  }
+
+  try {
+    const mcpResourceContexts = await collectPinnedMcpResourceContexts(settings.mcpToolConfig);
+    if (mcpResourceContexts.length > 0) {
+      runtimeSections.push(...mcpResourceContexts);
+    }
+  } catch (err) {
+    console.warn('[Chat] 读取固定 MCP Resource 失败:', err);
   }
 
   const focusEventContext = buildFocusEventSystemPrompt(visibleHistoryMessages);

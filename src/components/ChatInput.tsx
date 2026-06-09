@@ -1,6 +1,19 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { View, TextInput, Pressable, Text, StyleSheet, Image, Modal, ScrollView, Dimensions } from 'react-native';
+import {
+  View,
+  TextInput,
+  Pressable,
+  Text,
+  StyleSheet,
+  Image,
+  Modal,
+  ScrollView,
+  Dimensions,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { BlurView } from 'expo-blur';
@@ -8,10 +21,18 @@ import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { useSettingsStore } from '../stores/settings';
 import { buildStickerDefinitions, normalizeStickerName, type StickerDefinition } from '../utils/stickers';
+import {
+  formatMcpPromptResult,
+  formatMcpResourceResult,
+  getMcpPrompt,
+  readMcpResource,
+} from '../services/mcpHttpClient';
 
 
 let colors = lightColors;
 const STICKER_PANEL_HEIGHT = Math.min(420, Dimensions.get('window').height * 0.48);
+const MCP_PANEL_HEIGHT = Math.min(560, Dimensions.get('window').height * 0.68);
+type McpPanelTab = 'tools' | 'resources' | 'prompts';
 
 function clampNumber(value: number | undefined, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) return fallback;
@@ -55,13 +76,24 @@ export function ChatInput({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const [mcpPanelVisible, setMcpPanelVisible] = useState(false);
+  const [mcpSelectedServerId, setMcpSelectedServerId] = useState<string | null>(null);
+  const [mcpTab, setMcpTab] = useState<McpPanelTab>('resources');
+  const [mcpPromptArgs, setMcpPromptArgs] = useState<Record<string, string>>({});
+  const [mcpBusyKey, setMcpBusyKey] = useState<string | null>(null);
   const shouldInvertResponseIcon = isDarkTheme && (isStreaming || !isInputFocused);
   const responseTouchStartedRef = useRef(false);
   const sendInFlightRef = useRef(false);
   const insets = useSafeAreaInsets();
-  const { apiConfigs, activeConfigIndex, appearanceConfig, stickerConfig } = useSettingsStore();
+  const { apiConfigs, activeConfigIndex, appearanceConfig, stickerConfig, mcpToolConfig, setMcpToolConfig } = useSettingsStore();
   const current = apiConfigs[activeConfigIndex];
   const currentModel = current?.name || current?.model || '未配置';
+  const mcpServers = mcpToolConfig?.servers || [];
+  const selectedMcpServer =
+    mcpServers.find((server) => server.id === mcpSelectedServerId) ||
+    mcpServers.find((server) => server.enabled) ||
+    mcpServers[0] ||
+    null;
   const userStickers = useMemo(
     () => buildStickerDefinitions(stickerConfig?.userStickers),
     [stickerConfig?.userStickers]
@@ -122,6 +154,112 @@ export function ChatInput({
     if (disabled || isStreaming) return;
     setOptionsMenuVisible(false);
     await onEnableWebCruise?.();
+  };
+
+  const handleOpenMcpPanel = () => {
+    setOptionsMenuVisible(false);
+    setMcpPanelVisible(true);
+    if (!mcpSelectedServerId && selectedMcpServer) {
+      setMcpSelectedServerId(selectedMcpServer.id);
+    }
+  };
+
+  const appendToInput = (content: string) => {
+    setText((current) => {
+      const prefix = current.trimEnd();
+      return prefix ? `${prefix}\n\n${content}` : content;
+    });
+  };
+
+  const hasEnabledMcpAbility = (servers: typeof mcpServers) =>
+    servers.some(
+      (server) =>
+        server.enabled &&
+        (
+          (server.tools || []).some((tool) => tool.enabled !== false) ||
+          (server.resources || []).some((resource) => resource.enabled !== false && resource.pinned)
+        )
+    );
+
+  const handleToggleMcpResourcePinned = (serverId: string, uri: string, pinned: boolean) => {
+    const nextServers = mcpServers.map((server) => {
+      if (server.id !== serverId) return server;
+      return {
+        ...server,
+        resources: (server.resources || []).map((resource) =>
+          resource.uri === uri ? { ...resource, pinned } : resource
+        ),
+        updatedAt: Date.now(),
+      };
+    });
+    setMcpToolConfig({
+      servers: nextServers,
+      enabled: hasEnabledMcpAbility(nextServers) || !!mcpToolConfig?.resourceToolsEnabled,
+    });
+  };
+
+  const handleInsertMcpResource = async (
+    server: NonNullable<typeof selectedMcpServer>,
+    resource: NonNullable<NonNullable<typeof selectedMcpServer>['resources']>[number]
+  ) => {
+    const busyKey = `resource:${server.id}:${resource.uri}`;
+    setMcpBusyKey(busyKey);
+    try {
+      const result = await readMcpResource(
+        { url: server.url, authorization: server.authorization },
+        resource.uri
+      );
+      const content = formatMcpResourceResult(result);
+      appendToInput([
+        `MCP Resource：${resource.title || resource.name || resource.uri}`,
+        `来源：${server.name}`,
+        `URI：${resource.uri}`,
+        '',
+        content,
+      ].join('\n'));
+      setMcpPanelVisible(false);
+    } catch (error: any) {
+      Alert.alert('读取失败', error?.message || '无法读取 MCP 资源');
+    } finally {
+      setMcpBusyKey(null);
+    }
+  };
+
+  const defaultPromptArgsText = (prompt: NonNullable<NonNullable<typeof selectedMcpServer>['prompts']>[number]) => {
+    const args: Record<string, string> = {};
+    for (const arg of prompt.arguments || []) {
+      if (arg.required) args[arg.name] = '';
+    }
+    return Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : '{}';
+  };
+
+  const handleApplyMcpPrompt = async (
+    server: NonNullable<typeof selectedMcpServer>,
+    prompt: NonNullable<NonNullable<typeof selectedMcpServer>['prompts']>[number]
+  ) => {
+    const key = `${server.id}:${prompt.name}`;
+    const busyKey = `prompt:${key}`;
+    setMcpBusyKey(busyKey);
+    try {
+      const rawArgs = mcpPromptArgs[key] ?? defaultPromptArgsText(prompt);
+      const args = rawArgs.trim() ? JSON.parse(rawArgs) : {};
+      const result = await getMcpPrompt(
+        { url: server.url, authorization: server.authorization },
+        prompt.name,
+        args
+      );
+      appendToInput([
+        `MCP Prompt：${prompt.title || prompt.name}`,
+        `来源：${server.name}`,
+        '',
+        formatMcpPromptResult(result),
+      ].join('\n'));
+      setMcpPanelVisible(false);
+    } catch (error: any) {
+      Alert.alert('应用失败', error?.message || '无法读取 MCP 提示词');
+    } finally {
+      setMcpBusyKey(null);
+    }
   };
 
   const handleSend = async (value: string) => {
@@ -336,11 +474,182 @@ export function ChatInput({
               <Text style={styles.optionText}>AI网页巡游</Text>
             </Pressable>
             <View style={styles.optionDivider} />
+            <Pressable style={styles.optionItem} onPress={handleOpenMcpPanel}>
+              <Text style={styles.optionText}>MCP 管理</Text>
+            </Pressable>
+            <View style={styles.optionDivider} />
             <Pressable style={styles.optionItem} onPress={() => void pickImage()}>
               <Text style={styles.optionText}>图片</Text>
             </Pressable>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal transparent visible={mcpPanelVisible} animationType="fade" onRequestClose={() => setMcpPanelVisible(false)}>
+        <KeyboardAvoidingView
+          style={styles.mcpKeyboardAvoider}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Math.max(insets.bottom, 12)}
+        >
+          <View style={styles.mcpOverlay}>
+            <Pressable style={styles.mcpBackdrop} onPress={() => setMcpPanelVisible(false)} />
+            <View style={styles.mcpPanel}>
+              <View style={styles.mcpHeader}>
+                <View style={styles.mcpHeaderText}>
+                  <Text style={styles.mcpTitle}>MCP 管理</Text>
+                  <Text style={styles.mcpHint}>选择资源或提示词插入输入框；固定资源会自动附加到后续回复上下文。</Text>
+                </View>
+                <Pressable style={styles.mcpCloseButton} onPress={() => setMcpPanelVisible(false)}>
+                  <Text style={styles.mcpCloseText}>关闭</Text>
+                </Pressable>
+              </View>
+
+              {mcpServers.length === 0 ? (
+                <View style={styles.mcpEmpty}>
+                  <Text style={styles.mcpEmptyTitle}>尚未添加 MCP 服务</Text>
+                  <Text style={styles.mcpEmptyHint}>到设置的工具设置页添加并同步远程 MCP 服务。</Text>
+                </View>
+              ) : (
+                <View style={styles.mcpBody}>
+                  <ScrollView
+                    style={styles.mcpServerTabScroller}
+                    horizontal
+                    showsHorizontalScrollIndicator
+                    persistentScrollbar
+                    contentContainerStyle={styles.mcpServerTabs}
+                  >
+                    {mcpServers.map((server) => {
+                      const active = selectedMcpServer?.id === server.id;
+                      return (
+                        <Pressable
+                          key={server.id}
+                          style={[styles.mcpServerTab, active && styles.mcpServerTabActive]}
+                          onPress={() => setMcpSelectedServerId(server.id)}
+                        >
+                          <Text style={[styles.mcpServerTabText, active && styles.mcpServerTabTextActive]} numberOfLines={1}>
+                            {server.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <View style={styles.mcpSegmented}>
+                    {(['resources', 'prompts', 'tools'] as McpPanelTab[]).map((tab) => {
+                      const label = tab === 'resources' ? 'Resources' : tab === 'prompts' ? 'Prompts' : 'Tools';
+                      return (
+                        <Pressable
+                          key={tab}
+                          style={[styles.mcpSegmentButton, mcpTab === tab && styles.mcpSegmentButtonActive]}
+                          onPress={() => setMcpTab(tab)}
+                        >
+                          <Text style={[styles.mcpSegmentText, mcpTab === tab && styles.mcpSegmentTextActive]}>{label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <ScrollView
+                    style={styles.mcpList}
+                    contentContainerStyle={styles.mcpListContent}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator
+                    persistentScrollbar
+                  >
+                    {!selectedMcpServer ? null : mcpTab === 'resources' ? (
+                      (selectedMcpServer.resources || []).length === 0 ? (
+                        <Text style={styles.mcpEmptyInline}>这个服务还没有同步 Resources。</Text>
+                      ) : (
+                        (selectedMcpServer.resources || []).map((resource) => {
+                          const busyKey = `resource:${selectedMcpServer.id}:${resource.uri}`;
+                          return (
+                            <View key={resource.uri} style={styles.mcpItem}>
+                              <View style={styles.mcpItemText}>
+                                <Text style={styles.mcpItemTitle}>{resource.title || resource.name || resource.uri}</Text>
+                                {!!resource.description && <Text style={styles.mcpItemDescription} numberOfLines={2}>{resource.description}</Text>}
+                                <Text style={styles.mcpItemMeta} numberOfLines={1}>{resource.uri}</Text>
+                                <Text style={styles.mcpItemStatus}>{resource.pinned ? '已固定到上下文' : '未固定'}</Text>
+                              </View>
+                              <View style={styles.mcpItemActions}>
+                                <Pressable
+                                  style={styles.mcpSmallButton}
+                                  onPress={() => void handleInsertMcpResource(selectedMcpServer, resource)}
+                                  disabled={mcpBusyKey === busyKey}
+                                >
+                                  <Text style={styles.mcpSmallButtonText}>{mcpBusyKey === busyKey ? '读取中' : '插入'}</Text>
+                                </Pressable>
+                                <Pressable
+                                  style={[styles.mcpSmallButton, resource.pinned && styles.mcpSmallButtonActive]}
+                                  onPress={() => handleToggleMcpResourcePinned(selectedMcpServer.id, resource.uri, !resource.pinned)}
+                                >
+                                  <Text style={[styles.mcpSmallButtonText, resource.pinned && styles.mcpSmallButtonTextActive]}>
+                                    {resource.pinned ? '取消固定' : '固定'}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          );
+                        })
+                      )
+                    ) : mcpTab === 'prompts' ? (
+                      (selectedMcpServer.prompts || []).length === 0 ? (
+                        <Text style={styles.mcpEmptyInline}>这个服务还没有同步 Prompts。</Text>
+                      ) : (
+                        (selectedMcpServer.prompts || []).map((prompt) => {
+                          const key = `${selectedMcpServer.id}:${prompt.name}`;
+                          const busyKey = `prompt:${key}`;
+                          const argsText = mcpPromptArgs[key] ?? defaultPromptArgsText(prompt);
+                          return (
+                            <View key={prompt.name} style={styles.mcpPromptItem}>
+                              <Text style={styles.mcpItemTitle}>{prompt.title || prompt.name}</Text>
+                              {!!prompt.description && <Text style={styles.mcpItemDescription}>{prompt.description}</Text>}
+                              {(prompt.arguments || []).length > 0 && (
+                                <Text style={styles.mcpItemMeta}>
+                                  参数：{(prompt.arguments || []).map((arg) => arg.required ? `${arg.name}*` : arg.name).join(', ')}
+                                </Text>
+                              )}
+                              <TextInput
+                                style={styles.mcpPromptArgsInput}
+                                value={argsText}
+                                onChangeText={(value) => setMcpPromptArgs((current) => ({ ...current, [key]: value }))}
+                                multiline
+                                textAlignVertical="top"
+                                autoCapitalize="none"
+                                placeholder="{}"
+                                placeholderTextColor={colors.textTertiary}
+                              />
+                              <Pressable
+                                style={styles.mcpPrimaryButton}
+                                onPress={() => void handleApplyMcpPrompt(selectedMcpServer, prompt)}
+                                disabled={mcpBusyKey === busyKey}
+                              >
+                                <Text style={styles.mcpPrimaryButtonText}>{mcpBusyKey === busyKey ? '应用中' : '应用到输入框'}</Text>
+                              </Pressable>
+                            </View>
+                          );
+                        })
+                      )
+                    ) : (
+                      (selectedMcpServer.tools || []).length === 0 ? (
+                        <Text style={styles.mcpEmptyInline}>这个服务还没有同步 Tools。</Text>
+                      ) : (
+                        (selectedMcpServer.tools || []).map((tool) => (
+                          <View key={tool.name} style={styles.mcpItem}>
+                            <View style={styles.mcpItemText}>
+                              <Text style={styles.mcpItemTitle}>{tool.title || tool.name}</Text>
+                              {!!tool.description && <Text style={styles.mcpItemDescription} numberOfLines={2}>{tool.description}</Text>}
+                              <Text style={styles.mcpItemStatus}>{tool.enabled !== false ? 'AI 可自动调用' : '已关闭'}</Text>
+                            </View>
+                          </View>
+                        ))
+                      )
+                    )}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -596,6 +905,255 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.inputBorder,
     marginHorizontal: 10,
+  },
+  mcpOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.16)',
+  },
+  mcpBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  mcpPanel: {
+    marginHorizontal: 12,
+    marginBottom: 96,
+    height: MCP_PANEL_HEIGHT,
+    backgroundColor: colors.inputBackground,
+    borderRadius: 20,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+  },
+  mcpKeyboardAvoider: {
+    flex: 1,
+  },
+  mcpHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+  mcpHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mcpTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  mcpHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+  },
+  mcpCloseButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 9,
+    backgroundColor: colors.surfaceHover,
+  },
+  mcpCloseText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  mcpServerTabs: {
+    gap: 8,
+    paddingBottom: 4,
+    paddingRight: 4,
+    alignItems: 'center',
+  },
+  mcpServerTabScroller: {
+    maxHeight: 38,
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 10,
+  },
+  mcpBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  mcpServerTab: {
+    maxWidth: 120,
+    height: 30,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceHover,
+    justifyContent: 'center',
+  },
+  mcpServerTabActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  mcpServerTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  mcpServerTabTextActive: {
+    color: colors.primary,
+  },
+  mcpSegmented: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  mcpSegmentButton: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceHover,
+  },
+  mcpSegmentButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  mcpSegmentText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  mcpSegmentTextActive: {
+    color: '#FFFFFF',
+  },
+  mcpList: {
+    flex: 1,
+    minHeight: 0,
+  },
+  mcpListContent: {
+    gap: 10,
+    paddingBottom: 12,
+  },
+  mcpItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    backgroundColor: colors.surfaceHover,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mcpPromptItem: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    backgroundColor: colors.surfaceHover,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mcpItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mcpItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  mcpItemDescription: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+  },
+  mcpItemMeta: {
+    marginTop: 5,
+    fontSize: 11,
+    color: colors.textTertiary,
+  },
+  mcpItemStatus: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  mcpItemActions: {
+    flexShrink: 0,
+    gap: 8,
+  },
+  mcpSmallButton: {
+    minWidth: 72,
+    minHeight: 32,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  mcpSmallButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  mcpSmallButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  mcpSmallButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  mcpPromptArgsInput: {
+    minHeight: 72,
+    marginTop: 8,
+    marginBottom: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    backgroundColor: colors.inputBackground,
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 17,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  mcpPrimaryButton: {
+    minHeight: 38,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+  },
+  mcpPrimaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  mcpEmpty: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  mcpEmptyTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 6,
+  },
+  mcpEmptyHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  mcpEmptyInline: {
+    paddingVertical: 28,
+    textAlign: 'center',
+    fontSize: 13,
+    color: colors.textTertiary,
   },
 });
 

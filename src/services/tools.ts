@@ -43,6 +43,12 @@ export function getToolLabel(toolName: string): string {
       return `MCP ${serverId}: ${rawToolName}`;
     }
   }
+  if (toolName.startsWith('mcp_resource__')) {
+    const parts = toolName.split('__').filter(Boolean);
+    if (parts.length >= 2) {
+      return `MCP ${parts[1]}: 读取资源`;
+    }
+  }
   return toolName;
 }
 
