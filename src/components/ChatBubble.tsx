@@ -10,15 +10,18 @@ import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
 import { playTTS, stopTTS } from '../services/tts';
 import { saveGeneratedImageToLibrary } from '../services/imageGeneration';
+import { openWebView } from '../services/webviewController';
 import { getToolLabel } from '../services/tools';
 import { StickerContent } from './StickerContent';
 import { buildStickerDefinitions, hasStickerToken, isStickerOnlyContent } from '../utils/stickers';
 import { formatSmartTime } from '../utils/time';
+import { getLinkCardInfo, getSingleHttpUrlMessage } from '../utils/sharedLinks';
 
 
 let colors = lightColors;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const IMAGE_MAX_WIDTH = SCREEN_WIDTH * 0.65;
+const LINK_CARD_MAX_WIDTH = SCREEN_WIDTH * 0.68;
 const MESSAGE_AVATAR_SIZE = 36;
 
 function numberOrDefault(value: number | undefined, fallback: number, min: number, max: number) {
@@ -150,6 +153,30 @@ function splitThinking(raw: string): { thinking: string; body: string } {
   return { thinking: thinking.trim(), body: body.trim() };
 }
 
+function SharedLinkCard({ url }: { url: string }) {
+  const info = getLinkCardInfo(url);
+
+  return (
+    <View style={styles.sharedLinkCard}>
+      <View style={styles.sharedLinkIconWrap}>
+        <Image
+          source={require('../../assets/web.png')}
+          style={styles.sharedLinkIcon}
+          resizeMode="contain"
+        />
+      </View>
+      <View style={styles.sharedLinkTextBlock}>
+        <Text style={styles.sharedLinkTitle} numberOfLines={1}>
+          {info.title}
+        </Text>
+        <Text style={styles.sharedLinkSubtitle} numberOfLines={2}>
+          {info.subtitle}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export const ChatBubble = React.memo(function ChatBubble({
   message,
   blurTarget,
@@ -218,6 +245,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   const avatarFallback = isUser ? 'U' : 'AI';
   const messageHasSticker = hasStickerToken(message.content, messageStickers);
   const messageIsStickerOnly = isStickerOnlyContent(message.content, messageStickers);
+  const sharedLinkUrl = isUser ? getSingleHttpUrlMessage(message.content) : null;
   const editMessage = useChatStore((state) => state.editMessage);
   const removeMessage = useChatStore((state) => state.removeMessage);
   const removeToolInvocation = useChatStore((state) => state.removeToolInvocation);
@@ -319,6 +347,13 @@ export const ChatBubble = React.memo(function ChatBubble({
   function deleteUserMessage() {
     setMenuVisible(false);
     removeMessage(message.id);
+  }
+
+  function openSharedLinkCard() {
+    if (!sharedLinkUrl) return;
+    openWebView(sharedLinkUrl).catch((error) => {
+      Alert.alert('打开失败', error?.message || '无法打开链接');
+    });
   }
 
   function toggleCurrentFloorHidden(closeMenu: () => void) {
@@ -435,7 +470,7 @@ export const ChatBubble = React.memo(function ChatBubble({
           {message.content.length > 0 && (
             <Pressable
               ref={bubbleRef}
-              onPress={onBubblePress}
+              onPress={sharedLinkUrl ? openSharedLinkCard : onBubblePress}
               onLongPress={handleUserLongPress}
               style={userBubbleBaseStyle}
             >
@@ -449,13 +484,17 @@ export const ChatBubble = React.memo(function ChatBubble({
                   style={StyleSheet.absoluteFill}
                 />
               )}
-              <StickerContent
-                content={message.content}
-                variant="user"
-                userTextStyle={userTextStyle}
-                markdownStyle={userMarkdownStyles}
-                stickers={messageStickers}
-              />
+              {sharedLinkUrl ? (
+                <SharedLinkCard url={sharedLinkUrl} />
+              ) : (
+                <StickerContent
+                  content={message.content}
+                  variant="user"
+                  userTextStyle={userTextStyle}
+                  markdownStyle={userMarkdownStyles}
+                  stickers={messageStickers}
+                />
+              )}
             </Pressable>
           )}
           {message.content.length === 0 && !message.imageUri && (
@@ -1086,6 +1125,43 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   userBubbleWithSticker: {
     paddingVertical: 8,
     paddingHorizontal: 10,
+  },
+  sharedLinkCard: {
+    width: Math.min(300, LINK_CARD_MAX_WIDTH),
+    minHeight: 74,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sharedLinkIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sharedLinkIcon: {
+    width: 22,
+    height: 22,
+    tintColor: colors.primary,
+  },
+  sharedLinkTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sharedLinkTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  sharedLinkSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
   },
   userStickerOnlyBubble: {
     backgroundColor: 'transparent',

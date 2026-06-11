@@ -286,6 +286,7 @@ interface ChatState {
 
   sendMessage: (content: string, imageUri?: string) => Promise<void>;
   addUserMessage: (content: string, imageUri?: string) => Promise<Message | null>;
+  addSharedLinkToLatestConversation: (url: string) => Promise<string>;
   addSystemMessage: (content: string) => Promise<Message | null>;
   enableWebCruise: () => Promise<void>;
   triggerResponse: () => Promise<void>;
@@ -1453,6 +1454,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await insertMessage(conversationId, userMessage);
     await updateConversation(conversationId, { updatedAt: Date.now() });
     return userMessage;
+  },
+
+  // Android 系统分享入口：只把链接作为普通用户文本消息存入最新创建的聊天。
+  addSharedLinkToLatestConversation: async (url: string) => {
+    const now = Date.now();
+    const settings = useSettingsStore.getState();
+    const config = settings.apiConfigs[settings.activeConfigIndex];
+    const conversations = await getAllConversations();
+    let targetConversation = conversations[0] ?? null;
+
+    if (!targetConversation) {
+      targetConversation = {
+        id: randomUUID(),
+        title: '分享链接',
+        systemPrompt: settings.systemPrompt,
+        model: config?.model || '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await createConversation(targetConversation);
+    }
+
+    const userMessage: Message = {
+      id: randomUUID(),
+      role: 'user',
+      content: url,
+      createdAt: now,
+    };
+
+    await insertMessage(targetConversation.id, userMessage);
+    await updateConversation(targetConversation.id, { updatedAt: now });
+
+    if (get().conversationId === targetConversation.id) {
+      set((state) => ({
+        messages: [...state.messages, userMessage],
+        error: null,
+        openToBottomRequestId: state.openToBottomRequestId + 1,
+      }));
+    }
+
+    return targetConversation.id;
   },
 
   addSystemMessage: async (content: string) => {

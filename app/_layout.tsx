@@ -15,6 +15,7 @@ import { WebViewPanel } from '../src/components/WebViewPanel';
 import { useSettingsStore } from '../src/stores/settings';
 import { useLicenseStore } from '../src/stores/license';
 import { InviteGate } from '../src/components/InviteGate';
+import { IncomingShareHandler } from '../src/components/IncomingShareHandler';
 import {
   addFloatingBallToolActionListener,
   hideFloatingBall,
@@ -174,6 +175,7 @@ export default function RootLayout() {
           />
         </Stack>
         <WebViewPanel />
+        <IncomingShareHandler />
       </InviteGate>
     </>
   );

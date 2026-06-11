@@ -82,7 +82,22 @@
         }
       ],
       "expo-asset",
-      "expo-sharing"
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "text/plain",
+              "text/*"
+            ],
+            "multipleShareMimeTypes": [
+              "text/plain",
+              "text/*"
+            ]
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {},

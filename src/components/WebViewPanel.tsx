@@ -398,6 +398,15 @@ const GOOGLE_TRANSLATE_PAGE_URL = 'https://translate.google.com/translate';
 function normalizeAddressInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
+
+  const looksLikeHost =
+    /^https?:\/\//i.test(trimmed) ||
+    /^localhost(?::\d+)?(?:[/?#].*)?$/i.test(trimmed) ||
+    /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#].*)?$/.test(trimmed) ||
+    /^(?:[\p{L}\p{N}-]+\.?)+[.\u3002](?:[\p{L}\p{N}-]{2,})(?::\d+)?(?:[/?#].*)?$/u.test(trimmed);
+
+  if (!looksLikeHost) return null;
+
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   try {
     const parsed = new URL(withProtocol);
