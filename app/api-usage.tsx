@@ -145,7 +145,7 @@ export default function ApiUsageScreen() {
       <Pressable style={styles.achievementEntry} onPress={() => router.push('/api-achievements')}>
         <View>
           <Text style={styles.achievementEntryTitle}>成就徽章</Text>
-          <Text style={styles.achievementEntryMeta}>查看徽章墙，添加自定义成就</Text>
+          <Text style={styles.achievementEntryMeta}>查看阶段徽章，编辑徽章外观</Text>
         </View>
         <Text style={styles.achievementEntryAction}>进入</Text>
       </Pressable>
