@@ -24,6 +24,7 @@ import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { useSettingsStore } from '../stores/settings';
 import { buildStickerDefinitions, normalizeStickerName, type StickerDefinition } from '../utils/stickers';
+import { parseAppearanceCss } from '../utils/appearanceCss';
 import {
   formatMcpPromptResult,
   formatMcpResourceResult,
@@ -115,6 +116,10 @@ export function ChatInput({
   const sendInFlightRef = useRef(false);
   const insets = useSafeAreaInsets();
   const { apiConfigs, activeConfigIndex, appearanceConfig, stickerConfig, mcpToolConfig, setMcpToolConfig } = useSettingsStore();
+  const customCssStyles = useMemo(
+    () => parseAppearanceCss(appearanceConfig?.customCss),
+    [appearanceConfig?.customCss]
+  );
   const current = apiConfigs[activeConfigIndex];
   const currentModel = current?.name || current?.model || '未配置';
   const mcpServers = mcpToolConfig?.servers || [];
@@ -154,6 +159,9 @@ export function ChatInput({
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
   const inputBlurIntensity = clampNumber(appearanceConfig?.inputBlurIntensity, 72, 0, 100);
   const inputBorderRadius = clampNumber(appearanceConfig?.inputBorderRadius, 24, 0, 36);
+  const inputPanelRadius = typeof customCssStyles.inputBar?.borderRadius === 'number'
+    ? customCssStyles.inputBar.borderRadius
+    : inputBorderRadius;
   const isCompactInput = inputStyle === 'compact';
   const isGlassInput = inputStyle === 'glass' || isCompactInput;
   const glassBlur = glassBlurIntensity(inputBlurIntensity);
@@ -422,10 +430,11 @@ export function ChatInput({
       <View
         style={[
           styles.container,
-          { backgroundColor: inputPanelBackground, borderRadius: inputBorderRadius },
+          { backgroundColor: inputPanelBackground, borderRadius: inputPanelRadius },
           hasCustomInputSurface && styles.customContainer,
           isGlassInput && styles.glassContainer,
           isCompactInput && styles.compactContainer,
+          customCssStyles.inputBar,
         ]}
       >
         {inputBackgroundImageUri && (
@@ -452,8 +461,8 @@ export function ChatInput({
               style={[
                 styles.glassInnerSheen,
                 {
-                  borderTopLeftRadius: Math.max(0, inputBorderRadius - 1),
-                  borderTopRightRadius: Math.max(0, inputBorderRadius - 1),
+                  borderTopLeftRadius: Math.max(0, inputPanelRadius - 1),
+                  borderTopRightRadius: Math.max(0, inputPanelRadius - 1),
                 },
               ]}
             />
@@ -513,7 +522,7 @@ export function ChatInput({
               </View>
             )}
             <TextInput
-              style={[styles.input, styles.compactInput]}
+              style={[styles.input, styles.compactInput, customCssStyles.inputText]}
               value={text}
               onChangeText={handleChangeText}
               onSubmitEditing={() => void handleSend(text)}
@@ -552,7 +561,7 @@ export function ChatInput({
         ) : (
           <>
             <TextInput
-              style={styles.input}
+              style={[styles.input, customCssStyles.inputText]}
               value={text}
               onChangeText={handleChangeText}
               onSubmitEditing={() => void handleSend(text)}

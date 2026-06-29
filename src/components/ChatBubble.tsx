@@ -1,14 +1,13 @@
 import React, { useMemo, useState, useRef } from 'react';
 import type { RefObject } from 'react';
-import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView, ActivityIndicator, type TextStyle } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { BlurView } from 'expo-blur';
-import Svg, { ClipPath, Defs, G, Image as SvgImage, Rect } from 'react-native-svg';
 import { Message, type GeneratedPicture } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { useChatStore } from '../stores/chat';
-import { useSettingsStore, type BubbleTextureConfig } from '../stores/settings';
+import { useSettingsStore } from '../stores/settings';
 import { playTTS, stopTTS } from '../services/tts';
 import { saveGeneratedImageToLibrary } from '../services/imageGeneration';
 import { openWebView } from '../services/webviewController';
@@ -18,6 +17,7 @@ import { buildStickerDefinitions, hasStickerToken, isStickerOnlyContent } from '
 import { formatSmartTime } from '../utils/time';
 import { getLinkCardInfo, getSingleHttpUrlMessage } from '../utils/sharedLinks';
 import { parseDailyPaperCardMessage, type DailyPaperCardPayload } from '../utils/dailyPaperShare';
+import { parseAppearanceCss } from '../utils/appearanceCss';
 
 
 let colors = lightColors;
@@ -46,132 +46,6 @@ function percentWidth(value: number): `${number}%` {
 
 function glassBlurIntensity(value: number): number {
   return Math.round(8 + value * 0.22);
-}
-
-function scaleBubbleTextureInsets(texture: BubbleTextureConfig) {
-  const scale = Math.min(1, 220 / texture.originalWidth, 120 / texture.originalHeight);
-  return {
-    paddingLeft: Math.min(58, Math.round(texture.contentInsets.left * scale)),
-    paddingTop: Math.min(42, Math.round(texture.contentInsets.top * scale)),
-    paddingRight: Math.min(58, Math.round(texture.contentInsets.right * scale)),
-    paddingBottom: Math.min(42, Math.round(texture.contentInsets.bottom * scale)),
-  };
-}
-
-function BubbleTextureBackground({ texture }: { texture: BubbleTextureConfig }) {
-  const [layout, setLayout] = useState({ width: 0, height: 0 });
-  const clipPrefix = useMemo(() => `bubble-texture-${Math.random().toString(36).slice(2)}`, []);
-  const width = layout.width;
-  const height = layout.height;
-
-  const cells = useMemo(() => {
-    if (width <= 1 || height <= 1) return [];
-
-    const sourceWidth = Math.max(1, texture.originalWidth);
-    const sourceHeight = Math.max(1, texture.originalHeight);
-    const left = Math.min(texture.stretchInsets.left, sourceWidth - 1);
-    const top = Math.min(texture.stretchInsets.top, sourceHeight - 1);
-    const right = Math.min(texture.stretchInsets.right, sourceWidth - left - 1);
-    const bottom = Math.min(texture.stretchInsets.bottom, sourceHeight - top - 1);
-    const renderScale = Math.min(1, width / sourceWidth, height / sourceHeight);
-    const destLeft = Math.min(Math.round(left * renderScale), Math.floor(width / 2) - 1);
-    const destTop = Math.min(Math.round(top * renderScale), Math.floor(height / 2) - 1);
-    const destRight = Math.min(Math.round(right * renderScale), Math.floor(width / 2) - 1);
-    const destBottom = Math.min(Math.round(bottom * renderScale), Math.floor(height / 2) - 1);
-
-    const sourceColumns = [
-      { start: 0, size: left },
-      { start: left, size: sourceWidth - left - right },
-      { start: sourceWidth - right, size: right },
-    ];
-    const sourceRows = [
-      { start: 0, size: top },
-      { start: top, size: sourceHeight - top - bottom },
-      { start: sourceHeight - bottom, size: bottom },
-    ];
-    const destColumns = [
-      { start: 0, size: Math.max(0, destLeft) },
-      { start: Math.max(0, destLeft), size: Math.max(0, width - destLeft - destRight) },
-      { start: Math.max(0, width - destRight), size: Math.max(0, destRight) },
-    ];
-    const destRows = [
-      { start: 0, size: Math.max(0, destTop) },
-      { start: Math.max(0, destTop), size: Math.max(0, height - destTop - destBottom) },
-      { start: Math.max(0, height - destBottom), size: Math.max(0, destBottom) },
-    ];
-
-    const nextCells: Array<{
-      key: string;
-      sx: number;
-      sy: number;
-      sw: number;
-      sh: number;
-      dx: number;
-      dy: number;
-      dw: number;
-      dh: number;
-    }> = [];
-
-    sourceRows.forEach((sourceRow, rowIndex) => {
-      sourceColumns.forEach((sourceColumn, columnIndex) => {
-        const destRow = destRows[rowIndex];
-        const destColumn = destColumns[columnIndex];
-        if (sourceColumn.size <= 0 || sourceRow.size <= 0 || destColumn.size <= 0 || destRow.size <= 0) return;
-        nextCells.push({
-          key: `${rowIndex}-${columnIndex}`,
-          sx: sourceColumn.start,
-          sy: sourceRow.start,
-          sw: sourceColumn.size,
-          sh: sourceRow.size,
-          dx: destColumn.start,
-          dy: destRow.start,
-          dw: destColumn.size,
-          dh: destRow.size,
-        });
-      });
-    });
-
-    return nextCells;
-  }, [height, texture, width]);
-
-  return (
-    <View
-      pointerEvents="none"
-      style={styles.bubbleTextureBackground}
-      onLayout={(event) => {
-        const next = event.nativeEvent.layout;
-        setLayout({ width: next.width, height: next.height });
-      }}
-    >
-      {width > 1 && height > 1 && (
-        <Svg width={width} height={height}>
-          <Defs>
-            {cells.map((cell) => (
-              <ClipPath key={`clip-${cell.key}`} id={`${clipPrefix}-${cell.key}`}>
-                <Rect x={cell.dx} y={cell.dy} width={cell.dw} height={cell.dh} />
-              </ClipPath>
-            ))}
-          </Defs>
-          {cells.map((cell) => {
-            const scaleX = cell.dw / cell.sw;
-            const scaleY = cell.dh / cell.sh;
-            return (
-              <G key={cell.key} clipPath={`url(#${clipPrefix}-${cell.key})`}>
-                <SvgImage
-                  href={{ uri: texture.uri }}
-                  x={cell.dx - cell.sx * scaleX}
-                  y={cell.dy - cell.sy * scaleY}
-                  width={texture.originalWidth * scaleX}
-                  height={texture.originalHeight * scaleY}
-                  preserveAspectRatio="none"
-                />
-              </G>
-            );
-          })}
-        </Svg>
-      )}
-    </View>
-  );
 }
 
 const markdownRules = {
@@ -337,19 +211,21 @@ export const ChatBubble = React.memo(function ChatBubble({
   thinkingMarkdownStyles = useMemo(() => createThinkingMarkdownStyles(colors), [colors]);
   const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
   const stickerConfig = useSettingsStore((state) => state.stickerConfig);
+  const customCssStyles = useMemo(
+    () => parseAppearanceCss(appearanceConfig?.customCss),
+    [appearanceConfig?.customCss]
+  );
   const userBubbleColor = appearanceConfig?.userBubbleColor || colors.userBubble;
   const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
   const userBubbleRadius = numberOrDefault(appearanceConfig?.userBubbleRadius, 20, 0, 36);
   const userBubbleBlurIntensity = numberOrDefault(appearanceConfig?.userBubbleBlurIntensity, 0, 0, 100);
   const userBubbleWidthPercent = numberOrDefault(appearanceConfig?.userBubbleWidthPercent, 75, 45, 100);
-  const userBubbleTexture = appearanceConfig?.userBubbleTexture;
   const assistantBubbleStyle = appearanceConfig?.assistantBubbleStyle || 'plain';
   const assistantBubbleColor = appearanceConfig?.assistantBubbleColor || colors.userBubble;
   const assistantBubbleTransparent = !!appearanceConfig?.assistantBubbleTransparent;
   const assistantBubbleRadius = numberOrDefault(appearanceConfig?.assistantBubbleRadius, 20, 0, 36);
   const assistantBubbleBlurIntensity = numberOrDefault(appearanceConfig?.assistantBubbleBlurIntensity, 0, 0, 100);
   const assistantBubbleWidthPercent = numberOrDefault(appearanceConfig?.assistantBubbleWidthPercent, 75, 45, 100);
-  const assistantBubbleTexture = appearanceConfig?.assistantBubbleTexture;
   const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
   const assistantActionsHidden = !!appearanceConfig?.assistantActionsHidden;
   const assistantFooterColor = appearanceConfig?.assistantFooterColor || colors.textTertiary;
@@ -360,20 +236,37 @@ export const ChatBubble = React.memo(function ChatBubble({
   const assistantTextStrokeColor = appearanceConfig?.assistantTextStrokeColor || colors.background;
   const assistantTextStrokeWidth = numberOrDefault(appearanceConfig?.assistantTextStrokeWidth, 0, 0, 8);
   const userTextStyle = useMemo(
-    () => ({
-      color: userTextColor,
-      fontSize: userFontSize,
-      lineHeight: Math.round(userFontSize * 1.38),
-    }),
-    [userFontSize, userTextColor]
+    () => [
+      {
+        color: userTextColor,
+        fontSize: userFontSize,
+        lineHeight: Math.round(userFontSize * 1.38),
+      },
+      customCssStyles.userText,
+    ],
+    [customCssStyles.userText, userFontSize, userTextColor]
   );
   const userMarkdownStyles = useMemo(
-    () => createUserMarkdownStyles(colors, userFontSize, userTextColor),
-    [colors, userFontSize, userTextColor]
+    () => createUserMarkdownStyles(colors, userFontSize, userTextColor, customCssStyles.userText),
+    [colors, customCssStyles.userText, userFontSize, userTextColor]
   );
   markdownStyles = useMemo(
-    () => createMarkdownStyles(colors, assistantFontSize, assistantTextColor, assistantTextStrokeColor, assistantTextStrokeWidth),
-    [assistantFontSize, assistantTextColor, assistantTextStrokeColor, assistantTextStrokeWidth, colors]
+    () => createMarkdownStyles(
+      colors,
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      customCssStyles.assistantText
+    ),
+    [
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      colors,
+      customCssStyles.assistantText,
+    ]
   );
 
   const isUser = message.role === 'user';
@@ -611,33 +504,33 @@ export const ChatBubble = React.memo(function ChatBubble({
     const MENU_HEIGHT = 44;
     const menuLeft = Math.max(8, menuAnchor.x + menuAnchor.width - MENU_WIDTH);
     const menuTop = Math.max(8, menuAnchor.y - MENU_HEIGHT - 8);
-    const userBubbleTextureEnabled = !!userBubbleTexture?.uri && !messageIsStickerOnly;
-    const userBubbleTexturePadding = userBubbleTextureEnabled
-      ? scaleBubbleTextureInsets(userBubbleTexture)
-      : null;
-    const shouldBlurUserBubble = !userBubbleTextureEnabled && !messageIsStickerOnly && userBubbleBlurIntensity > 0;
+    const shouldBlurUserBubble = !messageIsStickerOnly && userBubbleBlurIntensity > 0;
     const userBubbleBaseStyle = [
       styles.userBubble,
       {
-        backgroundColor: userBubbleTextureEnabled
-          ? 'transparent'
-          : userBubbleTransparent
+        backgroundColor: userBubbleTransparent
           ? 'transparent'
           : shouldBlurUserBubble
             ? 'rgba(255,255,255,0.28)'
             : userBubbleColor,
         borderRadius: userBubbleRadius,
       },
-      userBubbleTextureEnabled && styles.bubbleTextureHost,
-      userBubbleTexturePadding,
       shouldBlurUserBubble && styles.userBubbleGlass,
-      messageHasSticker && !userBubbleTextureEnabled && styles.userBubbleWithSticker,
+      messageHasSticker && styles.userBubbleWithSticker,
       messageIsStickerOnly && styles.userStickerOnlyBubble,
+      customCssStyles.userBubble,
     ];
 
     return (
       <View style={[styles.userRow, isHidden && styles.hiddenRow]}>
-        <View style={[styles.userColumn, { maxWidth: percentWidth(userBubbleWidthPercent) }]}>
+        <View
+          style={[
+            styles.userColumn,
+            { maxWidth: percentWidth(userBubbleWidthPercent) },
+            customCssStyles.userBubble?.maxWidth !== undefined && { maxWidth: customCssStyles.userBubble.maxWidth },
+            customCssStyles.userMessage,
+          ]}
+        >
           {avatarHeader}
           {floorLabel && <Text style={styles.floorLabelRight}>{floorLabel}</Text>}
           {isHidden && <Text style={styles.hiddenLabelRight}>已隐藏</Text>}
@@ -676,9 +569,6 @@ export const ChatBubble = React.memo(function ChatBubble({
               onLongPress={handleUserLongPress}
               style={userBubbleBaseStyle}
             >
-              {userBubbleTextureEnabled && userBubbleTexture && (
-                <BubbleTextureBackground texture={userBubbleTexture} />
-              )}
               {shouldBlurUserBubble && (
                 <BlurView
                   blurTarget={blurTarget}
@@ -718,9 +608,6 @@ export const ChatBubble = React.memo(function ChatBubble({
               onLongPress={handleUserLongPress}
               style={userBubbleBaseStyle}
             >
-              {userBubbleTextureEnabled && userBubbleTexture && (
-                <BubbleTextureBackground texture={userBubbleTexture} />
-              )}
               {shouldBlurUserBubble && (
                 <BlurView
                   blurTarget={blurTarget}
@@ -879,32 +766,25 @@ export const ChatBubble = React.memo(function ChatBubble({
   }
 
   const assistantBubbleEnabled = assistantBubbleStyle === 'bubble';
-  const assistantBubbleTextureEnabled = assistantBubbleEnabled && !!assistantBubbleTexture?.uri && !messageIsStickerOnly;
-  const assistantBubbleTexturePadding = assistantBubbleTextureEnabled && assistantBubbleTexture
-    ? scaleBubbleTextureInsets(assistantBubbleTexture)
-    : null;
-  const shouldBlurAssistantBubble = assistantBubbleEnabled && !assistantBubbleTextureEnabled && !messageIsStickerOnly && assistantBubbleBlurIntensity > 0;
+  const shouldBlurAssistantBubble = assistantBubbleEnabled && !messageIsStickerOnly && assistantBubbleBlurIntensity > 0;
   const assistantContentStyle = assistantBubbleEnabled
     ? [
         styles.assistantBubble,
         {
           maxWidth: percentWidth(assistantBubbleWidthPercent),
-          backgroundColor: assistantBubbleTextureEnabled
-            ? 'transparent'
-            : assistantBubbleTransparent
+          backgroundColor: assistantBubbleTransparent
             ? 'transparent'
             : shouldBlurAssistantBubble
               ? 'rgba(255,255,255,0.28)'
               : assistantBubbleColor,
           borderRadius: assistantBubbleRadius,
         },
-        assistantBubbleTextureEnabled && styles.bubbleTextureHost,
-        assistantBubbleTexturePadding,
         shouldBlurAssistantBubble && styles.userBubbleGlass,
-        messageHasSticker && !assistantBubbleTextureEnabled && styles.userBubbleWithSticker,
+        messageHasSticker && styles.userBubbleWithSticker,
         messageIsStickerOnly && styles.userStickerOnlyBubble,
+        customCssStyles.assistantBubble,
       ]
-    : styles.assistantContent;
+    : [styles.assistantContent, customCssStyles.assistantBubble];
   const ASSISTANT_MENU_WIDTH = Math.min(340, SCREEN_WIDTH - 16);
   const assistantMenuLeft = Math.min(
     Math.max(8, menuAnchor.x),
@@ -913,7 +793,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   const assistantMenuTop = Math.max(8, menuAnchor.y + menuAnchor.height + 8);
 
   return (
-    <View style={[styles.assistantRow, isHidden && styles.hiddenBubble]}>
+    <View style={[styles.assistantRow, customCssStyles.assistantMessage, isHidden && styles.hiddenBubble]}>
       {avatarHeader}
       {floorLabel && <Text style={styles.floorLabelLeft}>{floorLabel}</Text>}
       {isHidden && <Text style={styles.hiddenLabelLeft}>已隐藏</Text>}
@@ -962,9 +842,6 @@ export const ChatBubble = React.memo(function ChatBubble({
         onPress={onBubblePress}
         onLongPress={handleAssistantLongPress}
       >
-        {assistantBubbleTextureEnabled && assistantBubbleTexture && (
-          <BubbleTextureBackground texture={assistantBubbleTexture} />
-        )}
         {shouldBlurAssistantBubble && (
           <BlurView
             blurTarget={blurTarget}
@@ -1394,12 +1271,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     height: 22,
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  bubbleTextureHost: {
-    overflow: 'hidden',
-  },
-  bubbleTextureBackground: {
-    ...StyleSheet.absoluteFill,
-  },
   userBubbleWithSticker: {
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -1757,13 +1628,15 @@ const createThinkingMarkdownStyles = (colors: ThemeColors) => StyleSheet.create(
 const createUserMarkdownStyles = (
   colors: ThemeColors,
   fontSize = 16,
-  textColor = colors.text
+  textColor = colors.text,
+  customTextStyle?: TextStyle
 ) => StyleSheet.create({
   body: {
     fontSize,
     color: textColor,
     lineHeight: Math.round(fontSize * 1.38),
     fontFamily: fonts.serifBold,
+    ...customTextStyle,
   },
   paragraph: {
     marginTop: 0,
@@ -1804,7 +1677,8 @@ const createMarkdownStyles = (
   fontSize = 16,
   textColor = colors.text,
   strokeColor = colors.background,
-  strokeWidth = 0
+  strokeWidth = 0,
+  customTextStyle?: TextStyle
 ) => {
   const strokeStyle = strokeWidth > 0
     ? {
@@ -1815,7 +1689,7 @@ const createMarkdownStyles = (
     : {};
 
   return StyleSheet.create({
-  body: { width: '100%', fontSize, color: textColor, lineHeight: Math.round(fontSize * 1.5), fontFamily: fonts.serifBold, ...strokeStyle },
+  body: { width: '100%', fontSize, color: textColor, lineHeight: Math.round(fontSize * 1.5), fontFamily: fonts.serifBold, ...strokeStyle, ...customTextStyle },
   code_inline: {
     backgroundColor: colors.surface, color: colors.primary,
     paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, fontSize: 14, fontFamily: 'monospace',

@@ -11,7 +11,7 @@ import { copyAsync } from 'expo-file-system/legacy';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import { fonts } from '../src/theme/fonts';
-import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type BubbleTextureConfig, type ChatInputIconKey, type ChatInputAppearanceStyle, type AssistantBubbleAppearanceStyle, type ShizukuFileRoot, type StickerOwner, type CustomSticker, type QQBotConfig, type ImageGenerationFaceReference, type DailyPaperSourceConfig } from '../src/stores/settings';
+import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle, type AssistantBubbleAppearanceStyle, type ShizukuFileRoot, type StickerOwner, type CustomSticker, type QQBotConfig, type ImageGenerationFaceReference, type DailyPaperSourceConfig } from '../src/stores/settings';
 import { TopBarIcon, TOP_BAR_ICON_ITEMS } from '../src/components/TopBarIcon';
 import type { TopBarIconKey } from '../src/utils/topBarIconTypes';
 import { useChatStore } from '../src/stores/chat';
@@ -60,9 +60,6 @@ const CUSTOM_TOP_BAR_ICON_MAX_SIDE = 2048;
 const CUSTOM_BACKGROUND_MAX_BYTES = 8 * 1024 * 1024;
 const CUSTOM_BACKGROUND_MIN_SIDE = 320;
 const CUSTOM_BACKGROUND_MAX_SIDE = 6000;
-const CUSTOM_BUBBLE_TEXTURE_MAX_BYTES = 8 * 1024 * 1024;
-const CUSTOM_BUBBLE_TEXTURE_MIN_SIDE = 48;
-const CUSTOM_BUBBLE_TEXTURE_MAX_SIDE = 4096;
 const CUSTOM_STICKER_MAX_BYTES = 5 * 1024 * 1024;
 const CUSTOM_STICKER_MIN_SIDE = 32;
 const CUSTOM_STICKER_MAX_SIDE = 4096;
@@ -89,11 +86,29 @@ const CHAT_INPUT_ICON_ITEMS: Array<{ key: ChatInputIconKey; label: string }> = [
   { key: 'stop', label: '停止生成' },
 ];
 const COLOR_SWATCHES = ['#f1eee7', '#FFFFFF', '#FDE68A', '#BFDBFE', '#FBCFE8', '#DCFCE7', '#2B241D', '#141413'];
+const CUSTOM_CSS_PLACEHOLDER = `.user-message {
+  max-width: 82%;
+}
+
+.user-bubble {
+  background-color: #f1eee7;
+  border-radius: 22px;
+}
+
+.assistant-text {
+  color: #222222;
+  font-size: 17px;
+  line-height: 24px;
+}
+
+.input-bar {
+  background-color: rgba(255,255,255,0.72);
+  border-radius: 28px;
+}`;
 const IMAGE_SIZE_OPTIONS = ['auto', '1024x1024', '1536x1024', '1024x1536'] as const;
 const IMAGE_QUALITY_OPTIONS = ['auto', 'low', 'medium', 'high'] as const;
 type ModelPickerTarget = 'chat' | 'image';
 type ImageOptionTarget = 'size' | 'quality';
-type BubbleTextureOwner = 'user' | 'assistant';
 
 export default function SettingsScreen() {
   colors = useThemeColors();
@@ -467,88 +482,6 @@ function validateBackgroundAsset(asset: ImagePicker.ImagePickerAsset): string | 
     return `图片边长不能超过 ${CUSTOM_BACKGROUND_MAX_SIDE}px`;
   }
   return null;
-}
-
-function validateBubbleTextureAsset(asset: ImagePicker.ImagePickerAsset): string | null {
-  const mimeType = asset.mimeType?.toLowerCase();
-  const extension = topBarIconExtension(asset);
-  const isAllowedType =
-    mimeType === 'image/png' ||
-    mimeType === 'image/webp' ||
-    mimeType === 'image/jpeg' ||
-    mimeType === 'image/jpg' ||
-    ['.png', '.webp', '.jpg'].includes(extension);
-
-  if (!isAllowedType) {
-    return '只支持 PNG、WebP 或 JPG，推荐使用透明 PNG';
-  }
-  if (asset.fileSize && asset.fileSize > CUSTOM_BUBBLE_TEXTURE_MAX_BYTES) {
-    return '图片不能超过 8MB';
-  }
-  if (
-    asset.width < CUSTOM_BUBBLE_TEXTURE_MIN_SIDE ||
-    asset.height < CUSTOM_BUBBLE_TEXTURE_MIN_SIDE
-  ) {
-    return `图片边长至少 ${CUSTOM_BUBBLE_TEXTURE_MIN_SIDE}px`;
-  }
-  if (
-    asset.width > CUSTOM_BUBBLE_TEXTURE_MAX_SIDE ||
-    asset.height > CUSTOM_BUBBLE_TEXTURE_MAX_SIDE
-  ) {
-    return `图片边长不能超过 ${CUSTOM_BUBBLE_TEXTURE_MAX_SIDE}px`;
-  }
-  return null;
-}
-
-function clampBubbleInset(value: number, max: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(Math.max(0, Math.round(value)), Math.max(0, Math.floor(max)));
-}
-
-function normalizeBubbleTextureConfig(config: BubbleTextureConfig): BubbleTextureConfig {
-  const halfWidth = Math.max(1, Math.floor(config.originalWidth / 2) - 1);
-  const halfHeight = Math.max(1, Math.floor(config.originalHeight / 2) - 1);
-
-  return {
-    ...config,
-    stretchInsets: {
-      left: clampBubbleInset(config.stretchInsets.left, halfWidth),
-      top: clampBubbleInset(config.stretchInsets.top, halfHeight),
-      right: clampBubbleInset(config.stretchInsets.right, halfWidth),
-      bottom: clampBubbleInset(config.stretchInsets.bottom, halfHeight),
-    },
-    contentInsets: {
-      left: clampBubbleInset(config.contentInsets.left, config.originalWidth - 1),
-      top: clampBubbleInset(config.contentInsets.top, config.originalHeight - 1),
-      right: clampBubbleInset(config.contentInsets.right, config.originalWidth - 1),
-      bottom: clampBubbleInset(config.contentInsets.bottom, config.originalHeight - 1),
-    },
-  };
-}
-
-function createBubbleTextureConfig(asset: ImagePicker.ImagePickerAsset, uri: string): BubbleTextureConfig {
-  const width = Math.max(CUSTOM_BUBBLE_TEXTURE_MIN_SIDE, asset.width || 240);
-  const height = Math.max(CUSTOM_BUBBLE_TEXTURE_MIN_SIDE, asset.height || 120);
-  const horizontal = Math.round(width * 0.24);
-  const vertical = Math.round(height * 0.30);
-
-  return normalizeBubbleTextureConfig({
-    uri,
-    originalWidth: width,
-    originalHeight: height,
-    stretchInsets: {
-      left: horizontal,
-      top: vertical,
-      right: horizontal,
-      bottom: vertical,
-    },
-    contentInsets: {
-      left: horizontal + 8,
-      top: vertical + 4,
-      right: horizontal + 8,
-      bottom: vertical + 4,
-    },
-  });
 }
 
 function validateStickerAsset(asset: ImagePicker.ImagePickerAsset): string | null {
@@ -957,11 +890,6 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const [pickingInputIconKey, setPickingInputIconKey] = useState<ChatInputIconKey | null>(null);
   const [pickingBackground, setPickingBackground] = useState<'chat' | 'input' | 'topBar' | null>(null);
   const [pickingAvatar, setPickingAvatar] = useState<'user' | 'assistant' | null>(null);
-  const [pickingBubbleTexture, setPickingBubbleTexture] = useState<BubbleTextureOwner | null>(null);
-  const [editingBubbleTexture, setEditingBubbleTexture] = useState<{
-    owner: BubbleTextureOwner;
-    config: BubbleTextureConfig;
-  } | null>(null);
   const [appearanceThemeName, setAppearanceThemeName] = useState('');
   const [appearanceThemesExpanded, setAppearanceThemesExpanded] = useState(false);
   const [userBubbleColorInput, setUserBubbleColorInput] = useState(appearanceConfig?.userBubbleColor || colors.userBubble);
@@ -983,11 +911,9 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
   const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
   const userBubbleWidthPercent = appearanceConfig?.userBubbleWidthPercent ?? 75;
-  const userBubbleTexture = appearanceConfig?.userBubbleTexture;
   const assistantBubbleStyle = appearanceConfig?.assistantBubbleStyle || 'plain';
   const assistantBubbleTransparent = !!appearanceConfig?.assistantBubbleTransparent;
   const assistantBubbleWidthPercent = appearanceConfig?.assistantBubbleWidthPercent ?? 75;
-  const assistantBubbleTexture = appearanceConfig?.assistantBubbleTexture;
   const messageAvatarsVisible = !!appearanceConfig?.messageAvatarsVisible;
   const messageMetaVisible = appearanceConfig?.messageMetaVisible ?? true;
   const userAvatarImageUri = appearanceConfig?.userAvatarImageUri;
@@ -1004,6 +930,7 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const userFontSize = appearanceConfig?.userFontSize ?? 16;
   const assistantFontSize = appearanceConfig?.assistantFontSize ?? 16;
   const assistantTextStrokeWidth = appearanceConfig?.assistantTextStrokeWidth ?? 0;
+  const customCss = appearanceConfig?.customCss || '';
   useEffect(() => {
     setUserBubbleColorInput(appearanceConfig?.userBubbleColor || colors.userBubble);
     setAssistantBubbleColorInput(appearanceConfig?.assistantBubbleColor || colors.userBubble);
@@ -1162,83 +1089,6 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     }
   }
 
-  async function handlePickBubbleTexture(owner: BubbleTextureOwner) {
-    if (pickingBubbleTexture) return;
-    setPickingBubbleTexture(owner);
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 1,
-      });
-      if (result.canceled || !result.assets[0]?.uri) return;
-
-      const asset = result.assets[0];
-      const validationError = validateBubbleTextureAsset(asset);
-      if (validationError) {
-        Alert.alert('气泡贴图不可用', validationError);
-        return;
-      }
-
-      const uri = await copyAppearanceImage(asset, 'bubble-textures', `${owner}-bubble`);
-      const config = createBubbleTextureConfig(asset, uri);
-      setAppearanceConfig(
-        owner === 'user'
-          ? { userBubbleTexture: config }
-          : { assistantBubbleTexture: config, assistantBubbleStyle: 'bubble' }
-      );
-      setEditingBubbleTexture({ owner, config });
-      showToast(owner === 'user' ? '用户气泡贴图已更新' : 'AI 气泡贴图已更新');
-    } catch (error: any) {
-      Alert.alert('选择气泡贴图失败', error?.message || '无法读取所选图片');
-    } finally {
-      setPickingBubbleTexture(null);
-    }
-  }
-
-  function handleEditBubbleTexture(owner: BubbleTextureOwner) {
-    const config = owner === 'user' ? userBubbleTexture : assistantBubbleTexture;
-    if (!config) return;
-    setEditingBubbleTexture({ owner, config });
-  }
-
-  function handleClearBubbleTexture(owner: BubbleTextureOwner) {
-    setAppearanceConfig(owner === 'user' ? { userBubbleTexture: undefined } : { assistantBubbleTexture: undefined });
-    showToast(owner === 'user' ? '用户气泡贴图已移除' : 'AI 气泡贴图已移除');
-  }
-
-  function updateEditingBubbleTexture(
-    group: 'stretchInsets' | 'contentInsets',
-    key: keyof BubbleTextureConfig['stretchInsets'],
-    value: number
-  ) {
-    setEditingBubbleTexture((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        config: normalizeBubbleTextureConfig({
-          ...current.config,
-          [group]: {
-            ...current.config[group],
-            [key]: value,
-          },
-        }),
-      };
-    });
-  }
-
-  function saveEditingBubbleTexture() {
-    if (!editingBubbleTexture) return;
-    const config = normalizeBubbleTextureConfig(editingBubbleTexture.config);
-    setAppearanceConfig(
-      editingBubbleTexture.owner === 'user'
-        ? { userBubbleTexture: config }
-        : { assistantBubbleTexture: config, assistantBubbleStyle: 'bubble' }
-    );
-    setEditingBubbleTexture(null);
-    showToast('气泡文字区域已保存');
-  }
-
   function commitColor(
     label: string,
     value: string,
@@ -1330,133 +1180,7 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     );
   }
 
-  function renderBubbleTextureRow(owner: BubbleTextureOwner) {
-    const texture = owner === 'user' ? userBubbleTexture : assistantBubbleTexture;
-    const isPicking = pickingBubbleTexture === owner;
-    const label = owner === 'user' ? '用户气泡贴图' : 'AI 气泡贴图';
-
-    return (
-      <View style={styles.appearanceAssetRow}>
-        <View style={styles.appearanceImagePreview}>
-          {texture?.uri ? (
-            <Image source={{ uri: texture.uri }} style={styles.appearanceImageThumb} resizeMode="contain" />
-          ) : (
-            <Text style={styles.appearanceImagePlaceholder}>{owner === 'user' ? 'UB' : 'AB'}</Text>
-          )}
-        </View>
-        <View style={styles.appearanceIconText}>
-          <Text style={styles.label}>{label}</Text>
-          <Text style={styles.hint}>
-            {texture?.uri ? '已启用贴图；红框区域会随文字拉伸。' : '上传透明 PNG 效果最好；可在上传后设置文字区域。'}
-          </Text>
-        </View>
-        <View style={styles.appearanceIconActions}>
-          <Pressable
-            style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
-            onPress={() => handlePickBubbleTexture(owner)}
-            disabled={!!pickingBubbleTexture}
-          >
-            {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>上传</Text>}
-          </Pressable>
-          <Pressable
-            style={[styles.smallActionButton, !texture?.uri && styles.smallActionButtonDisabled]}
-            onPress={() => handleEditBubbleTexture(owner)}
-            disabled={!texture?.uri}
-          >
-            <Text style={[styles.smallActionText, !texture?.uri && styles.smallActionTextDisabled]}>区域</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.smallActionButton, !texture?.uri && styles.smallActionButtonDisabled]}
-            onPress={() => handleClearBubbleTexture(owner)}
-            disabled={!texture?.uri}
-          >
-            <Text style={[styles.smallActionText, !texture?.uri && styles.smallActionTextDisabled]}>默认</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  function renderBubbleInsetEditor(
-    title: string,
-    group: 'stretchInsets' | 'contentInsets',
-    fallback: number
-  ) {
-    if (!editingBubbleTexture) return null;
-    const values = editingBubbleTexture.config[group];
-    const maxHorizontal =
-      group === 'stretchInsets'
-        ? Math.max(1, Math.floor(editingBubbleTexture.config.originalWidth / 2) - 1)
-        : Math.max(1, editingBubbleTexture.config.originalWidth - 1);
-    const maxVertical =
-      group === 'stretchInsets'
-        ? Math.max(1, Math.floor(editingBubbleTexture.config.originalHeight / 2) - 1)
-        : Math.max(1, editingBubbleTexture.config.originalHeight - 1);
-
-    return (
-      <>
-        <Text style={styles.bubbleTextureModalSection}>{title}</Text>
-        <View style={styles.appearanceNumberGrid}>
-          {(['left', 'right'] as const).map((key) => (
-            <View key={`${group}-${key}`} style={styles.appearanceNumberField}>
-              <Text style={styles.label}>{key === 'left' ? '左' : '右'}</Text>
-              <ClampedNumberInput
-                value={values[key]}
-                fallback={fallback}
-                min={0}
-                max={maxHorizontal}
-                onCommit={(value) => updateEditingBubbleTexture(group, key, value)}
-              />
-            </View>
-          ))}
-        </View>
-        <View style={styles.appearanceNumberGrid}>
-          {(['top', 'bottom'] as const).map((key) => (
-            <View key={`${group}-${key}`} style={styles.appearanceNumberField}>
-              <Text style={styles.label}>{key === 'top' ? '上' : '下'}</Text>
-              <ClampedNumberInput
-                value={values[key]}
-                fallback={fallback}
-                min={0}
-                max={maxVertical}
-                onCommit={(value) => updateEditingBubbleTexture(group, key, value)}
-              />
-            </View>
-          ))}
-        </View>
-      </>
-    );
-  }
-
-  const bubbleTextureModalConfig = editingBubbleTexture?.config;
-  const bubbleTexturePreviewWidth = bubbleTextureModalConfig
-    ? Math.min(260, Math.max(160, bubbleTextureModalConfig.originalWidth))
-    : 220;
-  const bubbleTexturePreviewHeight = bubbleTextureModalConfig
-    ? Math.max(90, Math.round((bubbleTexturePreviewWidth * bubbleTextureModalConfig.originalHeight) / bubbleTextureModalConfig.originalWidth))
-    : 120;
-  const bubbleTextureScale = bubbleTextureModalConfig
-    ? bubbleTexturePreviewWidth / bubbleTextureModalConfig.originalWidth
-    : 1;
-  const bubbleTextureStretchRect = bubbleTextureModalConfig
-    ? {
-        left: bubbleTextureModalConfig.stretchInsets.left * bubbleTextureScale,
-        top: bubbleTextureModalConfig.stretchInsets.top * bubbleTextureScale,
-        right: bubbleTextureModalConfig.stretchInsets.right * bubbleTextureScale,
-        bottom: bubbleTextureModalConfig.stretchInsets.bottom * bubbleTextureScale,
-      }
-    : null;
-  const bubbleTextureContentRect = bubbleTextureModalConfig
-    ? {
-        left: bubbleTextureModalConfig.contentInsets.left * bubbleTextureScale,
-        top: bubbleTextureModalConfig.contentInsets.top * bubbleTextureScale,
-        right: bubbleTextureModalConfig.contentInsets.right * bubbleTextureScale,
-        bottom: bubbleTextureModalConfig.contentInsets.bottom * bubbleTextureScale,
-      }
-    : null;
-
   return (
-    <>
     <ScrollView
       style={styles.content}
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
@@ -1847,8 +1571,6 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 
       <Text style={styles.sectionTitle}>聊天气泡与文字</Text>
       <Text style={styles.hint}>颜色使用 #RRGGBB 格式；磨砂系数为 0 时关闭玻璃效果。</Text>
-      {renderBubbleTextureRow('user')}
-      {renderBubbleTextureRow('assistant')}
       <View style={styles.switchRow}>
         <View style={styles.switchText}>
           <Text style={styles.label}>隐藏 AI 回复尾部标识</Text>
@@ -2142,6 +1864,32 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         </View>
       </View>
 
+      <Text style={styles.sectionTitle}>高级自定义 CSS</Text>
+      <Text style={styles.hint}>选择器：.user-message、.assistant-message、.user-bubble、.assistant-bubble、.user-text、.assistant-text、.input-bar、.input-text。</Text>
+      <TextInput
+        style={[styles.input, styles.multilineInput, styles.customCssInput]}
+        value={customCss}
+        onChangeText={(value) => setAppearanceConfig({ customCss: value.slice(0, 12000) })}
+        placeholder={CUSTOM_CSS_PLACEHOLDER}
+        placeholderTextColor={colors.textTertiary}
+        autoCapitalize="none"
+        autoCorrect={false}
+        multiline
+        textAlignVertical="top"
+      />
+      <View style={styles.actions}>
+        <Pressable
+          style={[styles.testButton, !customCss.trim() && styles.smallActionButtonDisabled]}
+          onPress={() => {
+            setAppearanceConfig({ customCss: '' });
+            showToast('自定义 CSS 已清空');
+          }}
+          disabled={!customCss.trim()}
+        >
+          <Text style={[styles.testButtonText, !customCss.trim() && styles.smallActionTextDisabled]}>清空 CSS</Text>
+        </Pressable>
+      </View>
+
       <Text style={styles.sectionTitle}>输入框自定义</Text>
       <View style={styles.segmentedRow}>
         {(['default', 'glass', 'compact'] as ChatInputAppearanceStyle[]).map((styleKey) => (
@@ -2281,83 +2029,6 @@ function AppearanceTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         </Pressable>
       </View>
     </ScrollView>
-    <Modal
-      transparent
-      visible={!!editingBubbleTexture}
-      animationType="fade"
-      onRequestClose={() => setEditingBubbleTexture(null)}
-    >
-      <Pressable style={styles.overlay} onPress={() => setEditingBubbleTexture(null)}>
-        <View style={styles.bubbleTextureModal} onStartShouldSetResponder={() => true}>
-          <Text style={styles.modalTitle}>
-            {editingBubbleTexture?.owner === 'user' ? '用户气泡文字区域' : 'AI 气泡文字区域'}
-          </Text>
-          <Text style={styles.hint}>红框内会随气泡尺寸拉伸；虚线框是文字放置区域，尾巴和装饰尽量放在红框外。</Text>
-          <ScrollView style={styles.bubbleTextureModalBody} keyboardShouldPersistTaps="handled">
-            {bubbleTextureModalConfig && (
-              <View style={styles.bubbleTexturePreviewStage}>
-                <View
-                  style={[
-                    styles.bubbleTexturePreview,
-                    {
-                      width: bubbleTexturePreviewWidth,
-                      height: bubbleTexturePreviewHeight,
-                    },
-                  ]}
-                >
-                  <Image
-                    source={{ uri: bubbleTextureModalConfig.uri }}
-                    style={styles.appearanceImageThumb}
-                    resizeMode="stretch"
-                  />
-                  {bubbleTextureStretchRect && (
-                    <View
-                      pointerEvents="none"
-                      style={[
-                        styles.bubbleTextureStretchGuide,
-                        {
-                          left: bubbleTextureStretchRect.left,
-                          top: bubbleTextureStretchRect.top,
-                          right: bubbleTextureStretchRect.right,
-                          bottom: bubbleTextureStretchRect.bottom,
-                        },
-                      ]}
-                    />
-                  )}
-                  {bubbleTextureContentRect && (
-                    <View
-                      pointerEvents="none"
-                      style={[
-                        styles.bubbleTextureContentGuide,
-                        {
-                          left: bubbleTextureContentRect.left,
-                          top: bubbleTextureContentRect.top,
-                          right: bubbleTextureContentRect.right,
-                          bottom: bubbleTextureContentRect.bottom,
-                        },
-                      ]}
-                    >
-                      <Text style={styles.bubbleTextureContentGuideText}>文字区域</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            )}
-            {renderBubbleInsetEditor('拉伸保护边距', 'stretchInsets', 24)}
-            {renderBubbleInsetEditor('文字内边距', 'contentInsets', 32)}
-          </ScrollView>
-          <View style={styles.modalButtons}>
-            <Pressable style={styles.modalCancel} onPress={() => setEditingBubbleTexture(null)}>
-              <Text style={styles.modalCancelText}>取消</Text>
-            </Pressable>
-            <Pressable style={styles.modalConfirm} onPress={saveEditingBubbleTexture}>
-              <Text style={styles.modalConfirmText}>保存</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Pressable>
-    </Modal>
-    </>
   );
 }
 
@@ -6198,9 +5869,9 @@ function IncomingLetterTab({ showToast, keyboardBottomInset }: SettingsTabProps)
 
       <Modal visible={creating} transparent animationType="fade" onRequestClose={closeEditor}>
         <View style={styles.overlay}>
-          <View style={[styles.modal, styles.bubbleTextureModal]}>
+          <View style={[styles.modal, styles.largeModal]}>
             <Text style={styles.modalTitle}>{editing ? '编辑收信日' : '新建收信日'}</Text>
-            <ScrollView style={styles.bubbleTextureModalBody} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <View style={styles.field}>
                 <Text style={styles.label}>名称</Text>
                 <TextInput
@@ -6993,6 +6664,12 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     minHeight: 84,
     textAlignVertical: 'top',
   },
+  customCssInput: {
+    minHeight: 220,
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   platformToggle: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -7133,58 +6810,15 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   modal: { backgroundColor: colors.background, borderRadius: 16, padding: 20, width: '85%', maxHeight: '60%' },
   modalTitle: { fontSize: 17, fontWeight: '600', color: colors.text, marginBottom: 12 },
-  bubbleTextureModal: {
+  largeModal: {
     backgroundColor: colors.background,
     borderRadius: 16,
     padding: 18,
     width: '90%',
     maxHeight: '86%',
   },
-  bubbleTextureModalBody: {
+  modalBody: {
     flexShrink: 1,
-  },
-  bubbleTexturePreviewStage: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-  },
-  bubbleTexturePreview: {
-    overflow: 'hidden',
-    backgroundColor: colors.inputBackground,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  bubbleTextureStretchGuide: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#EF4444',
-    backgroundColor: 'rgba(239,68,68,0.10)',
-  },
-  bubbleTextureContentGuide: {
-    position: 'absolute',
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(60,120,255,0.10)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 28,
-    minHeight: 18,
-  },
-  bubbleTextureContentGuideText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  bubbleTextureModalSection: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginBottom: 8,
   },
   modelList: { maxHeight: 300 },
   modelItem: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 8, marginBottom: 2 },
