@@ -2527,6 +2527,10 @@ interface ApiUsageDailySummaryRow extends ApiUsageSummaryRow {
   date_key: string;
 }
 
+interface ApiUsageDateKeyRow {
+  date_key: string;
+}
+
 interface ApiUsageModelSummaryRow extends ApiUsageSummaryRow {
   key_name: string;
   channels: string | null;
@@ -2699,6 +2703,22 @@ export async function getApiUsageSummaryByFeature(): Promise<ApiUsageGroupSummar
     key: row.key_name || 'unknown',
     ...mapApiUsageSummaryRow(row),
   }));
+}
+
+export async function getApiUsageActiveDateKeysByFeature(feature?: string, limit = 3650): Promise<string[]> {
+  const db = await getDatabase();
+  const featureFilter = feature && feature !== 'all';
+  const rows = await db.getAllAsync<ApiUsageDateKeyRow>(
+    `SELECT date(started_at / 1000, 'unixepoch', 'localtime') as date_key
+       FROM api_usage_events
+      WHERE status = 'success'
+        ${featureFilter ? 'AND feature = ?' : ''}
+      GROUP BY date_key
+      ORDER BY date_key DESC
+      LIMIT ?`,
+    featureFilter ? [feature, Math.max(1, limit)] : [Math.max(1, limit)]
+  );
+  return rows.map((row) => row.date_key).filter(Boolean);
 }
 
 export async function getApiUsageSummaryByModel(): Promise<ApiUsageGroupSummary[]> {

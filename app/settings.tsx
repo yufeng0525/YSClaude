@@ -2885,6 +2885,12 @@ function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         >
           <Text style={styles.diagnosticsButtonText}>打开 API 使用日志</Text>
         </Pressable>
+        <Pressable
+          style={styles.diagnosticsButton}
+          onPress={() => router.push('/api-achievements')}
+        >
+          <Text style={styles.diagnosticsButtonText}>打开 API 成就徽章</Text>
+        </Pressable>
       </View>
 
       {/* Model picker modal */}

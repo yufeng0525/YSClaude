@@ -174,9 +174,11 @@ export function StickerContent({
         if (isUser) {
           if (markdownStyle) {
             return (
-              <Markdown key={`text-${index}`} style={markdownStyle} rules={markdownRules}>
-                {chunk.text}
-              </Markdown>
+              <View key={`text-${index}`} style={styles.userMarkdownFrame}>
+                <Markdown style={markdownStyle} rules={markdownRules}>
+                  {chunk.text}
+                </Markdown>
+              </View>
             );
           }
 
@@ -188,9 +190,11 @@ export function StickerContent({
         }
 
         return (
-          <Markdown key={`text-${index}`} style={markdownStyle} rules={markdownRules}>
-            {chunk.text}
-          </Markdown>
+          <View key={`text-${index}`} style={styles.assistantMarkdownFrame}>
+            <Markdown style={markdownStyle} rules={markdownRules}>
+              {chunk.text}
+            </Markdown>
+          </View>
         );
       })}
     </View>
@@ -208,6 +212,17 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     alignItems: 'flex-start',
     width: '100%',
     maxWidth: '100%',
+  },
+  userMarkdownFrame: {
+    maxWidth: '100%',
+    flexShrink: 1,
+  },
+  assistantMarkdownFrame: {
+    alignSelf: 'stretch',
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    flexShrink: 1,
   },
   userText: {
     fontSize: 16,

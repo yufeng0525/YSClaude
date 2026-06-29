@@ -128,14 +128,14 @@ export function sanitizeTTSInput(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, ' ')
     .replace(/<[^<>]*>/g, ' ');
   const bracketedContentPattern =
-    /\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}|\u3010[^\u3010\u3011]*\u3011|\uFF08[^\uFF08\uFF09]*\uFF09|\uFF5B[^\uFF5B\uFF5D]*\uFF5D|<[^<>]*>|\uFF1C[^\uFF1C\uFF1E]*\uFF1E|\u300A[^\u300A\u300B]*\u300B/g;
+    /\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}|\u3010[^\u3010\u3011]*\u3011|\uFF08[^\uFF08\uFF09]*\uFF09|\uFF5B[^\uFF5B\uFF5D]*\uFF5D|<[^<>]*>|\uFF1C[^\uFF1C\uFF1E]*\uFF1E/g;
 
   while (bracketedContentPattern.test(next)) {
     next = next.replace(bracketedContentPattern, ' ');
     bracketedContentPattern.lastIndex = 0;
   }
 
-  return next.replace(/\s+/g, ' ').trim();
+  return next.replace(/[\u300A\u300B]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function hexToBytes(hex: string): Uint8Array {

@@ -142,6 +142,13 @@ export default function ApiUsageScreen() {
       </View>
 
       <GroupSection title="按功能汇总" rows={featureRows} />
+      <Pressable style={styles.achievementEntry} onPress={() => router.push('/api-achievements')}>
+        <View>
+          <Text style={styles.achievementEntryTitle}>成就徽章</Text>
+          <Text style={styles.achievementEntryMeta}>查看徽章墙，添加自定义成就</Text>
+        </View>
+        <Text style={styles.achievementEntryAction}>进入</Text>
+      </Pressable>
       <GroupSection title="按模型/渠道汇总" rows={modelRows} channelFormatter={(row) => formatModelChannels(row, apiConfigs)} />
       <Text style={styles.sectionTitle}>{selectedDateKey ? '日调用记录' : '最近调用'}</Text>
     </View>
@@ -526,6 +533,33 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     marginTop: 2,
     color: colors.textTertiary,
     fontSize: 11,
+  },
+  achievementEntry: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+  },
+  achievementEntryTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  achievementEntryMeta: {
+    marginTop: 4,
+    color: colors.textTertiary,
+    fontSize: 12,
+  },
+  achievementEntryAction: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
   },
   groupPanel: {
     gap: 8,
