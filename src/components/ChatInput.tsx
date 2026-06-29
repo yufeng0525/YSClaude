@@ -81,6 +81,7 @@ interface Props {
   onSend: (text: string, imageUri?: string, imageGenerationReferenceUris?: string[]) => void | Promise<void>;
   onTriggerResponse: () => void | Promise<void>;
   onEnableWebCruise?: () => void | Promise<void>;
+  onOpenFishingPanel?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -92,6 +93,7 @@ export function ChatInput({
   onSend,
   onTriggerResponse,
   onEnableWebCruise,
+  onOpenFishingPanel,
   disabled,
   isStreaming,
   onStop,
@@ -231,6 +233,11 @@ export function ChatInput({
     if (!mcpSelectedServerId && selectedMcpServer) {
       setMcpSelectedServerId(selectedMcpServer.id);
     }
+  };
+
+  const handleOpenFishingPanel = () => {
+    setOptionsMenuVisible(false);
+    onOpenFishingPanel?.();
   };
 
   const appendToInput = (content: string) => {
@@ -657,6 +664,10 @@ export function ChatInput({
             <View style={styles.optionDivider} />
             <Pressable style={styles.optionItem} onPress={handleOpenMcpPanel}>
               <Text style={styles.optionText}>MCP 管理</Text>
+            </Pressable>
+            <View style={styles.optionDivider} />
+            <Pressable style={styles.optionItem} onPress={handleOpenFishingPanel}>
+              <Text style={styles.optionText}>钓鱼面板</Text>
             </Pressable>
             <View style={styles.optionDivider} />
             <Pressable style={styles.optionItem} onPress={() => void pickImage()}>

@@ -38,6 +38,7 @@ export interface ToolInvocation {
   args: string;        // 原始参数 JSON 字符串
   result?: string;     // 工具执行结果或错误文本，供展开调试查看
   status?: 'running' | 'done';
+  contentOffset?: number; // 工具调用发生时，AI 原始回复内容已经生成到的位置
 }
 
 export interface ToolCall {

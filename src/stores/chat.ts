@@ -1075,6 +1075,7 @@ async function runToolLoop(
   }));
 
   let toolCallCount = 0;
+  let streamedContent = '';
 
   while (true) {
     const message = await streamChatCompletion({
@@ -1098,7 +1099,10 @@ async function runToolLoop(
           toolCount: tools.length,
         },
       },
-    }, onToken, signal);
+    }, (token) => {
+      streamedContent += token;
+      onToken(token);
+    }, signal);
 
     const toolCalls = message.tool_calls;
 
@@ -1128,6 +1132,7 @@ async function runToolLoop(
         name: tc.function.name,
         args: tc.function.arguments || '',
         status: 'running',
+        contentOffset: streamedContent.length,
       });
       let args: Record<string, any> = {};
       try {
@@ -1158,6 +1163,7 @@ async function runToolLoop(
         args: tc.function.arguments || '',
         result: displayResult,
         status: 'done',
+        contentOffset: streamedContent.length,
       });
       messages.push({
         role: 'tool',

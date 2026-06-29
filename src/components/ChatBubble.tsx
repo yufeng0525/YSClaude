@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dime
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { BlurView } from 'expo-blur';
-import { Message, type GeneratedPicture } from '../types';
+import { Message, type GeneratedPicture, type ToolInvocation } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { useChatStore } from '../stores/chat';
@@ -186,6 +186,104 @@ function splitThinking(raw: string): { thinking: string; body: string } {
     body = raw.slice(0, openIdx);
   }
   return { thinking: thinking.trim(), body: body.trim() };
+}
+
+type AssistantFlowPart =
+  | { type: 'text'; key: string; content: string; pictureOffset: number }
+  | { type: 'tool'; key: string; invocation: ToolInvocation; invocationIndex: number };
+
+const PIC_TOKEN_PATTERN = /\[Pic:[^\]\r\n]+\]/g;
+
+function countPicTokens(text: string): number {
+  return (text.match(PIC_TOKEN_PATTERN) || []).length;
+}
+
+function normalizeGeneratedPicsForSegment(
+  generatedPics: GeneratedPicture[] | undefined,
+  pictureOffset: number,
+  pictureCount: number
+): GeneratedPicture[] | undefined {
+  if (!generatedPics || pictureCount <= 0) return undefined;
+  const segmentPics = generatedPics
+    .filter((picture) => picture.tokenIndex >= pictureOffset && picture.tokenIndex < pictureOffset + pictureCount)
+    .map((picture) => ({ ...picture, tokenIndex: picture.tokenIndex - pictureOffset }));
+  return segmentPics.length > 0 ? segmentPics : undefined;
+}
+
+function findParagraphEndOffsets(text: string): number[] {
+  const offsets: number[] = [];
+  if (text.includes('```')) return offsets;
+  const pattern = /\n{2,}/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    offsets.push(match.index);
+  }
+  return offsets;
+}
+
+function getFallbackToolOffset(body: string, index: number): number {
+  const paragraphEnds = findParagraphEndOffsets(body);
+  return paragraphEnds[index] ?? body.length;
+}
+
+function getBodyOffsetForRawContentOffset(rawContent: string, rawOffset: number, bodyLength: number): number {
+  const safeRawOffset = Math.max(0, Math.min(rawContent.length, rawOffset));
+  const prefixBody = splitThinking(rawContent.slice(0, safeRawOffset)).body;
+  return Math.max(0, Math.min(bodyLength, prefixBody.length));
+}
+
+function buildAssistantFlowParts(
+  rawContent: string,
+  body: string,
+  invocations?: ToolInvocation[]
+): AssistantFlowPart[] {
+  const tools = invocations || [];
+  if (tools.length === 0) {
+    return body.length > 0 ? [{ type: 'text', key: 'text-0', content: body, pictureOffset: 0 }] : [];
+  }
+
+  const positionedTools = tools
+    .map((invocation, invocationIndex) => {
+      const offset = typeof invocation.contentOffset === 'number'
+        ? getBodyOffsetForRawContentOffset(rawContent, invocation.contentOffset, body.length)
+        : getFallbackToolOffset(body, invocationIndex);
+      return { invocation, invocationIndex, offset };
+    })
+    .sort((a, b) => a.offset - b.offset || a.invocationIndex - b.invocationIndex);
+
+  const parts: AssistantFlowPart[] = [];
+  let cursor = 0;
+
+  positionedTools.forEach((item) => {
+    const offset = Math.max(cursor, Math.min(body.length, item.offset));
+    if (offset > cursor) {
+      const content = body.slice(cursor, offset);
+      parts.push({
+        type: 'text',
+        key: `text-${cursor}-${offset}`,
+        content,
+        pictureOffset: countPicTokens(body.slice(0, cursor)),
+      });
+      cursor = offset;
+    }
+    parts.push({
+      type: 'tool',
+      key: `tool-${item.invocationIndex}`,
+      invocation: item.invocation,
+      invocationIndex: item.invocationIndex,
+    });
+  });
+
+  if (cursor < body.length) {
+    parts.push({
+      type: 'text',
+      key: `text-${cursor}-${body.length}`,
+      content: body.slice(cursor),
+      pictureOffset: countPicTokens(body.slice(0, cursor)),
+    });
+  }
+
+  return parts;
 }
 
 function SharedLinkCard({ url }: { url: string }) {
@@ -698,6 +796,7 @@ export const ChatBubble = React.memo(function ChatBubble({
 
   // 拆分思维链与正文：<thinking> 内容进胶囊，正文只渲染剩余部分
   const { thinking, body } = splitThinking(message.content);
+  const assistantFlowParts = buildAssistantFlowParts(message.content, body, message.toolInvocations);
 
   function handleAction(index: number) {
     switch (index) {
@@ -757,6 +856,42 @@ export const ChatBubble = React.memo(function ChatBubble({
   function handleGeneratedPicturePress(picture: GeneratedPicture) {
     if (!picture.imageUri) return;
     setPreviewImage({ uri: picture.imageUri, title: picture.prompt || 'AI 生成图片' });
+  }
+
+  function renderToolInvocation(inv: ToolInvocation, invocationIndex: number) {
+    return (
+      <Pressable
+        key={`tool-${invocationIndex}`}
+        style={styles.toolInlineItem}
+        onPress={() => setExpandedTools((state) => ({ ...state, [invocationIndex]: !state[invocationIndex] }))}
+        onLongPress={() => {
+          Alert.alert('删除', '确定删除该工具调用记录？', [
+            { text: '取消', style: 'cancel' },
+            { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, invocationIndex) },
+          ]);
+        }}
+      >
+        <View style={styles.toolRow}>
+          <Image
+            source={require('../../assets/clock.png')}
+            style={styles.toolIconLeft}
+            resizeMode="contain"
+          />
+          <Text style={styles.toolText} numberOfLines={1}>
+            {formatToolInvocation(inv.name, inv.args)}{inv.status === 'running' ? '（执行中）' : ''}
+          </Text>
+          <Text style={styles.toolChevron}>{expandedTools[invocationIndex] ? '⌃' : '⌄'}</Text>
+        </View>
+        {expandedTools[invocationIndex] && (
+          <View style={styles.toolDetailBox}>
+            <Text style={styles.toolDetailLabel}>参数</Text>
+            <Text style={styles.toolDetailText} selectable>{formatDebugJson(inv.args)}</Text>
+            <Text style={styles.toolDetailLabel}>结果</Text>
+            <Text style={styles.toolDetailText} selectable>{inv.result || '尚未返回结果'}</Text>
+          </View>
+        )}
+      </Pressable>
+    );
   }
 
   async function runPictureAction(action: 'regenerate' | 'delete-image' | 'delete-token' | 'download') {
@@ -830,43 +965,6 @@ export const ChatBubble = React.memo(function ChatBubble({
       {floorLabel && <Text style={styles.floorLabelLeft}>{floorLabel}</Text>}
       {isHidden && <Text style={styles.hiddenLabelLeft}>已隐藏</Text>}
       <FishingLogPanel invocations={message.toolInvocations} />
-      {/* 工具调用记录：显示在 AI 回复文字上方，每次调用一行 */}
-      {message.toolInvocations && message.toolInvocations.length > 0 && (
-        <View style={styles.toolList}>
-          {message.toolInvocations.map((inv, i) => (
-            <Pressable
-              key={i}
-              onPress={() => setExpandedTools((state) => ({ ...state, [i]: !state[i] }))}
-              onLongPress={() => {
-                Alert.alert('删除', '确定删除该工具调用记录？', [
-                  { text: '取消', style: 'cancel' },
-                  { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, i) },
-                ]);
-              }}
-            >
-              <View style={styles.toolRow}>
-                <Image
-                  source={require('../../assets/clock.png')}
-                  style={styles.toolIconLeft}
-                  resizeMode="contain"
-                />
-                <Text style={styles.toolText} numberOfLines={1}>
-                  {formatToolInvocation(inv.name, inv.args)}{inv.status === 'running' ? '（执行中）' : ''}
-                </Text>
-                <Text style={styles.toolChevron}>{expandedTools[i] ? '⌃' : '⌄'}</Text>
-              </View>
-              {expandedTools[i] && (
-                <View style={styles.toolDetailBox}>
-                  <Text style={styles.toolDetailLabel}>参数</Text>
-                  <Text style={styles.toolDetailText} selectable>{formatDebugJson(inv.args)}</Text>
-                  <Text style={styles.toolDetailLabel}>结果</Text>
-                  <Text style={styles.toolDetailText} selectable>{inv.result || '尚未返回结果'}</Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
-        </View>
-      )}
       {/* 思维链：<thinking> 包裹的内容拆出，正文只渲染剩余部分 */}
       {thinking.length > 0 && <ThinkingBlock thinking={thinking} />}
       <Pressable
@@ -892,16 +990,39 @@ export const ChatBubble = React.memo(function ChatBubble({
             <View pointerEvents="none" style={styles.glassInnerGlow} />
           </>
         )}
-        <StickerContent
-          content={body || ' '}
-          variant="assistant"
-          markdownStyle={markdownStyles}
-          markdownRules={markdownRules}
-          stickers={messageStickers}
-          generatedPics={message.generatedPics}
-          onPicturePress={handleGeneratedPicturePress}
-          onPictureLongPress={handleGeneratedPictureLongPress}
-        />
+        <View style={styles.assistantFlow}>
+          {assistantFlowParts.length > 0 ? assistantFlowParts.map((part) => {
+            if (part.type === 'tool') {
+              return renderToolInvocation(part.invocation, part.invocationIndex);
+            }
+
+            const pictureCount = countPicTokens(part.content);
+            return (
+              <StickerContent
+                key={part.key}
+                content={part.content}
+                variant="assistant"
+                markdownStyle={markdownStyles}
+                markdownRules={markdownRules}
+                stickers={messageStickers}
+                generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                onPicturePress={handleGeneratedPicturePress}
+                onPictureLongPress={handleGeneratedPictureLongPress}
+              />
+            );
+          }) : (
+            <StickerContent
+              content=" "
+              variant="assistant"
+              markdownStyle={markdownStyles}
+              markdownRules={markdownRules}
+              stickers={messageStickers}
+              generatedPics={message.generatedPics}
+              onPicturePress={handleGeneratedPicturePress}
+              onPictureLongPress={handleGeneratedPictureLongPress}
+            />
+          )}
+        </View>
       </Pressable>
       <Modal
         transparent
@@ -1492,10 +1613,19 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 16,
     overflow: 'hidden',
   },
-  // 工具调用记录列表（位于回复文字上方）
+  assistantFlow: {
+    width: '100%',
+    maxWidth: '100%',
+    gap: 8,
+  },
+  // 工具调用记录列表（兼容旧布局间距）
   toolList: {
     marginBottom: 8,
     gap: 6,
+  },
+  toolInlineItem: {
+    alignSelf: 'stretch',
+    maxWidth: '100%',
   },
   // 单行工具调用：左图标 + 中间文字 + 右箭头，左对齐
   toolRow: {

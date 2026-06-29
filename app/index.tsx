@@ -39,6 +39,7 @@ import { usePeriodStore } from '../src/stores/period';
 import { useSettingsStore } from '../src/stores/settings';
 import { ChatBubble } from '../src/components/ChatBubble';
 import { ChatInput } from '../src/components/ChatInput';
+import { FishingFloatingPanel } from '../src/components/FishingFloatingPanel';
 import { ModelSelector } from '../src/components/ModelSelector';
 import { TimeDivider } from '../src/components/TimeDivider';
 import { IncomingLetter, Message } from '../src/types';
@@ -165,6 +166,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
   const hotboardConfig = useSettingsStore((state) => state.hotboardConfig);
+  const mcpToolConfig = useSettingsStore((state) => state.mcpToolConfig);
   const settingsHydrated = useSettingsStore((state) => state._hydrated);
   const incomingLetterEnabled = useSettingsStore((state) => !!state.incomingLetterConfig?.enabled);
   const topBarIconUris = appearanceConfig?.topBarIconUris || {};
@@ -203,6 +205,7 @@ export default function ChatScreen() {
     removePeriodRecord,
   } = usePeriodStore();
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [fishingPanelVisible, setFishingPanelVisible] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [monthJumpVisible, setMonthJumpVisible] = useState(false);
@@ -1082,12 +1085,20 @@ export default function ChatScreen() {
           }}
           onTriggerResponse={triggerResponse}
           onEnableWebCruise={handleEnableWebCruise}
+          onOpenFishingPanel={() => setFishingPanelVisible(true)}
           disabled={isStreaming}
           isStreaming={isStreaming}
           onStop={stopStreaming}
           onModelPress={() => setShowModelSelector(true)}
         />
       </Animated.View>
+
+      <FishingFloatingPanel
+        visible={fishingPanelVisible}
+        messages={messages}
+        mcpToolConfig={mcpToolConfig}
+        onClose={() => setFishingPanelVisible(false)}
+      />
 
       {showModelSelector && (
         <ModelSelector onClose={() => setShowModelSelector(false)} />
