@@ -310,28 +310,14 @@ export default function ApiAchievementsScreen() {
 function AchievementGroupCard({ group, onPress }: { group: AchievementGroup; onPress: () => void }) {
   const displayRow = getGroupDisplayRow(group.rows);
   if (!displayRow) return null;
-  const earned = group.rows.filter((row) => row.achieved).length;
   return (
     <Pressable style={styles.badgeCard} onPress={onPress}>
       <BadgeMedal
         definition={displayRow.definition}
         achieved={displayRow.achieved}
       />
-      <Text style={styles.badgeName} numberOfLines={2}>{group.title}</Text>
-      <Text style={styles.badgeDescription} numberOfLines={2}>{displayRow.definition.name}</Text>
-      <Text style={styles.badgeCondition} numberOfLines={2}>{group.meta}</Text>
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressFill,
-            displayRow.achieved && styles.progressFillAchieved,
-            { width: `${Math.round(displayRow.progress * 100)}%` },
-          ]}
-        />
-      </View>
-      <Text style={styles.badgeProgress}>
-        已获得 {earned}/{group.rows.length}
-      </Text>
+      <Text style={styles.badgeName} numberOfLines={1}>{displayRow.definition.name}</Text>
+      <Text style={styles.badgeDescription} numberOfLines={2}>{displayRow.definition.description}</Text>
     </Pressable>
   );
 }
@@ -862,8 +848,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: 'rgba(107, 114, 128, 0.62)',
   },
   badgeName: {
+    width: '100%',
     marginTop: 9,
-    minHeight: 36,
+    minHeight: 20,
     color: colors.text,
     fontSize: 13,
     lineHeight: 18,
@@ -878,6 +865,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
   },
   badgeDescription: {
+    width: '100%',
     marginTop: 4,
     minHeight: 30,
     color: colors.textTertiary,

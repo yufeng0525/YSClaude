@@ -207,21 +207,23 @@ export function getDefaultApiAchievements(years: number[] = [new Date().getFullY
   ];
 
   const seasonAchievements = seasonYears.flatMap((year) =>
-    SEASONS.map((season) => ({
-      id: `season-${year}-${season.key}`,
-      name: `${year} ${season.label}日章`,
-      description: season.description,
-      category: 'season' as const,
-      metric: 'activeDays' as const,
-      feature: 'all' as const,
-      target: 60,
-      year,
-      season: season.key,
-      badgePattern: season.badgePattern,
-      badgeColor: season.badgeColor,
-      createdAt: now,
-      updatedAt: now,
-    }))
+    SEASONS
+      .filter((season) => season.key !== 'spring' || year >= 2027)
+      .map((season) => ({
+        id: `season-${year}-${season.key}`,
+        name: `${year} ${season.label}日章`,
+        description: season.description,
+        category: 'season' as const,
+        metric: 'activeDays' as const,
+        feature: 'all' as const,
+        target: 60,
+        year,
+        season: season.key,
+        badgePattern: season.badgePattern,
+        badgeColor: season.badgeColor,
+        createdAt: now,
+        updatedAt: now,
+      }))
   );
 
   const anniversaryAchievements = anniversaryYears.map((year) => {
