@@ -1010,6 +1010,31 @@ export async function getConversationMessageDates(conversationId: string): Promi
   return [...dates];
 }
 
+export async function getChatActiveDateKeys(limit = 3650): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ date_key: string }>(
+    `SELECT date(created_at / 1000, 'unixepoch', 'localtime') as date_key
+       FROM messages
+      WHERE role IN ('user', 'assistant')
+      GROUP BY date_key
+      ORDER BY date_key DESC
+      LIMIT ?`,
+    [Math.max(1, limit)]
+  );
+  return rows.map((row) => row.date_key).filter(Boolean);
+}
+
+export async function getCompanionActiveDateKeys(limit = 3650): Promise<string[]> {
+  const [chatDateKeys, apiDateKeys] = await Promise.all([
+    getChatActiveDateKeys(limit),
+    getApiUsageActiveDateKeysByFeature('all', limit),
+  ]);
+  return [...new Set([...chatDateKeys, ...apiDateKeys])]
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, Math.max(1, limit));
+}
+
 export async function getChatDiagnosticsConversations(): Promise<ChatDiagnosticsConversation[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{

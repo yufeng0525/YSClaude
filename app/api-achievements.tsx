@@ -21,8 +21,9 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {
-  getApiUsageActiveDateKeysByFeature,
+  getApiUsageDailySummaries,
   getApiUsageSummary,
+  getCompanionActiveDateKeys,
 } from '../src/db/operations';
 import {
   getApiAchievementDefinitions,
@@ -35,7 +36,7 @@ import {
   useApiAchievementsStore,
 } from '../src/stores/api-achievements';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
-import type { ApiUsageSummary } from '../src/types';
+import type { ApiUsageDailySummary, ApiUsageSummary } from '../src/types';
 
 let colors = lightColors;
 
@@ -120,6 +121,7 @@ interface EvaluatedAchievement {
   target: number;
   progress: number;
   achieved: boolean;
+  achievedAt?: string;
 }
 
 interface AchievementGroup {
@@ -140,6 +142,7 @@ export default function ApiAchievementsScreen() {
   const resetDefaultAchievements = useApiAchievementsStore((state) => state.resetDefaultAchievements);
   const [summary, setSummary] = useState<ApiUsageSummary>(EMPTY_SUMMARY);
   const [activeDateKeys, setActiveDateKeys] = useState<string[]>([]);
+  const [dailyRows, setDailyRows] = useState<ApiUsageDailySummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<AchievementDraft | null>(null);
@@ -149,12 +152,14 @@ export default function ApiAchievementsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [nextSummary, nextActiveDateKeys] = await Promise.all([
+      const [nextSummary, nextActiveDateKeys, nextDailyRows] = await Promise.all([
         getApiUsageSummary(),
-        getApiUsageActiveDateKeysByFeature('all'),
+        getCompanionActiveDateKeys(),
+        getApiUsageDailySummaries(3650),
       ]);
       setSummary(nextSummary);
       setActiveDateKeys(nextActiveDateKeys);
+      setDailyRows(nextDailyRows);
     } catch (err: any) {
       setError(err?.message || '无法读取 API 成就数据');
     } finally {
@@ -181,10 +186,9 @@ export default function ApiAchievementsScreen() {
     [achievementCustomizations, achievementYears]
   );
   const evaluatedRows = useMemo(
-    () => achievements.map((definition) => evaluateAchievement(definition, summary, activeDateKeys, anniversaryCheckIns)),
-    [achievements, activeDateKeys, anniversaryCheckIns, summary]
+    () => achievements.map((definition) => evaluateAchievement(definition, summary, activeDateKeys, anniversaryCheckIns, dailyRows)),
+    [achievements, activeDateKeys, anniversaryCheckIns, dailyRows, summary]
   );
-  const earnedCount = evaluatedRows.filter((row) => row.achieved).length;
   const companionRows = evaluatedRows.filter((row) => row.definition.category === 'companionDays');
   const tokenRows = evaluatedRows.filter((row) => row.definition.category === 'totalTokens');
   const anniversaryRows = evaluatedRows.filter((row) => row.definition.category === 'anniversary');
@@ -260,16 +264,6 @@ export default function ApiAchievementsScreen() {
 
       <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
         {error && <Text style={styles.errorText}>{error}</Text>}
-        <View style={styles.overviewPanel}>
-          <View>
-            <Text style={styles.overviewTitle}>徽章墙</Text>
-            <Text style={styles.overviewMeta}>已获得 {earnedCount}/{evaluatedRows.length}</Text>
-          </View>
-          <View style={styles.overviewStats}>
-            <Text style={styles.overviewNumber}>{formatNumber(summary.totalTokens)}</Text>
-            <Text style={styles.overviewLabel}>累计 tokens</Text>
-          </View>
-        </View>
 
         {loading && evaluatedRows.length === 0 ? (
           <View style={styles.loading}>
@@ -311,13 +305,18 @@ function AchievementGroupCard({ group, onPress }: { group: AchievementGroup; onP
   const displayRow = getGroupDisplayRow(group.rows);
   if (!displayRow) return null;
   return (
-    <Pressable style={styles.badgeCard} onPress={onPress}>
+    <Pressable style={styles.badgeWallItem} onPress={onPress}>
       <BadgeMedal
         definition={displayRow.definition}
         achieved={displayRow.achieved}
+        variant="wall"
       />
-      <Text style={styles.badgeName} numberOfLines={1}>{displayRow.definition.name}</Text>
-      <Text style={styles.badgeDescription} numberOfLines={2}>{displayRow.definition.description}</Text>
+      <Text style={styles.badgeWallName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82}>
+        {displayRow.definition.name}
+      </Text>
+      <Text style={[styles.badgeWallMeta, !displayRow.achieved && styles.badgeWallMetaLocked]} numberOfLines={1}>
+        {displayRow.achieved ? formatAchievementDate(displayRow.achievedAt) : formatLockedWallCondition(displayRow)}
+      </Text>
     </Pressable>
   );
 }
@@ -502,17 +501,25 @@ function BadgeMedal({
   definition,
   achieved,
   size = 'large',
+  variant = 'default',
 }: {
   definition: Pick<ApiAchievementDefinition, 'badgePattern' | 'badgeColor' | 'badgeImageUri'>;
   achieved: boolean;
   size?: 'large' | 'small' | 'detail';
+  variant?: 'default' | 'wall';
 }) {
   const palette = COLOR_OPTIONS.find((item) => item.key === definition.badgeColor)?.colors || COLOR_OPTIONS[0].colors;
-  const medalSize = size === 'detail' ? 112 : size === 'large' ? 76 : 48;
-  const iconSize = size === 'detail' ? 48 : size === 'large' ? 34 : 22;
+  const medalSize = variant === 'wall' ? 96 : size === 'detail' ? 112 : size === 'large' ? 76 : 48;
+  const iconSize = variant === 'wall' ? 46 : size === 'detail' ? 48 : size === 'large' ? 34 : 22;
   const hasCustomImage = !!definition.badgeImageUri;
   return (
-    <View style={[styles.medalShell, { width: medalSize, height: medalSize, opacity: achieved || hasCustomImage ? 1 : 0.38 }]}>
+    <View
+      style={[
+        styles.medalShell,
+        variant === 'wall' && styles.medalShellWall,
+        { width: medalSize, height: medalSize, opacity: achieved || hasCustomImage ? 1 : 0.38 },
+      ]}
+    >
       <LinearGradient colors={achieved ? palette : ['#D1D5DB', '#9CA3AF']} style={styles.medalGradient}>
         {definition.badgeImageUri ? (
           <View style={styles.badgeImageWrap}>
@@ -548,18 +555,60 @@ function evaluateAchievement(
   definition: ApiAchievementDefinition,
   summary: ApiUsageSummary,
   activeDateKeys: string[],
-  anniversaryCheckIns: string[]
+  anniversaryCheckIns: string[],
+  dailyRows: ApiUsageDailySummary[]
 ): EvaluatedAchievement {
   const current = getAchievementCurrent(definition, summary, activeDateKeys, anniversaryCheckIns);
   const target = Math.max(1, definition.target);
   const progress = Math.min(1, current / target);
+  const achieved = current >= target;
   return {
     definition,
     current,
     target,
     progress,
-    achieved: current >= target,
+    achieved,
+    achievedAt: achieved ? getAchievementDate(definition, activeDateKeys, anniversaryCheckIns, dailyRows) : undefined,
   };
+}
+
+function getAchievementDate(
+  definition: ApiAchievementDefinition,
+  activeDateKeys: string[],
+  anniversaryCheckIns: string[],
+  dailyRows: ApiUsageDailySummary[]
+): string | undefined {
+  if (definition.metric === 'totalTokens') {
+    return getTokenAchievementDate(dailyRows, definition.target);
+  }
+  if (definition.category === 'anniversary' && definition.year) {
+    const dateKey = anniversaryDateKey(definition.year);
+    return activeDateKeys.includes(dateKey) || anniversaryCheckIns.includes(dateKey) ? dateKey : undefined;
+  }
+  if (definition.category === 'season' && definition.year && definition.season) {
+    return getNthDateKey(
+      activeDateKeys.filter((key) => isDateKeyInSeason(key, definition.year!, definition.season!)),
+      definition.target
+    );
+  }
+  return getNthDateKey(activeDateKeys, definition.target);
+}
+
+function getNthDateKey(dateKeys: string[], target: number): string | undefined {
+  const sorted = [...new Set(dateKeys)]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return sorted[Math.max(0, target - 1)];
+}
+
+function getTokenAchievementDate(dailyRows: ApiUsageDailySummary[], target: number): string | undefined {
+  let total = 0;
+  const sortedRows = [...dailyRows].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  for (const row of sortedRows) {
+    total += row.totalTokens;
+    if (total >= target) return row.dateKey;
+  }
+  return undefined;
 }
 
 function getAchievementCurrent(
@@ -715,6 +764,26 @@ function formatMetricValue(value: number, metric: ApiAchievementMetric): string 
   return `${formatCompactNumber(value)} tokens`;
 }
 
+function formatAchievementDate(dateKey?: string): string {
+  if (!dateKey) return '已获得';
+  const [year, month, day] = dateKey.split('-').map((part) => parseInt(part, 10));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return dateKey;
+  return `${year}.${month}.${day}`;
+}
+
+function formatLockedWallCondition(row: EvaluatedAchievement): string {
+  if (row.definition.category === 'anniversary' && row.definition.year) {
+    return `${row.definition.year}.5.6 登录`;
+  }
+  if (row.definition.category === 'season') {
+    return `当前进度 ${formatNumber(row.current)}/${formatNumber(row.target)}`;
+  }
+  if (row.definition.metric === 'totalTokens') {
+    return `当前进度 ${formatCompactNumber(row.current)}/${formatCompactNumber(row.target)}`;
+  }
+  return `当前进度 ${formatNumber(row.current)}/${formatNumber(row.target)}`;
+}
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('zh-CN').format(value);
 }
@@ -755,64 +824,44 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
   },
   content: {
-    padding: 16,
-    paddingBottom: 32,
-    gap: 12,
-  },
-  overviewPanel: {
-    minHeight: 92,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-  },
-  overviewTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  overviewMeta: {
-    marginTop: 5,
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  overviewStats: {
-    alignItems: 'flex-end',
-    flexShrink: 1,
-  },
-  overviewNumber: {
-    color: colors.primary,
-    fontSize: 18,
-    fontWeight: '900',
-    fontVariant: ['tabular-nums'],
-  },
-  overviewLabel: {
-    marginTop: 4,
-    color: colors.textTertiary,
-    fontSize: 11,
-    fontWeight: '700',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 36,
+    gap: 18,
   },
   badgeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    columnGap: 10,
+    rowGap: 34,
   },
-  badgeCard: {
-    width: '48%',
-    minWidth: 154,
+  badgeWallItem: {
+    width: '30.5%',
+    minWidth: 96,
     flexGrow: 1,
     alignItems: 'center',
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 12,
+  },
+  badgeWallName: {
+    width: '100%',
+    marginTop: 12,
+    color: colors.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  badgeWallMeta: {
+    width: '100%',
+    marginTop: 8,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  badgeWallMetaLocked: {
+    color: colors.textTertiary,
   },
   medalShell: {
     borderRadius: 999,
@@ -820,6 +869,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.inputBackground,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  medalShellWall: {
+    padding: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   medalGradient: {
     flex: 1,
