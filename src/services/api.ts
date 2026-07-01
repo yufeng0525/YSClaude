@@ -567,7 +567,7 @@ export async function streamChat(
   request: ChatRequest,
   onToken: (token: string) => void,
   signal?: AbortSignal
-): Promise<void> {
+): Promise<ApiTokenUsage | undefined> {
   const { baseUrl, apiKey, model, messages, maxTokens, temperature, generateThinking, returnNativeThinking, sessionId } = request;
   const startedAt = Date.now();
 
@@ -678,14 +678,16 @@ export async function streamChat(
       onToken('</thinking>');
     }
 
+    const usage = normalizeUsage(rawUsage);
     await recordApiUsage({
       request,
       streaming: true,
       startedAt,
       endedAt: Date.now(),
       status: 'success',
-      usage: normalizeUsage(rawUsage),
+      usage,
     });
+    return usage;
   } catch (error: any) {
     await recordApiUsage({
       request,

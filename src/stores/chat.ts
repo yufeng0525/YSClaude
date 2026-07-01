@@ -2,6 +2,7 @@
 import { Message, Conversation, HiddenRange, ToolInvocation, GeneratedPicture, DailyPaper } from '../types';
 import { randomUUID } from 'expo-crypto';
 import { File } from 'expo-file-system';
+import { Alert } from 'react-native';
 import { ChatMessage, streamChat, streamChatCompletion } from '../services/api';
 import { deleteGeneratedImageFile, generateOpenAIImage } from '../services/imageGeneration';
 import { notifyReplyReady } from '../services/notifications';
@@ -482,6 +483,7 @@ interface ChatState {
 let abortController: AbortController | null = null;
 const autoHideAfterResponseIds = new Set<string>();
 let floatingSpeechBridgeId = 0;
+const warnedTokenUsageKeys = new Set<string>();
 
 function stripFloatingStreamNoise(content: string): string {
   return content
@@ -1033,6 +1035,26 @@ function isAbortError(err: any): boolean {
   );
 }
 
+function formatTokenCount(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+function showTokenWarningIfNeeded(
+  conversationId: string,
+  messageId: string,
+  totalTokens: number | undefined,
+  threshold: number | null | undefined
+) {
+  if (!threshold || !totalTokens || totalTokens <= threshold) return;
+  const warningKey = `${conversationId}:${messageId}`;
+  if (warnedTokenUsageKeys.has(warningKey)) return;
+  warnedTokenUsageKeys.add(warningKey);
+  Alert.alert(
+    'Token 预警',
+    `本次 API 调用共使用 ${formatTokenCount(totalTokens)} tokens，已超过你设置的 ${formatTokenCount(threshold)}。\n\n建议压缩总结对话，或在「对话设置」里隐藏旧消息后继续。`
+  );
+}
+
 /**
  * Tool Use 循环。
  * 返回是否已由工具流式路径处理；若没有启用任何工具则返回 false（调用方走普通流式路径）。
@@ -1053,7 +1075,7 @@ async function runToolLoop(
   onToolInvocation?: (inv: ToolInvocation) => void,
   signal?: AbortSignal,
   options?: { webCruiseEnabled?: boolean; sessionId?: string; conversationId?: string; messageId?: string }
-): Promise<boolean> {
+): Promise<{ handled: boolean; totalTokens?: number }> {
   const settings = useSettingsStore.getState();
   const webCruiseEnabled = !!options?.webCruiseEnabled;
   const memoryEnabled = settings.memoryVaultConfig.enabled && !!settings.memoryVaultConfig.baseUrl;
@@ -1088,7 +1110,7 @@ async function runToolLoop(
     mcpTools: settings.mcpToolConfig,
   });
   if (tools.length === 0) {
-    return false; // 无工具 → 走原有流式路径
+    return { handled: false }; // 无工具 → 走原有流式路径
   }
 
   // 每轮最大工具调用次数。网页交互通常需要多步，启用时使用更高上限。
@@ -1110,6 +1132,7 @@ async function runToolLoop(
 
   let toolCallCount = 0;
   let streamedContent = '';
+  let totalTokens = 0;
 
   while (true) {
     const message = await streamChatCompletion({
@@ -1137,12 +1160,15 @@ async function runToolLoop(
       streamedContent += token;
       onToken(token);
     }, signal);
+    if (typeof message.usage?.totalTokens === 'number') {
+      totalTokens += message.usage.totalTokens;
+    }
 
     const toolCalls = message.tool_calls;
 
     // 没有工具调用，或已达上限 → 当前内容已经通过 onToken 流式写入 UI
     if (!toolCalls || toolCalls.length === 0 || toolCallCount >= maxToolCalls) {
-      return true;
+      return { handled: true, totalTokens };
     }
 
     // 将 assistant 的 tool_calls 消息追加到上下文。部分 OpenAI 兼容服务不接受
@@ -1555,7 +1581,7 @@ async function streamAssistantResponse(
 
   try {
     let requestStarted = false;
-    const handledByToolLoop = await runToolLoop(
+    const toolLoopResult = await runToolLoop(
       {
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,
@@ -1578,8 +1604,9 @@ async function streamAssistantResponse(
     );
     requestStarted = true;
 
-    if (!handledByToolLoop) {
-      await streamChat(
+    let responseTotalTokens = toolLoopResult.totalTokens;
+    if (!toolLoopResult.handled) {
+      const usage = await streamChat(
         {
           baseUrl: config.baseUrl,
           apiKey: config.apiKey,
@@ -1600,6 +1627,7 @@ async function streamAssistantResponse(
         onToken,
         abortController.signal
       );
+      responseTotalTokens = usage?.totalTokens;
     }
 
     const finalMessages = get().messages;
@@ -1617,6 +1645,12 @@ async function streamAssistantResponse(
     await updateConversation(conversationId, { updatedAt: Date.now() });
     if (requestStarted) {
       await hideAutoHideMessagesAfterResponse(get, set, conversationId, historyMessages);
+      showTokenWarningIfNeeded(
+        conversationId,
+        assistantMessage.id,
+        responseTotalTokens,
+        settings.tokenWarningThreshold
+      );
     }
   } catch (err: any) {
     if (isAbortError(err)) {

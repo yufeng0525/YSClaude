@@ -573,6 +573,7 @@ interface SettingsState {
   systemPrompt: string;
   systemPrompts: { name: string; content: string }[];
   maxOutputTokens: number | null;
+  tokenWarningThreshold: number | null;
   stripThinking: boolean;
   ttsConfig: TTSConfig;
   memoryVaultConfig: MemoryVaultConfig;
@@ -603,6 +604,7 @@ interface SettingsState {
   setSystemPrompt: (prompt: string) => void;
   setSystemPrompts: (prompts: { name: string; content: string }[]) => void;
   setMaxOutputTokens: (tokens: number | null) => void;
+  setTokenWarningThreshold: (tokens: number | null) => void;
   setStripThinking: (value: boolean) => void;
   setTTSConfig: (config: Partial<TTSConfig>) => void;
   setMemoryVaultConfig: (config: Partial<MemoryVaultConfig>) => void;
@@ -656,6 +658,7 @@ export const useSettingsStore = create<SettingsState>()(
         { name: '默认', content: 'You are a helpful assistant.' },
       ],
       maxOutputTokens: null,
+      tokenWarningThreshold: null,
       stripThinking: false,
       ttsConfig: {
         groupId: '',
@@ -853,6 +856,7 @@ export const useSettingsStore = create<SettingsState>()(
       setSystemPrompts: (prompts) => set({ systemPrompts: prompts }),
 
       setMaxOutputTokens: (tokens) => set({ maxOutputTokens: tokens }),
+      setTokenWarningThreshold: (tokens) => set({ tokenWarningThreshold: tokens }),
       setStripThinking: (value) => set({ stripThinking: value }),
       setTTSConfig: (config) =>
         set((state) => ({ ttsConfig: { ...state.ttsConfig, ...config } })),
@@ -1184,6 +1188,7 @@ export const useSettingsStore = create<SettingsState>()(
         systemPrompt: state.systemPrompt,
         systemPrompts: state.systemPrompts,
         maxOutputTokens: state.maxOutputTokens,
+        tokenWarningThreshold: state.tokenWarningThreshold,
         stripThinking: state.stripThinking,
         ttsConfig: state.ttsConfig,
         memoryVaultConfig: state.memoryVaultConfig,

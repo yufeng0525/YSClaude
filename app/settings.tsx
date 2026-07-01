@@ -2956,6 +2956,7 @@ function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
 function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const {
     maxOutputTokens,
+    tokenWarningThreshold,
     systemPrompt,
     stripThinking,
     periodConfig,
@@ -2964,6 +2965,7 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     imageGenerationPrompt,
     setSystemPrompt,
     setMaxOutputTokens,
+    setTokenWarningThreshold,
     setStripThinking,
     setPeriodConfig,
     setPromptCacheConfig,
@@ -2985,6 +2987,9 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const [fromStr, setFromStr] = useState('');
   const [toStr, setToStr] = useState('');
   const [tokensStr, setTokensStr] = useState(maxOutputTokens ? String(maxOutputTokens) : '');
+  const [tokenWarningStr, setTokenWarningStr] = useState(
+    tokenWarningThreshold ? String(tokenWarningThreshold) : ''
+  );
   const [promptText, setPromptText] = useState(systemPrompt);
   const [imagePromptText, setImagePromptText] = useState(imageGenerationPrompt || '');
   const [importingMyphone, setImportingMyphone] = useState(false);
@@ -3139,6 +3144,22 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     }
     setMaxOutputTokens(num);
     showToast(`AI 最大输出 ${num} tokens`);
+  }
+
+  function handleSaveTokenWarning() {
+    const val = tokenWarningStr.trim();
+    if (!val) {
+      setTokenWarningThreshold(null);
+      showToast('Token 预警已关闭');
+      return;
+    }
+    const num = parseInt(val, 10);
+    if (isNaN(num) || num <= 0) {
+      Alert.alert('提示', '请输入有效的正整数');
+      return;
+    }
+    setTokenWarningThreshold(num);
+    showToast(`Token 预警 ${num}`);
   }
 
   async function handleImportMyphone() {
@@ -3446,6 +3467,22 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
         <TextInput style={[styles.input, { flex: 1 }]} value={tokensStr} onChangeText={setTokensStr}
           keyboardType="number-pad" placeholder="不限制" placeholderTextColor={colors.textTertiary} />
         <Pressable style={styles.fetchButton} onPress={handleSaveTokens}>
+          <Text style={styles.fetchButtonText}>保存</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.sectionTitle}>Token 预警</Text>
+      <Text style={styles.hint}>当一次发送触发的 API 调用 total tokens 超过该数值时，弹窗提醒压缩总结对话；留空则关闭预警</Text>
+      <View style={styles.modelRow}>
+        <TextInput
+          style={[styles.input, { flex: 1 }]}
+          value={tokenWarningStr}
+          onChangeText={setTokenWarningStr}
+          keyboardType="number-pad"
+          placeholder="关闭预警"
+          placeholderTextColor={colors.textTertiary}
+        />
+        <Pressable style={styles.fetchButton} onPress={handleSaveTokenWarning}>
           <Text style={styles.fetchButtonText}>保存</Text>
         </Pressable>
       </View>
