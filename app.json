@@ -29,7 +29,8 @@
         "android.permission.WRITE_CALENDAR"
       ],
       "usesCleartextTraffic": true,
-      "package": "com.ysclaude.app"
+      "package": "com.ysclaude.app",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png",

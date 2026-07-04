@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, AppState } from 'react-native';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import {
@@ -25,6 +25,7 @@ import { handleFloatingBallToolAction } from '../src/services/floatingToolAction
 import { startDesktopLyricSync, stopDesktopLyricSync } from '../src/services/desktopLyrics';
 import { startFocusAppStateListener } from '../src/services/focusAppState';
 import { startPromptCacheRemoteSnapshotFlushListener } from '../src/services/promptCacheKeepalive';
+import { useChatStore } from '../src/stores/chat';
 
 
 let colors = lightColors;
@@ -117,6 +118,23 @@ export default function RootLayout() {
     const unsub = startPromptCacheRemoteSnapshotFlushListener();
     return unsub;
   }, []);
+
+  useEffect(() => {
+    // 必须等 settings 完成持久化恢复：否则 getRemoteConfig() 拿不到远程服务地址，
+    // 首次同步会静默空跑，表现为"打开 App 后要刷新很多次才能看到 AI 主动消息"。
+    if (!settingsHydrated) return;
+
+    const syncRemoteInbox = () => {
+      useChatStore.getState().syncPromptCacheRemoteInbox().catch(() => undefined);
+    };
+    syncRemoteInbox();
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        syncRemoteInbox();
+      }
+    });
+    return () => sub.remove();
+  }, [settingsHydrated]);
 
   if (!fontsLoaded) {
     return (

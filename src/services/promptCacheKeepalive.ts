@@ -1,6 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { ChatMessage } from './api';
-import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheTtl, type ThinkingCompatibility, type ThinkingEffort } from '../stores/settings';
+import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheConfig, type PromptCacheTtl, type ThinkingCompatibility, type ThinkingEffort } from '../stores/settings';
 
 const KEEPALIVE_SYNC_TIMEOUT_MS = 10000;
 const SNAPSHOT_SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
@@ -9,6 +9,20 @@ const SNAPSHOT_PREVIEW_TAIL_CHARS = 90;
 
 export interface PromptCacheRemoteSnapshot {
   conversationId: string;
+  agentTools?: {
+    memoryVault?: {
+      enabled: boolean;
+      baseUrl: string;
+      topK: number;
+      tokenBudget: number;
+      maxToolCalls: number;
+    };
+    webSearch?: {
+      enabled: boolean;
+      tavilyApiKey: string;
+      maxResults: number;
+    };
+  };
   request: {
     baseUrl: string;
     apiKey: string;
@@ -29,7 +43,8 @@ export interface PromptCacheRemoteSnapshot {
 }
 
 export interface PromptCacheRemoteSnapshotStatus {
-  state: 'empty' | 'pending' | 'synced';
+  state: 'empty' | 'pending' | 'syncing' | 'synced' | 'failed';
+  source: 'local' | 'server' | null;
   queueCount: number;
   conversationId: string | null;
   model: string | null;
@@ -39,23 +54,97 @@ export interface PromptCacheRemoteSnapshotStatus {
   queuedAt: number | null;
   nextSyncAt: number | null;
   syncedAt: number | null;
+  lastSyncAttemptAt: number | null;
+  lastSyncError: string | null;
+  serverNextKeepaliveAt: number | null;
+  serverSnapshotHash: string | null;
+  serverStatus: string | null;
+  serverDisabledReason: string | null;
+  serverUpdatedAt: number | null;
+  serverLastTouchedAt: number | null;
+  serverLastError: string | null;
+  serverConversationCount: number;
+  serverStatusFetchedAt: number | null;
+  serverStatusError: string | null;
+  serverPendingMessageCount: number;
+  serverActivityCount: number;
+}
+
+export interface PromptCacheRemoteToolTranscriptEntry {
+  toolName: string;
+  args: Record<string, any>;
+  resultPreview: string;
+  createdAt: number;
+}
+
+export interface PromptCacheRemoteInboxMessage {
+  id: string;
+  role: 'assistant';
+  content: string;
+  createdAt: number;
+  source?: string;
+  toolTranscript?: PromptCacheRemoteToolTranscriptEntry[];
+}
+
+export interface PromptCacheRemoteActivityEntry {
+  id: string;
+  type: string;
+  summary: string;
+  toolTranscript?: PromptCacheRemoteToolTranscriptEntry[];
+  appendedMessages?: Array<{ role: string; content: string }>;
+  createdAt: number;
 }
 
 interface SnapshotPreview {
   conversationId: string;
-  model: string;
+  model: string | null;
   messageCount: number;
   lastMessageRole: string | null;
   lastMessageTail: string | null;
+}
+
+interface PromptCacheRemoteServerConversationStatus {
+  conversationId: string;
+  snapshotHash: string | null;
+  status: string | null;
+  disabledReason: string | null;
+  lastTouchedAt: number | null;
+  nextKeepaliveAt: number | null;
+  lastError: string | null;
+  updatedAt: number | null;
+  preview: {
+    model?: string | null;
+    messageCount?: number;
+    lastMessageRole?: string | null;
+    lastMessageTail?: string | null;
+  } | null;
+  pendingMessageCount: number;
+  activityCount: number;
 }
 
 let pendingSnapshots: PromptCacheRemoteSnapshot[] = [];
 let snapshotSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let snapshotSyncDueAt: number | null = null;
 let snapshotFlushAppState: AppStateStatus = AppState.currentState;
+let snapshotSyncInFlight = false;
 let latestSnapshotPreview: SnapshotPreview | null = null;
+let latestSnapshotPreviewSource: 'local' | 'server' | null = null;
 let latestSnapshotQueuedAt: number | null = null;
 let latestSnapshotSyncedAt: number | null = null;
+let latestSnapshotSyncAttemptAt: number | null = null;
+let latestSnapshotSyncError: string | null = null;
+let latestServerNextKeepaliveAt: number | null = null;
+let latestServerSnapshotHash: string | null = null;
+let latestServerStatus: string | null = null;
+let latestServerDisabledReason: string | null = null;
+let latestServerUpdatedAt: number | null = null;
+let latestServerLastTouchedAt: number | null = null;
+let latestServerLastError: string | null = null;
+let latestServerConversationCount = 0;
+let latestServerStatusFetchedAt: number | null = null;
+let latestServerStatusError: string | null = null;
+let latestServerPendingMessageCount = 0;
+let latestServerActivityCount = 0;
 const snapshotStatusListeners = new Set<() => void>();
 
 function normalizeServerUrl(value: string): string {
@@ -92,10 +181,87 @@ async function postRemote(path: string, body: unknown): Promise<boolean> {
   }
 }
 
+async function getRemoteJson(path: string): Promise<any | null> {
+  const remote = getRemoteConfig();
+  if (!remote) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), KEEPALIVE_SYNC_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${remote.serverUrl}${path}`, {
+      headers: remote.token.trim() ? { Authorization: `Bearer ${remote.token.trim()}` } : undefined,
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    return response.json().catch(() => null);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function postRemoteJson(path: string, body: unknown): Promise<{ ok: boolean; data?: any; error?: string }> {
+  const remote = getRemoteConfig();
+  if (!remote) return { ok: false, error: '远程保活未配置' };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), KEEPALIVE_SYNC_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${remote.serverUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(remote.token.trim() ? { Authorization: `Bearer ${remote.token.trim()}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => null);
+    return {
+      ok: response.ok,
+      data,
+      error: response.ok ? undefined : data?.error || `HTTP ${response.status}`,
+    };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || '远程保活请求失败' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizePreviewText(value: string): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (normalized.length <= SNAPSHOT_PREVIEW_TAIL_CHARS) return normalized;
   return normalized.slice(-SNAPSHOT_PREVIEW_TAIL_CHARS);
+}
+
+function splitPushList(value?: string): string[] {
+  return String(value || '')
+    .split(/[\s,，;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildRemotePushConfig(config?: PromptCacheConfig): Record<string, unknown> | undefined {
+  const channel = config?.pushChannel || 'wxpusher';
+  const serverChanSendKey = config?.serverChanSendKey?.trim() || '';
+  const wxPusherAppToken = config?.wxPusherAppToken?.trim() || '';
+  const wxPusherUids = splitPushList(config?.wxPusherUid);
+  const wxPusherTopicIds = splitPushList(config?.wxPusherTopicIds)
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item > 0);
+  const push: Record<string, unknown> = {};
+  push.provider = channel;
+  if ((channel === 'serverchan' || channel === 'both') && serverChanSendKey) {
+    push.serverChanSendKey = serverChanSendKey;
+  }
+  if ((channel === 'wxpusher' || channel === 'both') && wxPusherAppToken && (wxPusherUids.length > 0 || wxPusherTopicIds.length > 0)) {
+    push.wxPusher = {
+      appToken: wxPusherAppToken,
+      uids: wxPusherUids,
+      topicIds: wxPusherTopicIds,
+    };
+  }
+  return Object.keys(push).length > 1 ? push : undefined;
 }
 
 function extractMessageText(content: ChatMessage['content']): string {
@@ -129,6 +295,103 @@ function buildSnapshotPreview(snapshot: PromptCacheRemoteSnapshot): SnapshotPrev
   };
 }
 
+function normalizeServerNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeServerConversation(raw: any): PromptCacheRemoteServerConversationStatus | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.conversationId !== 'string' || !raw.conversationId.trim()) {
+    return null;
+  }
+  const preview = raw.preview && typeof raw.preview === 'object' ? raw.preview : null;
+  return {
+    conversationId: raw.conversationId.trim(),
+    snapshotHash: typeof raw.snapshotHash === 'string' ? raw.snapshotHash : null,
+    status: typeof raw.status === 'string' ? raw.status : null,
+    disabledReason: typeof raw.disabledReason === 'string' ? raw.disabledReason : null,
+    lastTouchedAt: normalizeServerNumber(raw.lastTouchedAt),
+    nextKeepaliveAt: normalizeServerNumber(raw.nextKeepaliveAt),
+    lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
+    updatedAt: normalizeServerNumber(raw.updatedAt),
+    preview,
+    pendingMessageCount: Math.max(0, Number(raw.pendingMessageCount) || 0),
+    activityCount: Math.max(0, Number(raw.activityCount) || 0),
+  };
+}
+
+function pickServerConversation(
+  conversations: PromptCacheRemoteServerConversationStatus[],
+  preferredConversationId?: string | null
+): PromptCacheRemoteServerConversationStatus | null {
+  if (conversations.length === 0) return null;
+  const preferredId = preferredConversationId?.trim();
+  const sorted = [...conversations].sort((a, b) => {
+    const aPreferred = preferredId && a.conversationId === preferredId ? 1 : 0;
+    const bPreferred = preferredId && b.conversationId === preferredId ? 1 : 0;
+    if (aPreferred !== bPreferred) return bPreferred - aPreferred;
+
+    const aActive = a.status === 'active' ? 1 : 0;
+    const bActive = b.status === 'active' ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+
+    const aTime = a.updatedAt ?? a.lastTouchedAt ?? 0;
+    const bTime = b.updatedAt ?? b.lastTouchedAt ?? 0;
+    return bTime - aTime;
+  });
+  return sorted[0] ?? null;
+}
+
+function applyServerSnapshotStatus(
+  conversations: PromptCacheRemoteServerConversationStatus[],
+  preferredConversationId?: string | null
+): void {
+  latestServerConversationCount = conversations.length;
+  latestServerStatusFetchedAt = Date.now();
+  latestServerStatusError = null;
+
+  const selected = pickServerConversation(conversations, preferredConversationId);
+  if (!selected) {
+    latestServerSnapshotHash = null;
+    latestServerStatus = null;
+    latestServerDisabledReason = null;
+    latestServerUpdatedAt = null;
+    latestServerLastTouchedAt = null;
+    latestServerLastError = null;
+    latestServerNextKeepaliveAt = null;
+    latestServerPendingMessageCount = 0;
+    latestServerActivityCount = 0;
+    if (pendingSnapshots.length === 0 && latestSnapshotPreviewSource === 'server') {
+      latestSnapshotPreview = null;
+      latestSnapshotPreviewSource = null;
+      latestSnapshotSyncedAt = null;
+    }
+    return;
+  }
+
+  latestServerSnapshotHash = selected.snapshotHash;
+  latestServerStatus = selected.status;
+  latestServerDisabledReason = selected.disabledReason;
+  latestServerUpdatedAt = selected.updatedAt;
+  latestServerLastTouchedAt = selected.lastTouchedAt;
+  latestServerLastError = selected.lastError;
+  latestServerNextKeepaliveAt = selected.nextKeepaliveAt;
+  latestServerPendingMessageCount = selected.pendingMessageCount;
+  latestServerActivityCount = selected.activityCount;
+
+  if (pendingSnapshots.length === 0) {
+    latestSnapshotPreview = {
+      conversationId: selected.conversationId,
+      model: selected.preview?.model ?? null,
+      messageCount: Math.max(0, Number(selected.preview?.messageCount) || 0),
+      lastMessageRole: selected.preview?.lastMessageRole ?? null,
+      lastMessageTail: selected.preview?.lastMessageTail ?? null,
+    };
+    latestSnapshotPreviewSource = 'server';
+    latestSnapshotQueuedAt = null;
+    latestSnapshotSyncedAt = selected.updatedAt ?? selected.lastTouchedAt ?? latestServerStatusFetchedAt;
+  }
+}
+
 function buildSnapshotPayload(snapshot: PromptCacheRemoteSnapshot): unknown {
   const config = useSettingsStore.getState().promptCacheConfig;
   return {
@@ -140,6 +403,9 @@ function buildSnapshotPayload(snapshot: PromptCacheRemoteSnapshot): unknown {
       endMinutes: config?.quietEndMinutes ?? 7 * 60,
     },
     request: snapshot.request,
+    agentTools: snapshot.agentTools,
+    agentTick: { enabled: config?.remoteAgentTickEnabled !== false },
+    push: buildRemotePushConfig(config),
   };
 }
 
@@ -156,8 +422,18 @@ function notifySnapshotStatusListeners(): void {
 
 export function getPromptCacheRemoteSnapshotStatus(): PromptCacheRemoteSnapshotStatus {
   const hasPending = pendingSnapshots.length > 0;
+  const state = snapshotSyncInFlight
+    ? 'syncing'
+    : hasPending
+      ? 'pending'
+      : latestSnapshotSyncError
+        ? 'failed'
+        : latestSnapshotPreview
+          ? 'synced'
+          : 'empty';
   return {
-    state: hasPending ? 'pending' : latestSnapshotPreview ? 'synced' : 'empty',
+    state,
+    source: latestSnapshotPreviewSource,
     queueCount: pendingSnapshots.length,
     conversationId: latestSnapshotPreview?.conversationId ?? null,
     model: latestSnapshotPreview?.model ?? null,
@@ -167,6 +443,20 @@ export function getPromptCacheRemoteSnapshotStatus(): PromptCacheRemoteSnapshotS
     queuedAt: hasPending ? latestSnapshotQueuedAt : null,
     nextSyncAt: hasPending ? snapshotSyncDueAt : null,
     syncedAt: hasPending ? null : latestSnapshotSyncedAt,
+    lastSyncAttemptAt: latestSnapshotSyncAttemptAt,
+    lastSyncError: latestSnapshotSyncError,
+    serverNextKeepaliveAt: latestServerNextKeepaliveAt,
+    serverSnapshotHash: latestServerSnapshotHash,
+    serverStatus: latestServerStatus,
+    serverDisabledReason: latestServerDisabledReason,
+    serverUpdatedAt: latestServerUpdatedAt,
+    serverLastTouchedAt: latestServerLastTouchedAt,
+    serverLastError: latestServerLastError,
+    serverConversationCount: latestServerConversationCount,
+    serverStatusFetchedAt: latestServerStatusFetchedAt,
+    serverStatusError: latestServerStatusError,
+    serverPendingMessageCount: latestServerPendingMessageCount,
+    serverActivityCount: latestServerActivityCount,
   };
 }
 
@@ -178,31 +468,44 @@ export function subscribePromptCacheRemoteSnapshotStatus(listener: () => void): 
 }
 
 async function flushLatestPromptCacheRemoteSnapshot(): Promise<boolean> {
+  if (snapshotSyncInFlight) return false;
   clearSnapshotSyncTimer();
 
   const latestSnapshot = pendingSnapshots[pendingSnapshots.length - 1];
   if (!latestSnapshot) return false;
 
-  const ok = await postRemote('/v1/keepalive/snapshot', buildSnapshotPayload(latestSnapshot));
-  if (ok) {
+  snapshotSyncInFlight = true;
+  latestSnapshotSyncAttemptAt = Date.now();
+  latestSnapshotSyncError = null;
+  notifySnapshotStatusListeners();
+
+  const result = await postRemoteJson('/v1/keepalive/snapshot', buildSnapshotPayload(latestSnapshot));
+  snapshotSyncInFlight = false;
+  if (result.ok) {
     const flushedIndex = pendingSnapshots.indexOf(latestSnapshot);
     if (flushedIndex >= 0) {
       pendingSnapshots = pendingSnapshots.slice(flushedIndex + 1);
     }
+    latestServerNextKeepaliveAt = typeof result.data?.nextKeepaliveAt === 'number' ? result.data.nextKeepaliveAt : null;
+    latestServerStatus = typeof result.data?.status === 'string' ? result.data.status : latestServerStatus;
+    latestServerSnapshotHash = typeof result.data?.snapshotHash === 'string' ? result.data.snapshotHash : latestServerSnapshotHash;
     if (pendingSnapshots.length > 0) {
       latestSnapshotPreview = buildSnapshotPreview(pendingSnapshots[pendingSnapshots.length - 1]);
+      latestSnapshotPreviewSource = 'local';
       latestSnapshotSyncedAt = null;
       scheduleSnapshotSync();
     } else {
       latestSnapshotPreview = buildSnapshotPreview(latestSnapshot);
+      latestSnapshotPreviewSource = 'local';
       latestSnapshotQueuedAt = null;
       latestSnapshotSyncedAt = Date.now();
     }
   } else if (pendingSnapshots.length > 0) {
+    latestSnapshotSyncError = result.error || '远程快照同步失败';
     scheduleSnapshotSync();
   }
   notifySnapshotStatusListeners();
-  return ok;
+  return result.ok;
 }
 
 function scheduleSnapshotSync(): void {
@@ -219,23 +522,147 @@ function scheduleSnapshotSync(): void {
 export async function syncPromptCacheRemoteSnapshot(snapshot: PromptCacheRemoteSnapshot): Promise<boolean> {
   if (!getRemoteConfig()) return false;
 
+  const hadPendingWork = pendingSnapshots.length > 0 || snapshotSyncInFlight || !!snapshotSyncTimer;
+  const shouldSyncImmediately = !hadPendingWork && latestSnapshotSyncedAt === null;
   pendingSnapshots.push(snapshot);
   if (pendingSnapshots.length > SNAPSHOT_SYNC_QUEUE_LIMIT) {
     pendingSnapshots = pendingSnapshots.slice(-SNAPSHOT_SYNC_QUEUE_LIMIT);
   }
   latestSnapshotPreview = buildSnapshotPreview(snapshot);
+  latestSnapshotPreviewSource = 'local';
   latestSnapshotQueuedAt = Date.now();
   latestSnapshotSyncedAt = null;
-  scheduleSnapshotSync();
+  latestSnapshotSyncError = null;
+  if (shouldSyncImmediately) {
+    notifySnapshotStatusListeners();
+    flushLatestPromptCacheRemoteSnapshot().catch((error) => {
+      latestSnapshotSyncError = error?.message || '远程快照同步失败';
+      scheduleSnapshotSync();
+    });
+  } else {
+    scheduleSnapshotSync();
+  }
   return true;
+}
+
+export async function flushPromptCacheRemoteSnapshotNow(): Promise<boolean> {
+  return flushLatestPromptCacheRemoteSnapshot();
+}
+
+export async function refreshPromptCacheRemoteServerStatus(preferredConversationId?: string | null): Promise<boolean> {
+  const remote = getRemoteConfig();
+  if (!remote) {
+    latestServerStatusError = '远程保活未配置';
+    notifySnapshotStatusListeners();
+    return false;
+  }
+
+  try {
+    const data = await getRemoteJson('/v1/keepalive/status');
+    if (!data || !Array.isArray(data.conversations)) {
+      latestServerStatusFetchedAt = Date.now();
+      latestServerStatusError = '远程服务状态响应无效';
+      notifySnapshotStatusListeners();
+      return false;
+    }
+
+    const conversations = data.conversations
+      .map(normalizeServerConversation)
+      .filter((item: PromptCacheRemoteServerConversationStatus | null): item is PromptCacheRemoteServerConversationStatus => !!item);
+    applyServerSnapshotStatus(conversations, preferredConversationId);
+    notifySnapshotStatusListeners();
+    return true;
+  } catch (error: any) {
+    latestServerStatusFetchedAt = Date.now();
+    latestServerStatusError = error?.message || '远程服务状态读取失败';
+    notifySnapshotStatusListeners();
+    return false;
+  }
+}
+
+export interface PromptCacheRemotePendingConversation {
+  conversationId: string;
+  pendingMessageCount: number;
+  activityCount: number;
+}
+
+// 列出服务端所有有待消费消息/活动的会话，收件同步以此为准（不依赖 App 当前打开的会话）
+export async function fetchPromptCacheRemotePendingConversations(): Promise<PromptCacheRemotePendingConversation[]> {
+  const data = await getRemoteJson('/v1/keepalive/status');
+  if (!data || !Array.isArray(data.conversations)) return [];
+  return data.conversations
+    .filter((item: any) => item && typeof item.conversationId === 'string' && item.conversationId.trim())
+    .map((item: any) => ({
+      conversationId: item.conversationId.trim(),
+      pendingMessageCount: Math.max(0, Number(item.pendingMessageCount) || 0),
+      activityCount: Math.max(0, Number(item.activityCount) || 0),
+    }))
+    .filter((item: PromptCacheRemotePendingConversation) => item.pendingMessageCount > 0 || item.activityCount > 0);
+}
+
+export async function fetchPromptCacheRemoteInbox(conversationId: string): Promise<PromptCacheRemoteInboxMessage[]> {
+  const data = await getRemoteJson(`/v1/keepalive/inbox?conversationId=${encodeURIComponent(conversationId)}`);
+  return Array.isArray(data?.messages) ? data.messages : [];
+}
+
+export async function ackPromptCacheRemoteInbox(conversationId: string, ids: string[]): Promise<boolean> {
+  return postRemote('/v1/keepalive/inbox/ack', { conversationId, ids });
+}
+
+export async function fetchPromptCacheRemoteActivity(conversationId: string): Promise<PromptCacheRemoteActivityEntry[]> {
+  const data = await getRemoteJson(`/v1/keepalive/activity?conversationId=${encodeURIComponent(conversationId)}`);
+  return Array.isArray(data?.activity) ? data.activity : [];
+}
+
+export async function ackPromptCacheRemoteActivity(conversationId: string, ids: string[]): Promise<boolean> {
+  return postRemote('/v1/keepalive/activity/ack', { conversationId, ids });
+}
+
+export async function pushRemoteServerChanKey(serverChanSendKey: string): Promise<boolean> {
+  if (!serverChanSendKey.trim()) return false;
+  return postRemote('/v1/keepalive/push-token', {
+    provider: 'serverchan',
+    serverChanSendKey: serverChanSendKey.trim(),
+  });
+}
+
+export async function pushRemotePushConfig(config: PromptCacheConfig): Promise<boolean> {
+  const push = buildRemotePushConfig(config);
+  if (!push) return false;
+  return postRemote('/v1/keepalive/push-token', push);
+}
+
+export async function testRemoteServerChanPush(serverChanSendKey: string): Promise<{ ok: boolean; error?: string }> {
+  const result = await postRemoteJson('/v1/keepalive/push-test', {
+    provider: 'serverchan',
+    serverChanSendKey: serverChanSendKey.trim() || undefined,
+  });
+  return { ok: result.ok, error: result.error };
+}
+
+export async function testRemoteWxPusherPush(config: PromptCacheConfig): Promise<{ ok: boolean; error?: string }> {
+  const push = buildRemotePushConfig({
+    ...config,
+    pushChannel: 'wxpusher',
+    serverChanSendKey: '',
+  });
+  const result = await postRemoteJson('/v1/keepalive/push-test', push || {});
+  return { ok: result.ok, error: result.error };
 }
 
 export function startPromptCacheRemoteSnapshotFlushListener(): () => void {
   snapshotFlushAppState = AppState.currentState;
+  refreshPromptCacheRemoteServerStatus(latestSnapshotPreview?.conversationId).catch((error) => {
+    console.warn('[PromptCacheKeepalive] 初始化刷新远程快照状态失败:', error);
+  });
   const sub = AppState.addEventListener('change', (nextState) => {
-    const wasActive = snapshotFlushAppState === 'active';
     snapshotFlushAppState = nextState;
-    if (!wasActive || nextState === 'active') return;
+    if (nextState === 'active') {
+      refreshPromptCacheRemoteServerStatus(latestSnapshotPreview?.conversationId).catch((error) => {
+        console.warn('[PromptCacheKeepalive] 前台刷新远程快照状态失败:', error);
+      });
+      return;
+    }
 
     flushLatestPromptCacheRemoteSnapshot().catch((error) => {
       console.warn('[PromptCacheKeepalive] 退后台同步远程快照失败:', error);
@@ -252,11 +679,24 @@ export async function disablePromptCacheRemoteKeepalive(conversationId: string):
   }
   if (pendingSnapshots.length > 0 && latestSnapshotPreview?.conversationId === conversationId) {
     latestSnapshotPreview = buildSnapshotPreview(pendingSnapshots[pendingSnapshots.length - 1]);
+    latestSnapshotPreviewSource = 'local';
     latestSnapshotSyncedAt = null;
   } else if (pendingSnapshots.length === 0 && latestSnapshotPreview?.conversationId === conversationId) {
     latestSnapshotPreview = null;
+    latestSnapshotPreviewSource = null;
     latestSnapshotQueuedAt = null;
     latestSnapshotSyncedAt = null;
+    latestSnapshotSyncAttemptAt = null;
+    latestSnapshotSyncError = null;
+    latestServerNextKeepaliveAt = null;
+    latestServerSnapshotHash = null;
+    latestServerStatus = null;
+    latestServerDisabledReason = null;
+    latestServerUpdatedAt = null;
+    latestServerLastTouchedAt = null;
+    latestServerLastError = null;
+    latestServerPendingMessageCount = 0;
+    latestServerActivityCount = 0;
   }
   notifySnapshotStatusListeners();
 

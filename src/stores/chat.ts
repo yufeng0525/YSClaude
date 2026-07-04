@@ -6,7 +6,16 @@ import { Alert } from 'react-native';
 import { ChatMessage, streamChat, streamChatCompletion } from '../services/api';
 import { deleteGeneratedImageFile, generateOpenAIImage } from '../services/imageGeneration';
 import { cancelPromptCacheReminder, notifyReplyReady, schedulePromptCacheReminder } from '../services/notifications';
-import { disablePromptCacheRemoteKeepalive, syncPromptCacheRemoteSnapshot } from '../services/promptCacheKeepalive';
+import {
+  ackPromptCacheRemoteActivity,
+  ackPromptCacheRemoteInbox,
+  disablePromptCacheRemoteKeepalive,
+  fetchPromptCacheRemoteActivity,
+  fetchPromptCacheRemoteInbox,
+  fetchPromptCacheRemotePendingConversations,
+  syncPromptCacheRemoteSnapshot,
+  type PromptCacheRemoteActivityEntry,
+} from '../services/promptCacheKeepalive';
 import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheTtl, type RunCommandConfig, type StablePromptRole, type ThinkingCompatibility, type ThinkingEffort } from './settings';
 import { getToolDefinitions, executeTool, getToolLabel, ToolExecutionResult } from '../services/tools';
 import { observeActiveWebView } from '../services/webviewController';
@@ -459,6 +468,7 @@ interface ChatState {
   addDailyPaperToLatestConversation: (paper: DailyPaper) => Promise<string>;
   addSystemMessage: (content: string) => Promise<Message | null>;
   enableWebCruise: () => Promise<void>;
+  syncPromptCacheRemoteInbox: () => Promise<void>;
   keepPromptCacheAlive: () => Promise<void>;
   triggerResponse: () => Promise<void>;
   markMessagesForAutoHideAfterResponse: (ids: string[]) => void;
@@ -1003,7 +1013,11 @@ function handlePromptCacheKeepaliveAfterSuccess(
 
   if (config.keepaliveMode === 'remote') {
     if (shouldKeepAlive && request) {
-      syncPromptCacheRemoteSnapshot({ conversationId, request }).catch((error) => {
+      syncPromptCacheRemoteSnapshot({
+        conversationId,
+        request,
+        agentTools: buildPromptCacheRemoteAgentTools(),
+      }).catch((error) => {
         console.warn('[PromptCache] 远程保活快照同步失败:', error);
       });
     } else {
@@ -1019,6 +1033,159 @@ function handlePromptCacheKeepaliveAfterSuccess(
     }).catch(() => undefined);
   } else {
     cancelPromptCacheReminder(conversationId).catch(() => undefined);
+  }
+}
+
+function buildPromptCacheRemoteAgentTools(): Parameters<typeof syncPromptCacheRemoteSnapshot>[0]['agentTools'] {
+  const settings = useSettingsStore.getState();
+  const memoryVaultEnabled = settings.memoryVaultConfig.enabled && !!settings.memoryVaultConfig.baseUrl.trim();
+  const webSearchEnabled = settings.webSearchConfig.enabled && !!settings.webSearchConfig.tavilyApiKey.trim();
+  if (!memoryVaultEnabled && !webSearchEnabled) return undefined;
+
+  return {
+    ...(memoryVaultEnabled
+      ? {
+          memoryVault: {
+            enabled: true,
+            baseUrl: settings.memoryVaultConfig.baseUrl.trim().replace(/\/$/, ''),
+            topK: settings.memoryVaultConfig.topK || 5,
+            tokenBudget: settings.memoryVaultConfig.tokenBudget || 2000,
+            maxToolCalls: settings.memoryVaultConfig.maxToolCalls || 3,
+          },
+        }
+      : {}),
+    ...(webSearchEnabled
+      ? {
+          webSearch: {
+            enabled: true,
+            tavilyApiKey: settings.webSearchConfig.tavilyApiKey.trim(),
+            maxResults: settings.webSearchConfig.maxResults || 5,
+          },
+        }
+      : {}),
+  };
+}
+
+// 把服务器的工具调用记录映射为展示用 ToolInvocation（不进 API 请求）
+function mapRemoteToolTranscript(
+  toolTranscript?: PromptCacheRemoteActivityEntry['toolTranscript']
+): ToolInvocation[] | undefined {
+  if (!toolTranscript || toolTranscript.length === 0) return undefined;
+  return toolTranscript.map((tool) => ({
+    name: tool.toolName,
+    args: JSON.stringify(tool.args ?? {}),
+    result: tool.resultPreview || '完成',
+    status: 'done' as const,
+  }));
+}
+
+let remoteInboxSyncInFlight = false;
+
+// 单个会话的收件同步：直接写本地 SQLite（不依赖该会话是否打开），
+// 若该会话恰好是当前打开的会话，再把新消息追加进内存 state。
+// 插入的消息必须与服务器追加进 request.messages 的内容逐字一致
+// （id 以 remote- 开头的消息在 API 管线中原样透传），保证缓存前缀不分叉。
+async function syncRemoteInboxForConversation(
+  conversationId: string,
+  get: () => { conversationId: string | null; messages: Message[] },
+  set: (updater: (state: { messages: Message[] }) => { messages: Message[]; error: null }) => void
+): Promise<void> {
+  const [remoteMessages, remoteActivity] = await Promise.all([
+    fetchPromptCacheRemoteInbox(conversationId),
+    fetchPromptCacheRemoteActivity(conversationId),
+  ]);
+  if (remoteMessages.length === 0 && remoteActivity.length === 0) return;
+
+  // 以数据库为准做去重：不管会话是否打开、打开的是第几页，都不会漏判/重插
+  const dbMessages = await getMessagesByConversation(conversationId);
+  const existingIds = new Set(dbMessages.map((message) => message.id));
+
+  const nextMessages: Message[] = [];
+  for (const item of remoteMessages) {
+    if (!item.id || !item.content) continue;
+    const messageId = `remote-inbox-${item.id}`;
+    // 兼容旧数据：历史版本直接用服务器 id 入库
+    if (existingIds.has(messageId) || existingIds.has(item.id)) continue;
+    existingIds.add(messageId);
+    nextMessages.push({
+      id: messageId,
+      role: 'assistant',
+      content: item.content,
+      toolInvocations: mapRemoteToolTranscript(item.toolTranscript),
+      createdAt: item.createdAt || Date.now(),
+    });
+  }
+
+  for (const item of remoteActivity) {
+    if (!item.id) continue;
+    // 兼容旧数据：历史版本以 remote-activity-{id} 存 system 消息
+    const legacyId = `remote-activity-${item.id}`;
+    if (existingIds.has(legacyId)) continue;
+    const appended = item.appendedMessages || [];
+    if (appended.length === 0) {
+      // user_message 型条目（内容经 inbox 送达）或旧服务器：无需插入，仅 ack
+      continue;
+    }
+    appended.forEach((appendedMessage, index) => {
+      if (typeof appendedMessage?.content !== 'string' || !appendedMessage.content) return;
+      const messageId = index === 0 ? legacyId : `${legacyId}-${index}`;
+      if (existingIds.has(messageId)) return;
+      existingIds.add(messageId);
+      nextMessages.push({
+        id: messageId,
+        role: 'assistant',
+        content: appendedMessage.content,
+        toolInvocations: index === 0 ? mapRemoteToolTranscript(item.toolTranscript) : undefined,
+        createdAt: item.createdAt || Date.now(),
+      });
+    });
+  }
+
+  if (nextMessages.length > 0) {
+    nextMessages.sort((a, b) => a.createdAt - b.createdAt);
+    // 先落库，成功后才 ack，保证消息不丢
+    for (const message of nextMessages) {
+      await insertMessage(conversationId, message);
+    }
+    await updateConversation(conversationId, { updatedAt: Date.now() });
+
+    // 该会话正打开时，同步追加到内存（过滤掉可能已被 UI 加载的 id）
+    if (get().conversationId === conversationId) {
+      set((state) => {
+        const loadedIds = new Set(state.messages.map((message) => message.id));
+        const toAppend = nextMessages.filter((message) => !loadedIds.has(message.id));
+        return {
+          messages: toAppend.length > 0 ? [...state.messages, ...toAppend] : state.messages,
+          error: null,
+        };
+      });
+    }
+  }
+
+  await Promise.all([
+    remoteMessages.length > 0 ? ackPromptCacheRemoteInbox(conversationId, remoteMessages.map((item) => item.id)) : Promise.resolve(false),
+    remoteActivity.length > 0 ? ackPromptCacheRemoteActivity(conversationId, remoteActivity.map((item) => item.id)) : Promise.resolve(false),
+  ]);
+}
+
+// 远程收件箱/活动记录合并：以服务端 status 列表为准，逐会话拉取并落库。
+// 不再依赖 App 当前打开的会话——冷启动没有打开任何会话时也能把 AI 主动消息写入本地。
+async function syncPromptCacheRemoteInboxImpl(
+  get: () => { conversationId: string | null; messages: Message[] },
+  set: (updater: (state: { messages: Message[] }) => { messages: Message[]; error: null }) => void
+): Promise<void> {
+  const pendingConversations = await fetchPromptCacheRemotePendingConversations();
+  if (pendingConversations.length === 0) return;
+
+  // 只同步本地存在的会话，避免把其他设备的会话消息写成孤儿记录
+  const localConversationIds = new Set((await getAllConversations()).map((conv) => conv.id));
+  for (const pending of pendingConversations) {
+    if (!localConversationIds.has(pending.conversationId)) continue;
+    try {
+      await syncRemoteInboxForConversation(pending.conversationId, get, set);
+    } catch (error) {
+      console.warn('[Chat] 远程收件同步失败:', pending.conversationId, error);
+    }
   }
 }
 
@@ -1192,6 +1359,11 @@ async function buildPromptCacheKeepaliveRequest(
   }
 
   const apiMessages = await Promise.all(filtered.map(async (m, index) => {
+    // 远程保活期间由服务器追加的消息：原样透传（不加时间标记/不做任何转换），
+    // 保证客户端重建的消息序列与服务器缓存的前缀逐字节一致。
+    if (m.id.startsWith('remote-')) {
+      return { role: m.role, content: m.content };
+    }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
     let msgContent = formatDailyPaperCardForAi(m.content);
@@ -1534,6 +1706,11 @@ async function streamAssistantResponse(
   // 相邻消息间隔超过阈值时，在该消息 content 前插入一行独立时间标记。
   // 第一条消息始终带标记，作为对话起点的时间锚点。
   const apiMessagesPromises = filtered.map(async (m, index) => {
+    // 远程保活期间由服务器追加的消息：原样透传（不加时间标记/不做任何转换），
+    // 保证客户端重建的消息序列与服务器缓存的前缀逐字节一致。
+    if (m.id.startsWith('remote-')) {
+      return { role: m.role, content: m.content };
+    }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
     let msgContent = formatDailyPaperCardForAi(m.content);
@@ -2157,6 +2334,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await updateConversation(conversationId, { updatedAt: Date.now() });
   },
 
+  syncPromptCacheRemoteInbox: async () => {
+    // 防止 mount 同步与前台同步并发交错导致双插
+    if (remoteInboxSyncInFlight) return;
+    remoteInboxSyncInFlight = true;
+    try {
+      await syncPromptCacheRemoteInboxImpl(get, set);
+    } finally {
+      remoteInboxSyncInFlight = false;
+    }
+  },
+
   keepPromptCacheAlive: async () => {
     const { conversationId, hiddenRanges, isPromptCacheKeepaliveRunning, isStreaming } = get();
     if (!conversationId) {
@@ -2334,6 +2522,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       openToBottomRequestId: get().openToBottomRequestId + 1,
       error: null,
     });
+    // 打开会话时顺带拉一次远程收件箱，AI 主动消息即时可见
+    get().syncPromptCacheRemoteInbox().catch(() => undefined);
   },
 
   loadConversationAroundMessage: async (conversationId: string, messageId: string) => {

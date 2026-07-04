@@ -307,6 +307,12 @@ export interface PromptCacheConfig {
   quietEndMinutes: number;
   remoteServerUrl: string;
   remoteAuthToken: string;
+  remoteAgentTickEnabled: boolean;
+  pushChannel: 'serverchan' | 'wxpusher' | 'both';
+  serverChanSendKey: string;
+  wxPusherAppToken: string;
+  wxPusherUid: string;
+  wxPusherTopicIds: string;
 }
 
 export interface ImageGenerationFaceReference {
@@ -490,6 +496,12 @@ function normalizePromptCacheConfig(config?: Partial<PromptCacheConfig>): Prompt
     quietEndMinutes: clampMinutes(config?.quietEndMinutes, 7 * 60),
     remoteServerUrl: config?.remoteServerUrl || '',
     remoteAuthToken: config?.remoteAuthToken || '',
+    remoteAgentTickEnabled: config?.remoteAgentTickEnabled ?? true,
+    pushChannel: config?.pushChannel === 'serverchan' || config?.pushChannel === 'both' ? config.pushChannel : 'wxpusher',
+    serverChanSendKey: config?.serverChanSendKey || '',
+    wxPusherAppToken: config?.wxPusherAppToken || '',
+    wxPusherUid: config?.wxPusherUid || '',
+    wxPusherTopicIds: config?.wxPusherTopicIds || '',
   };
 }
 
@@ -847,6 +859,12 @@ export const useSettingsStore = create<SettingsState>()(
         quietEndMinutes: 7 * 60,
         remoteServerUrl: '',
         remoteAuthToken: '',
+        remoteAgentTickEnabled: true,
+        pushChannel: 'wxpusher',
+        serverChanSendKey: '',
+        wxPusherAppToken: '',
+        wxPusherUid: '',
+        wxPusherTopicIds: '',
       },
       imageGenerationConfig: {
         enabled: false,

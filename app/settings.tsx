@@ -11,7 +11,7 @@ import { copyAsync } from 'expo-file-system/legacy';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
 import { fonts } from '../src/theme/fonts';
-import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle, type AssistantBubbleAppearanceStyle, type ShizukuFileRoot, type StickerOwner, type CustomSticker, type QQBotConfig, type ImageGenerationFaceReference, type DailyPaperSourceConfig, type PromptCacheCompatibility, type PromptCacheTtl, type StablePromptRole, type ThinkingCompatibility, type ThinkingEffort } from '../src/stores/settings';
+import { useSettingsStore, NamedAPIConfig, TTSConfig, MemoryVaultConfig, WebSearchConfig, type ChatInputIconKey, type ChatInputAppearanceStyle, type AssistantBubbleAppearanceStyle, type ShizukuFileRoot, type StickerOwner, type CustomSticker, type QQBotConfig, type ImageGenerationFaceReference, type DailyPaperSourceConfig, type PromptCacheCompatibility, type PromptCacheConfig, type PromptCacheTtl, type StablePromptRole, type ThinkingCompatibility, type ThinkingEffort } from '../src/stores/settings';
 import { TopBarIcon, TOP_BAR_ICON_ITEMS } from '../src/components/TopBarIcon';
 import type { TopBarIconKey } from '../src/utils/topBarIconTypes';
 import { useChatStore } from '../src/stores/chat';
@@ -49,8 +49,13 @@ import { cancelAllPromptCacheReminders, rescheduleAllPromptCacheReminders } from
 import {
   checkPromptCacheRemoteServer,
   disablePromptCacheRemoteKeepalive,
+  flushPromptCacheRemoteSnapshotNow,
   getPromptCacheRemoteSnapshotStatus,
+  refreshPromptCacheRemoteServerStatus,
   subscribePromptCacheRemoteSnapshotStatus,
+  pushRemotePushConfig,
+  testRemoteServerChanPush,
+  testRemoteWxPusherPush,
 } from '../src/services/promptCacheKeepalive';
 import { useKeyboardHeight } from '../src/hooks/useKeyboardHeight';
 import { buildStickerDefinitions, normalizeStickerName } from '../src/utils/stickers';
@@ -147,6 +152,11 @@ const PROMPT_CACHE_KEEPALIVE_MODE_OPTIONS = [
   { value: 'local', label: '本地提醒' },
   { value: 'remote', label: '远程保活' },
 ] as const;
+const PROMPT_CACHE_PUSH_CHANNEL_OPTIONS: Array<{ value: PromptCacheConfig['pushChannel']; label: string }> = [
+  { value: 'wxpusher', label: 'WxPusher' },
+  { value: 'serverchan', label: 'ServerChan' },
+  { value: 'both', label: 'Both' },
+];
 const PROMPT_CACHE_COMPATIBILITY_OPTIONS: Array<{ value: PromptCacheCompatibility; label: string }> = [
   { value: 'standard', label: '标准' },
   { value: 'openrouter', label: 'OpenRouter' },
@@ -3119,7 +3129,15 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const [quietEndText, setQuietEndText] = useState(formatClockMinutes(promptCacheConfig?.quietEndMinutes ?? 7 * 60));
   const [remoteServerUrlText, setRemoteServerUrlText] = useState(promptCacheConfig?.remoteServerUrl || '');
   const [remoteAuthTokenText, setRemoteAuthTokenText] = useState(promptCacheConfig?.remoteAuthToken || '');
+  const [serverChanSendKeyText, setServerChanSendKeyText] = useState(promptCacheConfig?.serverChanSendKey || '');
+  const [wxPusherAppTokenText, setWxPusherAppTokenText] = useState(promptCacheConfig?.wxPusherAppToken || '');
+  const [wxPusherUidText, setWxPusherUidText] = useState(promptCacheConfig?.wxPusherUid || '');
+  const [wxPusherTopicIdsText, setWxPusherTopicIdsText] = useState(promptCacheConfig?.wxPusherTopicIds || '');
+  const [testingServerChanPush, setTestingServerChanPush] = useState(false);
+  const [testingWxPusherPush, setTestingWxPusherPush] = useState(false);
   const [checkingRemoteKeepalive, setCheckingRemoteKeepalive] = useState(false);
+  const [flushingRemoteSnapshot, setFlushingRemoteSnapshot] = useState(false);
+  const [refreshingRemoteServerStatus, setRefreshingRemoteServerStatus] = useState(false);
   const [remoteSnapshotStatus, setRemoteSnapshotStatus] = useState(() => getPromptCacheRemoteSnapshotStatus());
   const [hiddenDiagnosticMessages, setHiddenDiagnosticMessages] = useState<ChatDiagnosticsMessage[]>([]);
 
@@ -3135,13 +3153,29 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   useEffect(() => {
     setRemoteServerUrlText(promptCacheConfig?.remoteServerUrl || '');
     setRemoteAuthTokenText(promptCacheConfig?.remoteAuthToken || '');
-  }, [promptCacheConfig?.remoteAuthToken, promptCacheConfig?.remoteServerUrl]);
+    setServerChanSendKeyText(promptCacheConfig?.serverChanSendKey || '');
+    setWxPusherAppTokenText(promptCacheConfig?.wxPusherAppToken || '');
+    setWxPusherUidText(promptCacheConfig?.wxPusherUid || '');
+    setWxPusherTopicIdsText(promptCacheConfig?.wxPusherTopicIds || '');
+  }, [
+    promptCacheConfig?.remoteAuthToken,
+    promptCacheConfig?.remoteServerUrl,
+    promptCacheConfig?.serverChanSendKey,
+    promptCacheConfig?.wxPusherAppToken,
+    promptCacheConfig?.wxPusherTopicIds,
+    promptCacheConfig?.wxPusherUid,
+  ]);
 
   useEffect(() => {
     return subscribePromptCacheRemoteSnapshotStatus(() => {
       setRemoteSnapshotStatus(getPromptCacheRemoteSnapshotStatus());
     });
   }, []);
+
+  useEffect(() => {
+    if ((promptCacheConfig?.keepaliveMode || 'local') !== 'remote') return;
+    refreshPromptCacheRemoteServerStatus(conversationId).catch(() => undefined);
+  }, [conversationId, promptCacheConfig?.keepaliveMode, promptCacheConfig?.remoteAuthToken, promptCacheConfig?.remoteServerUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3269,7 +3303,10 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   }
 
   function formatRemoteSnapshotState() {
+    if (remoteSnapshotStatus.state === 'syncing') return '同步中';
     if (remoteSnapshotStatus.state === 'pending') return '待同步';
+    if (remoteSnapshotStatus.state === 'failed') return '同步失败';
+    if (remoteSnapshotStatus.state === 'synced' && remoteSnapshotStatus.source === 'server') return '服务端快照';
     if (remoteSnapshotStatus.state === 'synced') return '已同步';
     return '暂无快照';
   }
@@ -3281,10 +3318,66 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     if (remoteSnapshotStatus.syncedAt) {
       return `最近同步 ${formatFullTime(remoteSnapshotStatus.syncedAt)}`;
     }
+    if (remoteSnapshotStatus.lastSyncAttemptAt) {
+      return `最近尝试 ${formatFullTime(remoteSnapshotStatus.lastSyncAttemptAt)}`;
+    }
     if (remoteSnapshotStatus.queuedAt) {
       return `入队时间 ${formatFullTime(remoteSnapshotStatus.queuedAt)}`;
     }
+    if (remoteSnapshotStatus.serverUpdatedAt) {
+      return `服务端更新 ${formatFullTime(remoteSnapshotStatus.serverUpdatedAt)}`;
+    }
+    if (remoteSnapshotStatus.serverStatusFetchedAt) {
+      return `服务端状态 ${formatFullTime(remoteSnapshotStatus.serverStatusFetchedAt)}`;
+    }
     return '等待 1h cache 命中后的成功请求';
+  }
+
+  function formatRemoteServerStatus() {
+    if (!remoteSnapshotStatus.serverStatus) return null;
+    if (remoteSnapshotStatus.serverStatus === 'active') return '服务器保活中';
+    if (remoteSnapshotStatus.serverStatus === 'disabled') {
+      return remoteSnapshotStatus.serverDisabledReason
+        ? `服务器已停用：${remoteSnapshotStatus.serverDisabledReason}`
+        : '服务器已停用';
+    }
+    return `服务器状态：${remoteSnapshotStatus.serverStatus}`;
+  }
+
+  function formatSnapshotHash(hash: string | null) {
+    return hash ? hash.slice(0, 10) : null;
+  }
+
+  async function handleRefreshRemoteServerStatus() {
+    if (refreshingRemoteServerStatus) return;
+    setPromptCacheConfig({
+      remoteServerUrl: remoteServerUrlText.trim(),
+      remoteAuthToken: remoteAuthTokenText.trim(),
+    });
+    setRefreshingRemoteServerStatus(true);
+    try {
+      const ok = await refreshPromptCacheRemoteServerStatus(conversationId);
+      showToast(ok ? '已刷新服务器快照状态' : '服务器状态读取失败');
+    } catch (error: any) {
+      showToast(error?.message || '服务器状态读取失败');
+    } finally {
+      setRemoteSnapshotStatus(getPromptCacheRemoteSnapshotStatus());
+      setRefreshingRemoteServerStatus(false);
+    }
+  }
+
+  async function handleFlushRemoteSnapshotNow() {
+    if (flushingRemoteSnapshot || remoteSnapshotStatus.queueCount <= 0) return;
+    setFlushingRemoteSnapshot(true);
+    try {
+      const ok = await flushPromptCacheRemoteSnapshotNow();
+      showToast(ok ? '快照已同步到远程服务' : '快照同步失败');
+    } catch (error: any) {
+      showToast(error?.message || '快照同步失败');
+    } finally {
+      setRemoteSnapshotStatus(getPromptCacheRemoteSnapshotStatus());
+      setFlushingRemoteSnapshot(false);
+    }
   }
 
   function snippet(text: string) {
@@ -3351,8 +3444,92 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     setPromptCacheConfig({
       remoteServerUrl: remoteServerUrlText.trim(),
       remoteAuthToken: remoteAuthTokenText.trim(),
+      pushChannel: promptCacheConfig?.pushChannel || 'wxpusher',
+      serverChanSendKey: serverChanSendKeyText.trim(),
+      wxPusherAppToken: wxPusherAppTokenText.trim(),
+      wxPusherUid: wxPusherUidText.trim(),
+      wxPusherTopicIds: wxPusherTopicIdsText.trim(),
     });
     showToast('远程保活配置已保存');
+  }
+
+  function currentPushConfig(): PromptCacheConfig {
+    return {
+      ...promptCacheConfig,
+      serverChanSendKey: serverChanSendKeyText.trim(),
+      wxPusherAppToken: wxPusherAppTokenText.trim(),
+      wxPusherUid: wxPusherUidText.trim(),
+      wxPusherTopicIds: wxPusherTopicIdsText.trim(),
+    };
+  }
+
+  function handleSaveServerChanSendKey() {
+    const sendKey = serverChanSendKeyText.trim();
+    setPromptCacheConfig({ serverChanSendKey: sendKey });
+    if (sendKey) {
+      // 立即同步到服务端已有会话，无需等下一次快照上传
+      pushRemotePushConfig(currentPushConfig()).catch(() => undefined);
+    }
+    showToast(sendKey ? 'Server酱 SendKey 已保存' : 'Server酱推送已关闭');
+  }
+
+  async function handleTestServerChanPush() {
+    if (testingServerChanPush) return;
+    const sendKey = serverChanSendKeyText.trim();
+    if (!sendKey) {
+      showToast('请先填写 Server酱 SendKey');
+      return;
+    }
+    setPromptCacheConfig({ serverChanSendKey: sendKey });
+    setTestingServerChanPush(true);
+    try {
+      const result = await testRemoteServerChanPush(sendKey);
+      showToast(result.ok ? '测试推送已发送，请查看微信/Server酱通道' : (result.error || '测试推送失败'));
+    } catch (error: any) {
+      showToast(error?.message || '测试推送失败');
+    } finally {
+      setTestingServerChanPush(false);
+    }
+  }
+
+  function handleSaveWxPusherConfig() {
+    const appToken = wxPusherAppTokenText.trim();
+    const uid = wxPusherUidText.trim();
+    const topicIds = wxPusherTopicIdsText.trim();
+    setPromptCacheConfig({
+      wxPusherAppToken: appToken,
+      wxPusherUid: uid,
+      wxPusherTopicIds: topicIds,
+    });
+    if (appToken && (uid || topicIds)) {
+      pushRemotePushConfig(currentPushConfig()).catch(() => undefined);
+    }
+    showToast(appToken && (uid || topicIds) ? 'WxPusher 推送配置已保存' : 'WxPusher 推送已关闭');
+  }
+
+  async function handleTestWxPusherPush() {
+    if (testingWxPusherPush) return;
+    const appToken = wxPusherAppTokenText.trim();
+    const uid = wxPusherUidText.trim();
+    const topicIds = wxPusherTopicIdsText.trim();
+    if (!appToken || (!uid && !topicIds)) {
+      showToast('请先填写 WxPusher AppToken，并填写 UID 或 Topic ID');
+      return;
+    }
+    setPromptCacheConfig({
+      wxPusherAppToken: appToken,
+      wxPusherUid: uid,
+      wxPusherTopicIds: topicIds,
+    });
+    setTestingWxPusherPush(true);
+    try {
+      const result = await testRemoteWxPusherPush(currentPushConfig());
+      showToast(result.ok ? 'WxPusher 测试推送已发送' : (result.error || 'WxPusher 测试推送失败'));
+    } catch (error: any) {
+      showToast(error?.message || 'WxPusher 测试推送失败');
+    } finally {
+      setTestingWxPusherPush(false);
+    }
   }
 
   async function handleCheckRemoteKeepaliveServer() {
@@ -3364,10 +3541,14 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     setCheckingRemoteKeepalive(true);
     try {
       const ok = await checkPromptCacheRemoteServer();
+      if (ok) {
+        await refreshPromptCacheRemoteServerStatus(conversationId);
+      }
       showToast(ok ? '远程保活服务连接正常' : '远程保活服务无响应');
     } catch (error: any) {
       showToast(error?.message || '远程保活服务连接失败');
     } finally {
+      setRemoteSnapshotStatus(getPromptCacheRemoteSnapshotStatus());
       setCheckingRemoteKeepalive(false);
     }
   }
@@ -3851,24 +4032,134 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
               <Text style={styles.importButtonText}>测试远程服务</Text>
             )}
           </Pressable>
+          <Text style={styles.label}>推送渠道</Text>
+          <View style={styles.segmentedRow}>
+            {PROMPT_CACHE_PUSH_CHANNEL_OPTIONS.map((item) => (
+              <Pressable
+                key={item.value}
+                style={[styles.segmentedButton, (promptCacheConfig?.pushChannel || 'wxpusher') === item.value && styles.segmentedButtonActive]}
+                onPress={() => {
+                  setPromptCacheConfig({ pushChannel: item.value });
+                  pushRemotePushConfig({
+                    ...currentPushConfig(),
+                    pushChannel: item.value,
+                  }).catch(() => undefined);
+                }}
+              >
+                <Text style={[styles.segmentedText, (promptCacheConfig?.pushChannel || 'wxpusher') === item.value && styles.segmentedTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>Server酱 SendKey</Text>
+          <Text style={styles.hint}>AI 主动留言时通过 Server酱推送到微信。在 sct.ftqq.com 获取 SendKey；留空则不推送。</Text>
+          <TextInput
+            style={styles.input}
+            value={serverChanSendKeyText}
+            onChangeText={setServerChanSendKeyText}
+            onBlur={handleSaveServerChanSendKey}
+            placeholder="SCTxxxxxxxxxxxx"
+            placeholderTextColor={colors.textTertiary}
+            secureTextEntry
+            autoCapitalize="none"
+          />
+          <Pressable
+            style={[styles.importButton, testingServerChanPush && styles.importButtonDisabled]}
+            onPress={handleTestServerChanPush}
+            disabled={testingServerChanPush}
+          >
+            {testingServerChanPush ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.importButtonText}>测试 Server酱推送</Text>
+            )}
+          </Pressable>
+          <Text style={styles.label}>WxPusher AppToken</Text>
+          <Text style={styles.hint}>AI 主动留言时也可通过 WxPusher 推送到微信。UID 和 Topic ID 二选一填写即可，多个值可用逗号或空格分隔。</Text>
+          <TextInput
+            style={styles.input}
+            value={wxPusherAppTokenText}
+            onChangeText={setWxPusherAppTokenText}
+            onBlur={handleSaveWxPusherConfig}
+            placeholder="AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            placeholderTextColor={colors.textTertiary}
+            secureTextEntry
+            autoCapitalize="none"
+          />
+          <Text style={styles.label}>WxPusher UID</Text>
+          <TextInput
+            style={styles.input}
+            value={wxPusherUidText}
+            onChangeText={setWxPusherUidText}
+            onBlur={handleSaveWxPusherConfig}
+            placeholder="UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+          <Text style={styles.label}>WxPusher Topic IDs</Text>
+          <TextInput
+            style={styles.input}
+            value={wxPusherTopicIdsText}
+            onChangeText={setWxPusherTopicIdsText}
+            onBlur={handleSaveWxPusherConfig}
+            placeholder="123,456"
+            placeholderTextColor={colors.textTertiary}
+            keyboardType="numbers-and-punctuation"
+            autoCapitalize="none"
+          />
+          <Pressable
+            style={[styles.importButton, testingWxPusherPush && styles.importButtonDisabled]}
+            onPress={handleTestWxPusherPush}
+            disabled={testingWxPusherPush}
+          >
+            {testingWxPusherPush ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.importButtonText}>测试 WxPusher 推送</Text>
+            )}
+          </Pressable>
+          <View style={styles.switchRow}>
+            <View style={styles.switchText}>
+              <Text style={styles.label}>远程自主活动</Text>
+              <Text style={styles.hint}>开启后服务端保活时会告知 AI 已过去的时间，由它自主决定是否留言或记录活动；关闭则仅做缓存续期。修改将在下一次快照同步后生效。</Text>
+            </View>
+            <Switch
+              value={promptCacheConfig?.remoteAgentTickEnabled !== false}
+              onValueChange={(value) => {
+                setPromptCacheConfig({ remoteAgentTickEnabled: value });
+                showToast(value ? '远程自主活动已开启' : '远程自主活动已关闭');
+              }}
+              trackColor={{ true: colors.primary }}
+            />
+          </View>
           <View style={styles.remoteSnapshotStatus}>
             <View style={styles.remoteSnapshotHeader}>
               <Text style={styles.previewHint}>当前快照</Text>
               <Text
                 style={[
                   styles.remoteSnapshotState,
+                  remoteSnapshotStatus.state === 'syncing' && styles.remoteSnapshotStatePending,
                   remoteSnapshotStatus.state === 'pending' && styles.remoteSnapshotStatePending,
                   remoteSnapshotStatus.state === 'synced' && styles.remoteSnapshotStateSynced,
+                  remoteSnapshotStatus.state === 'failed' && styles.remoteSnapshotStateFailed,
                 ]}
               >
                 {formatRemoteSnapshotState()}
               </Text>
             </View>
             <Text style={styles.remoteSnapshotMeta}>
-              队列 {remoteSnapshotStatus.queueCount}/5
+              {remoteSnapshotStatus.source === 'server' ? '服务端' : '本地'} · 队列 {remoteSnapshotStatus.queueCount}/5
               {remoteSnapshotStatus.model ? ` · ${remoteSnapshotStatus.model}` : ''}
               {remoteSnapshotStatus.messageCount > 0 ? ` · ${remoteSnapshotStatus.messageCount} 条消息` : ''}
             </Text>
+            {formatRemoteServerStatus() ? (
+              <Text style={styles.remoteSnapshotMeta}>
+                {formatRemoteServerStatus()}
+                {formatSnapshotHash(remoteSnapshotStatus.serverSnapshotHash) ? ` · #${formatSnapshotHash(remoteSnapshotStatus.serverSnapshotHash)}` : ''}
+                {remoteSnapshotStatus.serverConversationCount > 1 ? ` · 共 ${remoteSnapshotStatus.serverConversationCount} 个会话` : ''}
+              </Text>
+            ) : null}
             {remoteSnapshotStatus.lastMessageTail ? (
               <Text style={styles.remoteSnapshotText} numberOfLines={3}>
                 {remoteSnapshotStatus.lastMessageRole ? `${roleLabel(remoteSnapshotStatus.lastMessageRole)}：` : ''}
@@ -3878,6 +4169,65 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
               <Text style={styles.remoteSnapshotText}>暂无待展示的消息片段</Text>
             )}
             <Text style={styles.hint}>{formatRemoteSnapshotTime()}</Text>
+            {remoteSnapshotStatus.serverNextKeepaliveAt ? (
+              <Text style={styles.hint}>服务端下次保活 {formatFullTime(remoteSnapshotStatus.serverNextKeepaliveAt)}</Text>
+            ) : null}
+            {remoteSnapshotStatus.serverLastTouchedAt ? (
+              <Text style={styles.hint}>服务端最近保活 {formatFullTime(remoteSnapshotStatus.serverLastTouchedAt)}</Text>
+            ) : null}
+            {remoteSnapshotStatus.serverPendingMessageCount > 0 || remoteSnapshotStatus.serverActivityCount > 0 ? (
+              <Text style={styles.hint}>
+                待收件 {remoteSnapshotStatus.serverPendingMessageCount} · 自主活动 {remoteSnapshotStatus.serverActivityCount}
+              </Text>
+            ) : null}
+            {remoteSnapshotStatus.lastSyncError ? (
+              <Text style={styles.remoteSnapshotError} numberOfLines={3}>
+                {remoteSnapshotStatus.lastSyncError}
+              </Text>
+            ) : null}
+            {remoteSnapshotStatus.serverLastError ? (
+              <Text style={styles.remoteSnapshotError} numberOfLines={3}>
+                服务端保活失败：{remoteSnapshotStatus.serverLastError}
+              </Text>
+            ) : null}
+            {remoteSnapshotStatus.serverStatusError ? (
+              <Text style={styles.remoteSnapshotError} numberOfLines={3}>
+                状态读取失败：{remoteSnapshotStatus.serverStatusError}
+              </Text>
+            ) : null}
+            <View style={styles.remoteSnapshotActions}>
+              <Pressable
+                style={[
+                  styles.smallActionButton,
+                  styles.remoteSnapshotFlushButton,
+                  refreshingRemoteServerStatus && styles.smallActionButtonDisabled,
+                ]}
+                onPress={handleRefreshRemoteServerStatus}
+                disabled={refreshingRemoteServerStatus}
+              >
+                <Text style={[styles.smallActionText, refreshingRemoteServerStatus && styles.smallActionTextDisabled]}>
+                  {refreshingRemoteServerStatus ? '刷新中' : '刷新服务器状态'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.smallActionButton,
+                  styles.remoteSnapshotFlushButton,
+                  (flushingRemoteSnapshot || remoteSnapshotStatus.queueCount <= 0) && styles.smallActionButtonDisabled,
+                ]}
+                onPress={handleFlushRemoteSnapshotNow}
+                disabled={flushingRemoteSnapshot || remoteSnapshotStatus.queueCount <= 0}
+              >
+                <Text
+                  style={[
+                    styles.smallActionText,
+                    (flushingRemoteSnapshot || remoteSnapshotStatus.queueCount <= 0) && styles.smallActionTextDisabled,
+                  ]}
+                >
+                  {flushingRemoteSnapshot || remoteSnapshotStatus.state === 'syncing' ? '同步中' : '立即同步快照'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       )}
@@ -7836,6 +8186,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   remoteSnapshotStateSynced: {
     color: colors.success,
   },
+  remoteSnapshotStateFailed: {
+    color: colors.danger,
+  },
   remoteSnapshotMeta: {
     fontSize: 12,
     color: colors.textSecondary,
@@ -7844,6 +8197,22 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: colors.text,
+  },
+  remoteSnapshotError: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.danger,
+  },
+  remoteSnapshotActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 2,
+  },
+  remoteSnapshotFlushButton: {
+    alignSelf: 'flex-start',
+    minWidth: 118,
+    paddingHorizontal: 12,
   },
   importButton: {
     minHeight: 46,
