@@ -19,6 +19,7 @@ import { formatSmartTime } from '../utils/time';
 import { getLinkCardInfo, getSingleHttpUrlMessage } from '../utils/sharedLinks';
 import { parseDailyPaperCardMessage, type DailyPaperCardPayload } from '../utils/dailyPaperShare';
 import { parseAppearanceCss } from '../utils/appearanceCss';
+import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 
 
 let colors = lightColors;
@@ -92,6 +93,23 @@ function MarkdownTable({
 const markdownRules = {
   table: (node: any, children: React.ReactNode, _parent: any, styles: any) => (
     <MarkdownTable key={node.key} markdownStyles={styles}>{children}</MarkdownTable>
+  ),
+  fence: (node: any, _children: React.ReactNode, _parent: any, styles: any, inheritedStyles: any = {}) => (
+    <MarkdownCodeBlock
+      key={node.key}
+      content={node.content || ''}
+      language={node.sourceInfo}
+      inheritedStyle={inheritedStyles}
+      codeStyle={styles.code_block}
+    />
+  ),
+  code_block: (node: any, _children: React.ReactNode, _parent: any, styles: any, inheritedStyles: any = {}) => (
+    <MarkdownCodeBlock
+      key={node.key}
+      content={node.content || ''}
+      inheritedStyle={inheritedStyles}
+      codeStyle={styles.code_block}
+    />
   ),
 };
 

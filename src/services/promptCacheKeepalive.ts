@@ -6,6 +6,10 @@ const KEEPALIVE_SYNC_TIMEOUT_MS = 10000;
 const SNAPSHOT_SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
 const SNAPSHOT_SYNC_QUEUE_LIMIT = 5;
 const SNAPSHOT_PREVIEW_TAIL_CHARS = 90;
+const APP_KEEPALIVE_SUFFIX = '这是一次 Prompt 缓存保活请求。请不要输出任何内容。';
+const SERVER_KEEPALIVE_PING = '[Server keepalive ping] Keep the prompt cache warm. Do not answer this message.';
+const RUNTIME_CONTEXT_PREFIX = '以下是本轮运行时上下文和应用附加信息：';
+const USER_LATEST_INPUT_MARKER = '用户最新输入：';
 
 export interface PromptCacheRemoteSnapshot {
   conversationId: string;
@@ -288,8 +292,52 @@ function extractMessageText(content: ChatMessage['content']): string {
     .join(' ');
 }
 
+function stripRuntimeLatestInputWrapper(content: ChatMessage['content']): ChatMessage['content'] {
+  if (typeof content === 'string') {
+    if (!content.includes(RUNTIME_CONTEXT_PREFIX)) return content;
+    const markerIndex = content.indexOf(USER_LATEST_INPUT_MARKER);
+    if (markerIndex < 0) return content;
+    return content.slice(markerIndex + USER_LATEST_INPUT_MARKER.length).replace(/^\s+/, '') || content;
+  }
+
+  if (!Array.isArray(content) || content.length === 0) return content;
+  const first = content[0];
+  if (!first || typeof first !== 'object' || typeof first.text !== 'string') return content;
+  if (!first.text.includes(RUNTIME_CONTEXT_PREFIX)) return content;
+
+  const markerIndex = first.text.indexOf(USER_LATEST_INPUT_MARKER);
+  if (markerIndex < 0) return content;
+
+  const latestInputPrefix = first.text.slice(markerIndex + USER_LATEST_INPUT_MARKER.length).replace(/^\s+/, '');
+  if (latestInputPrefix) {
+    return [
+      { ...first, text: latestInputPrefix },
+      ...content.slice(1),
+    ];
+  }
+  return content.slice(1);
+}
+
+function isKeepaliveSuffixMessage(message: ChatMessage): boolean {
+  if (message.role !== 'user') return false;
+  const text = extractMessageText(message.content).replace(/\s+/g, ' ').trim();
+  return text === APP_KEEPALIVE_SUFFIX || text === SERVER_KEEPALIVE_PING;
+}
+
+function normalizeSnapshotPreviewMessages(messages: ChatMessage[]): ChatMessage[] {
+  const normalized = messages.map((message) =>
+    message.role === 'user'
+      ? { ...message, content: stripRuntimeLatestInputWrapper(message.content) }
+      : message
+  );
+  while (normalized.length > 0 && isKeepaliveSuffixMessage(normalized[normalized.length - 1])) {
+    normalized.pop();
+  }
+  return normalized;
+}
+
 function buildSnapshotPreview(snapshot: PromptCacheRemoteSnapshot): SnapshotPreview {
-  const messages = snapshot.request.messages || [];
+  const messages = normalizeSnapshotPreviewMessages(snapshot.request.messages || []);
   const lastTextMessage = [...messages].reverse().find((message) => normalizePreviewText(extractMessageText(message.content)));
   const fallbackMessage = messages[messages.length - 1] ?? null;
   const lastMessageText = lastTextMessage ? normalizePreviewText(extractMessageText(lastTextMessage.content)) : '';

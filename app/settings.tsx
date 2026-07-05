@@ -3349,6 +3349,13 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
     return `服务器状态：${remoteSnapshotStatus.serverStatus}`;
   }
 
+  function formatRemoteSnapshotSourceMeta() {
+    const source = remoteSnapshotStatus.source === 'server' ? '服务端' : '本地';
+    if (remoteSnapshotStatus.state === 'syncing') return `${source} · 正在上传`;
+    if (remoteSnapshotStatus.queueCount > 0) return `${source} · 队列 ${remoteSnapshotStatus.queueCount}/5`;
+    return `${source} · 无待同步队列`;
+  }
+
   function formatSnapshotHash(hash: string | null) {
     return hash ? hash.slice(0, 10) : null;
   }
@@ -4199,7 +4206,7 @@ function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
               </Text>
             </View>
             <Text style={styles.remoteSnapshotMeta}>
-              {remoteSnapshotStatus.source === 'server' ? '服务端' : '本地'} · 队列 {remoteSnapshotStatus.queueCount}/5
+              {formatRemoteSnapshotSourceMeta()}
               {remoteSnapshotStatus.model ? ` · ${remoteSnapshotStatus.model}` : ''}
               {remoteSnapshotStatus.messageCount > 0 ? ` · ${remoteSnapshotStatus.messageCount} 条消息` : ''}
             </Text>
