@@ -16,6 +16,7 @@ import type { WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { randomUUID } from 'expo-crypto';
 import { captureRef } from 'react-native-view-shot';
+import { ArrowLeft, Minus, MoreHorizontal, RotateCw, X } from 'lucide-react-native';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { sqliteStorage } from '../db/kv-storage';
@@ -439,6 +440,14 @@ function buildGoogleTranslateUrl(value: string): string | null {
   }
 }
 
+function getDisplayHostname(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, '');
+  } catch {
+    return '';
+  }
+}
+
 function shouldOpenGoogleAuthExternally(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -563,6 +572,7 @@ export function WebViewPanel() {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showWebMenu, setShowWebMenu] = useState(false);
   const [showClearDataMenu, setShowClearDataMenu] = useState(false);
+  const [showAddressInput, setShowAddressInput] = useState(false);
   const [webViewUserAgent, setWebViewUserAgent] = useState<string | undefined>(undefined);
   const [webViewReloadKey, setWebViewReloadKey] = useState(0);
   const panelPositionRef = useRef(panelPosition);
@@ -1086,6 +1096,8 @@ export function WebViewPanel() {
     setStatus('打开网页');
     setShowBookmarks(false);
     setShowWebMenu(false);
+    setShowClearDataMenu(false);
+    setShowAddressInput(false);
     setWebViewReloadKey((key) => key + 1);
   };
 
@@ -1096,6 +1108,13 @@ export function WebViewPanel() {
       return;
     }
     openUrl(nextUrl);
+  };
+
+  const openAddressInput = () => {
+    setAddressInput(urlRef.current || addressInput);
+    setShowAddressInput(true);
+    setShowWebMenu(false);
+    setShowClearDataMenu(false);
   };
 
   const handleSubmitHomeSearch = () => {
@@ -1179,6 +1198,7 @@ export function WebViewPanel() {
     setCollapsed(true);
     setShowWebMenu(false);
     setShowClearDataMenu(false);
+    setShowAddressInput(false);
   };
 
   const handleClose = () => {
@@ -1197,6 +1217,7 @@ export function WebViewPanel() {
     setWebViewUserAgent(undefined);
     setShowWebMenu(false);
     setShowClearDataMenu(false);
+    setShowAddressInput(false);
   };
 
   const persistBookmarkList = async (nextBookmarks: WebBookmark[]) => {
@@ -1268,27 +1289,54 @@ export function WebViewPanel() {
         },
       ]
     : expandedPanelStyle;
+  const displayHostname = getDisplayHostname(url);
+  const displayTitle = title || displayHostname || '网页交互';
 
   return (
     <>
     <View style={panelStyle} pointerEvents={collapsed ? 'none' : 'auto'}>
       <View style={styles.header} {...dragResponder.panHandlers}>
-        <View style={styles.headerText}>
+        <Pressable style={styles.headerText} onPress={openAddressInput}>
           <Text style={styles.title} numberOfLines={1}>
-            {title || '网页交互'}
+            {displayTitle}
           </Text>
           <Text style={styles.url} numberOfLines={1}>
-            {url}
+            {displayHostname || '网页首页'}
           </Text>
-        </View>
-        {loading && <ActivityIndicator size="small" color={colors.primary} />}
-        <Pressable style={styles.modeButton} onPress={handleCollapse}>
-          <Text style={styles.modeButtonText}>收起</Text>
         </Pressable>
-        <Pressable style={styles.closeButton} onPress={handleClose}>
-          <Text style={styles.closeText}>关闭</Text>
+        {loading && <ActivityIndicator size="small" color={colors.primary} />}
+        <Pressable
+          style={[styles.headerIconButton, !canGoBack && styles.headerIconButtonDisabled]}
+          onPress={handleGoBack}
+          disabled={!canGoBack}
+        >
+          <ArrowLeft size={16} color={canGoBack ? colors.textSecondary : colors.textTertiary} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable
+          style={[styles.headerIconButton, !url && styles.headerIconButtonDisabled]}
+          onPress={handleReload}
+          disabled={!url}
+        >
+          <RotateCw size={15} color={url ? colors.textSecondary : colors.textTertiary} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable
+          style={[styles.headerIconButton, showWebMenu && styles.headerIconButtonActive]}
+          onPress={() => {
+            setShowWebMenu((current) => !current);
+            setShowAddressInput(false);
+            setShowClearDataMenu(false);
+          }}
+        >
+          <MoreHorizontal size={18} color={showWebMenu ? '#FFFFFF' : colors.textSecondary} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable style={styles.headerIconButton} onPress={handleCollapse}>
+          <Minus size={17} color={colors.textSecondary} strokeWidth={2.4} />
+        </Pressable>
+        <Pressable style={styles.headerIconButton} onPress={handleClose}>
+          <X size={16} color={colors.textSecondary} strokeWidth={2.3} />
         </Pressable>
       </View>
+      {showAddressInput && (
       <View style={styles.addressRow}>
         <TextInput
           value={addressInput}
@@ -1302,25 +1350,18 @@ export function WebViewPanel() {
           placeholderTextColor={colors.textTertiary}
           style={styles.addressInput}
         />
-        <Pressable style={styles.menuButton} onPress={() => setShowWebMenu((current) => !current)}>
-          <Text style={styles.menuButtonText}>⋯</Text>
+        <Pressable style={styles.addressCloseButton} onPress={() => setShowAddressInput(false)}>
+          <X size={16} color={colors.textSecondary} strokeWidth={2.3} />
         </Pressable>
       </View>
+      )}
       {showWebMenu && (
         <View style={styles.webMenu}>
           <Pressable
-            style={[styles.webMenuItem, !canGoBack && styles.webMenuItemDisabled]}
-            onPress={handleGoBack}
-            disabled={!canGoBack}
+            style={styles.webMenuItem}
+            onPress={openAddressInput}
           >
-            <Text style={[styles.webMenuText, !canGoBack && styles.webMenuTextDisabled]}>回退</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.webMenuItem, !url && styles.webMenuItemDisabled]}
-            onPress={handleReload}
-            disabled={!url}
-          >
-            <Text style={[styles.webMenuText, !url && styles.webMenuTextDisabled]}>刷新</Text>
+            <Text style={styles.webMenuText}>输入网址</Text>
           </Pressable>
           <Pressable
             style={[styles.webMenuItem, !url && styles.webMenuItemDisabled]}
@@ -1529,50 +1570,47 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     overflow: 'hidden',
   },
   header: {
-    minHeight: 52,
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    zIndex: 8,
   },
   headerText: {
     flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    paddingVertical: 2,
+    paddingRight: 4,
   },
   title: {
     color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
   url: {
     marginTop: 2,
     color: colors.textTertiary,
     fontSize: 11,
   },
-  closeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  headerIconButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 8,
     backgroundColor: colors.surface,
   },
-  closeText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500',
+  headerIconButtonActive: {
+    backgroundColor: colors.primary,
   },
-  modeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-  },
-  modeButtonText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500',
+  headerIconButtonDisabled: {
+    opacity: 0.45,
   },
   addressRow: {
     flexDirection: 'row',
@@ -1583,20 +1621,15 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    zIndex: 7,
   },
-  menuButton: {
-    width: 36,
-    height: 36,
+  addressCloseButton: {
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
     backgroundColor: colors.surface,
-  },
-  menuButtonText: {
-    color: colors.textSecondary,
-    fontSize: 22,
-    fontWeight: '600',
-    lineHeight: 24,
   },
   addressInput: {
     flex: 1,
@@ -1611,19 +1644,27 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 13,
   },
   webMenu: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    position: 'absolute',
+    top: 54,
+    right: 10,
+    width: 188,
+    gap: 6,
+    padding: 8,
+    borderRadius: 10,
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000000',
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+    zIndex: 20,
   },
   webMenuItem: {
-    minHeight: 34,
+    minHeight: 38,
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
     backgroundColor: colors.surface,
   },
@@ -1647,11 +1688,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   clearDataOptions: {
     width: '100%',
-    gap: 8,
+    gap: 6,
     paddingTop: 2,
   },
   clearDataItem: {
-    minHeight: 54,
+    minHeight: 52,
     justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
