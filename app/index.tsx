@@ -28,7 +28,6 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurTargetView } from 'expo-blur';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
@@ -284,7 +283,6 @@ export default function ChatScreen() {
     && isRemoteInboxSyncing
     && remoteInboxSyncConversationId === conversationId;
   const flatListRef = useRef<FlatList<Message>>(null);
-  const blurTargetRef = useRef<View | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollFollowUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -978,7 +976,6 @@ export default function ChatScreen() {
           <ChatMessageEntrance animate={enteringMessageIds.has(item.id)}>
             <ChatBubble
               message={item}
-              blurTarget={blurTargetRef}
               previousUserMessage={prev?.role === 'user' ? prev : null}
               isHidden={isHidden}
               floorNumber={floor}
@@ -1137,14 +1134,14 @@ export default function ChatScreen() {
       style={styles.container}
       onTouchStart={handleScreenTouchStart}
     >
-      <BlurTargetView ref={blurTargetRef} style={styles.backgroundBlurTarget}>
+      <View style={styles.backgroundLayer}>
         <View style={styles.backgroundBase} />
         {chatBackgroundImageUri && (
           <>
             <Image source={{ uri: chatBackgroundImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           </>
         )}
-      </BlurTargetView>
+      </View>
       <View style={styles.header}>
         {topBarBackgroundImageUri && (
           <Image
@@ -1305,7 +1302,6 @@ export default function ChatScreen() {
         onLayout={handleInputLayout}
       >
         <ChatInput
-          blurTarget={blurTargetRef}
           onSend={async (text, imageUri, imageGenerationReferenceUris) => {
             await addUserMessage(text, imageUri, imageGenerationReferenceUris);
           }}
@@ -1529,7 +1525,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  backgroundBlurTarget: {
+  backgroundLayer: {
     position: 'absolute',
     top: 0,
     right: 0,

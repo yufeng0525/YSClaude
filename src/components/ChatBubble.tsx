@@ -1,9 +1,7 @@
 import React, { useMemo, useState, useRef } from 'react';
-import type { RefObject } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView, ActivityIndicator, type TextStyle } from 'react-native';
 import { NativeViewGestureHandler, ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import { BlurView } from 'expo-blur';
 import { Message, type GeneratedPicture, type ToolInvocation } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
@@ -14,7 +12,7 @@ import { saveGeneratedImageToLibrary } from '../services/imageGeneration';
 import { openWebView } from '../services/webviewController';
 import { getToolLabel } from '../services/tools';
 import { StickerContent } from './StickerContent';
-import { buildStickerDefinitions, hasStickerToken, isStickerOnlyContent } from '../utils/stickers';
+import { buildStickerDefinitions, getStickerByName, hasStickerToken, isStickerOnlyContent, type StickerDefinition } from '../utils/stickers';
 import { formatSmartTime } from '../utils/time';
 import { getLinkCardInfo, getSingleHttpUrlMessage } from '../utils/sharedLinks';
 import { parseDailyPaperCardMessage, type DailyPaperCardPayload } from '../utils/dailyPaperShare';
@@ -44,11 +42,6 @@ function withAlpha(hex: string, alpha: number): string {
 
 function percentWidth(value: number): `${number}%` {
   return `${value}%`;
-}
-
-function glassBlurIntensity(value: number): number {
-  if (value <= 0) return 0;
-  return Math.min(100, Math.round(20 + value * 0.7));
 }
 
 function withoutFontWeight(style?: TextStyle): TextStyle | undefined {
@@ -124,7 +117,6 @@ const chatIcons = [
 
 interface Props {
   message: Message;
-  blurTarget?: RefObject<View | null>;
   previousUserMessage?: Message | null;
   isLastAssistant?: boolean;
   showAssistantFooter?: boolean;
@@ -224,6 +216,8 @@ type AssistantFlowPart =
   | { type: 'text'; key: string; content: string; pictureOffset: number }
   | { type: 'tool'; key: string; invocation: ToolInvocation; invocationIndex: number };
 
+type AssistantBubbleFlowPart = AssistantFlowPart;
+
 const PIC_TOKEN_PATTERN = /\[Pic:[^\]\r\n]+\]/g;
 
 function countPicTokens(text: string): number {
@@ -318,6 +312,171 @@ function buildAssistantFlowParts(
   return parts;
 }
 
+function trimSegmentWithOffset(text: string, start: number): { content: string; start: number } | null {
+  const leadingLength = text.match(/^\s*/)?.[0].length ?? 0;
+  const trailingLength = text.match(/\s*$/)?.[0].length ?? 0;
+  const content = text.slice(leadingLength, Math.max(leadingLength, text.length - trailingLength));
+  return content.length > 0 ? { content, start: start + leadingLength } : null;
+}
+
+function splitParagraphSegments(text: string, start: number): Array<{ content: string; start: number }> {
+  if (!text) return [];
+  if (text.includes('```')) {
+    const segment = trimSegmentWithOffset(text, start);
+    return segment ? [segment] : [];
+  }
+
+  const segments: Array<{ content: string; start: number }> = [];
+  const paragraphBreakPattern = /\n{2,}/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = paragraphBreakPattern.exec(text)) !== null) {
+    const segment = trimSegmentWithOffset(text.slice(cursor, match.index), start + cursor);
+    if (segment) segments.push(segment);
+    cursor = paragraphBreakPattern.lastIndex;
+  }
+
+  const finalSegment = trimSegmentWithOffset(text.slice(cursor), start + cursor);
+  if (finalSegment) segments.push(finalSegment);
+  return segments;
+}
+
+function splitAssistantTextPartForBubbles(
+  part: Extract<AssistantFlowPart, { type: 'text' }>,
+  stickers: StickerDefinition[]
+): AssistantBubbleFlowPart[] {
+  const segments: AssistantBubbleFlowPart[] = [];
+  const stickerPattern = /\[Sticker:([^\]\r\n]+)\]/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let segmentIndex = 0;
+
+  function pushTextSegments(text: string, start: number) {
+    splitParagraphSegments(text, start).forEach((segment) => {
+      segments.push({
+        type: 'text',
+        key: `${part.key}-segment-${segmentIndex}`,
+        content: segment.content,
+        pictureOffset: part.pictureOffset + countPicTokens(part.content.slice(0, segment.start)),
+      });
+      segmentIndex += 1;
+    });
+  }
+
+  while ((match = stickerPattern.exec(part.content)) !== null) {
+    const sticker = getStickerByName(match[1], stickers);
+    if (!sticker) continue;
+
+    if (match.index > cursor) {
+      pushTextSegments(part.content.slice(cursor, match.index), cursor);
+    }
+
+    segments.push({
+      type: 'text',
+      key: `${part.key}-sticker-${segmentIndex}`,
+      content: match[0],
+      pictureOffset: part.pictureOffset + countPicTokens(part.content.slice(0, match.index)),
+    });
+    segmentIndex += 1;
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < part.content.length) {
+    pushTextSegments(part.content.slice(cursor), cursor);
+  }
+
+  return segments;
+}
+
+function buildAssistantBubbleFlowParts(
+  parts: AssistantFlowPart[],
+  stickers: StickerDefinition[]
+): AssistantBubbleFlowPart[] {
+  return parts.flatMap((part) => (
+    part.type === 'text' ? splitAssistantTextPartForBubbles(part, stickers) : [part]
+  ));
+}
+
+function isRemoteActivityMessage(message: Message): boolean {
+  return message.role === 'assistant' && message.id.startsWith('remote-activity-');
+}
+
+function parseRemoteActivityContent(content: string): { title: string; eyebrow: string; summary: string } {
+  const trimmed = content.trim();
+  const isNoop = trimmed.startsWith('[远程自主判断]');
+  const isActivity = trimmed.startsWith('[远程自主活动记录]');
+  const withoutMarker = trimmed
+    .replace(/^\[远程自主判断\]\s*/, '')
+    .replace(/^\[远程自主活动记录\]\s*/, '');
+  const [summaryBlock] = withoutMarker.split(/\n\s*工具调用：/);
+  const summary = summaryBlock.trim() || (isNoop ? 'AI 判断暂时不需要打扰你。' : 'AI 记录了一次远程活动。');
+
+  if (isNoop) {
+    return {
+      title: 'AI 没有打扰你',
+      eyebrow: '远程判断',
+      summary,
+    };
+  }
+
+  return {
+    title: isActivity ? 'AI 记录了一次活动' : 'AI 远程活动',
+    eyebrow: '后台同步',
+    summary,
+  };
+}
+
+function RemoteActivityCard({
+  message,
+  onPress,
+  onLongPress,
+}: {
+  message: Message;
+  onPress?: () => void;
+  onLongPress: (event: any) => void;
+}) {
+  const card = parseRemoteActivityContent(message.content);
+  const tools = message.toolInvocations || [];
+
+  return (
+    <Pressable
+      style={styles.remoteActivityCard}
+      onPress={onPress}
+      onLongPress={onLongPress}
+    >
+      <View style={styles.remoteActivityHeader}>
+        <View style={styles.remoteActivityStatus}>
+          <View style={styles.remoteActivityDot} />
+          <Text style={styles.remoteActivityEyebrow}>{card.eyebrow}</Text>
+        </View>
+        <Text style={styles.remoteActivityTime}>{formatSmartTime(message.createdAt)}</Text>
+      </View>
+      <Text style={styles.remoteActivityTitle}>{card.title}</Text>
+      <Text style={styles.remoteActivitySummary} selectable>{card.summary}</Text>
+      {tools.length > 0 && (
+        <View style={styles.remoteActivityTools}>
+          {tools.slice(0, 4).map((tool, index) => (
+            <View key={`${tool.name}-${index}`} style={styles.remoteActivityToolItem}>
+              <Text style={styles.remoteActivityToolName} numberOfLines={1}>
+                {formatToolInvocation(tool.name, tool.args)}
+              </Text>
+              {!!tool.result && (
+                <Text style={styles.remoteActivityToolResult} numberOfLines={2}>
+                  {tool.result}
+                </Text>
+              )}
+            </View>
+          ))}
+          {tools.length > 4 && (
+            <Text style={styles.remoteActivityMoreTools}>还有 {tools.length - 4} 个工具调用</Text>
+          )}
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function SharedLinkCard({ url }: { url: string }) {
   const info = getLinkCardInfo(url);
 
@@ -355,7 +514,6 @@ function DailyPaperForwardCard({ paper }: { paper: DailyPaperCardPayload }) {
 
 export const ChatBubble = React.memo(function ChatBubble({
   message,
-  blurTarget,
   previousUserMessage,
   isLastAssistant,
   showAssistantFooter,
@@ -373,20 +531,14 @@ export const ChatBubble = React.memo(function ChatBubble({
     () => parseAppearanceCss(appearanceConfig?.customCss),
     [appearanceConfig?.customCss]
   );
-  const isDarkTheme = colors.background === '#12100D';
-  const glassTint = isDarkTheme ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight';
-  const bubbleGlassBackground = isDarkTheme ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.08)';
-  const bubbleGlassOverlay = isDarkTheme ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.12)';
   const userBubbleColor = appearanceConfig?.userBubbleColor || colors.userBubble;
   const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
   const userBubbleRadius = numberOrDefault(appearanceConfig?.userBubbleRadius, 20, 0, 36);
-  const userBubbleBlurIntensity = numberOrDefault(appearanceConfig?.userBubbleBlurIntensity, 0, 0, 100);
   const userBubbleWidthPercent = numberOrDefault(appearanceConfig?.userBubbleWidthPercent, 75, 45, 100);
   const assistantBubbleStyle = appearanceConfig?.assistantBubbleStyle || 'plain';
   const assistantBubbleColor = appearanceConfig?.assistantBubbleColor || colors.userBubble;
   const assistantBubbleTransparent = !!appearanceConfig?.assistantBubbleTransparent;
   const assistantBubbleRadius = numberOrDefault(appearanceConfig?.assistantBubbleRadius, 20, 0, 36);
-  const assistantBubbleBlurIntensity = numberOrDefault(appearanceConfig?.assistantBubbleBlurIntensity, 0, 0, 100);
   const assistantBubbleWidthPercent = numberOrDefault(appearanceConfig?.assistantBubbleWidthPercent, 75, 45, 100);
   const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
   const assistantActionsHidden = !!appearanceConfig?.assistantActionsHidden;
@@ -666,18 +818,12 @@ export const ChatBubble = React.memo(function ChatBubble({
     const MENU_HEIGHT = 44;
     const menuLeft = Math.max(8, menuAnchor.x + menuAnchor.width - MENU_WIDTH);
     const menuTop = Math.max(8, menuAnchor.y - MENU_HEIGHT - 8);
-    const shouldBlurUserBubble = !messageIsStickerOnly && userBubbleBlurIntensity > 0;
     const userBubbleBaseStyle = [
       styles.userBubble,
       {
-        backgroundColor: userBubbleTransparent
-          ? 'transparent'
-          : shouldBlurUserBubble
-            ? bubbleGlassBackground
-            : userBubbleColor,
+        backgroundColor: userBubbleTransparent ? 'transparent' : userBubbleColor,
         borderRadius: userBubbleRadius,
       },
-      shouldBlurUserBubble && styles.userBubbleGlass,
       messageHasSticker && styles.userBubbleWithSticker,
       messageIsStickerOnly && styles.userStickerOnlyBubble,
       customCssStyles.userBubble,
@@ -731,23 +877,6 @@ export const ChatBubble = React.memo(function ChatBubble({
               onLongPress={handleUserLongPress}
               style={userBubbleBaseStyle}
             >
-              {shouldBlurUserBubble && (
-                <BlurView
-                  blurTarget={blurTarget}
-                  blurMethod="dimezisBlurView"
-                  blurReductionFactor={1}
-                  intensity={glassBlurIntensity(userBubbleBlurIntensity)}
-                  tint={glassTint}
-                  style={StyleSheet.absoluteFill}
-                />
-              )}
-              {shouldBlurUserBubble && (
-                <>
-                  <View pointerEvents="none" style={[styles.glassSurfaceOverlay, { backgroundColor: bubbleGlassOverlay }]} />
-                  <View pointerEvents="none" style={styles.glassTopHighlight} />
-                  <View pointerEvents="none" style={styles.glassInnerGlow} />
-                </>
-              )}
               {dailyPaperCard ? (
                 <DailyPaperForwardCard paper={dailyPaperCard} />
               ) : sharedLinkUrl ? (
@@ -770,23 +899,6 @@ export const ChatBubble = React.memo(function ChatBubble({
               onLongPress={handleUserLongPress}
               style={userBubbleBaseStyle}
             >
-              {shouldBlurUserBubble && (
-                <BlurView
-                  blurTarget={blurTarget}
-                  blurMethod="dimezisBlurView"
-                  blurReductionFactor={1}
-                  intensity={glassBlurIntensity(userBubbleBlurIntensity)}
-                  tint={glassTint}
-                  style={StyleSheet.absoluteFill}
-                />
-              )}
-              {shouldBlurUserBubble && (
-                <>
-                  <View pointerEvents="none" style={[styles.glassSurfaceOverlay, { backgroundColor: bubbleGlassOverlay }]} />
-                  <View pointerEvents="none" style={styles.glassTopHighlight} />
-                  <View pointerEvents="none" style={styles.glassInnerGlow} />
-                </>
-              )}
               <Text style={[styles.userText, userTextStyle]}>{message.content}</Text>
             </Pressable>
           )}
@@ -829,6 +941,10 @@ export const ChatBubble = React.memo(function ChatBubble({
   // 拆分思维链与正文：<thinking> 内容进胶囊，正文只渲染剩余部分
   const { thinking, body } = splitThinking(message.content);
   const assistantFlowParts = buildAssistantFlowParts(message.content, body, message.toolInvocations);
+  const assistantBubbleFlowParts = assistantBubbleStyle === 'bubble'
+    ? buildAssistantBubbleFlowParts(assistantFlowParts, messageStickers)
+    : assistantFlowParts;
+  const remoteActivityCardVisible = isRemoteActivityMessage(message);
 
   function handleAction(index: number) {
     switch (index) {
@@ -879,6 +995,13 @@ export const ChatBubble = React.memo(function ChatBubble({
       setMenuAnchor({ x, y, width, height });
       setAssistantMenuVisible(true);
     });
+  }
+
+  function handleAssistantBubbleLongPress(event: any) {
+    const pageX = typeof event?.nativeEvent?.pageX === 'number' ? event.nativeEvent.pageX : 16;
+    const pageY = typeof event?.nativeEvent?.pageY === 'number' ? event.nativeEvent.pageY : 16;
+    setMenuAnchor({ x: pageX, y: pageY, width: 0, height: 0 });
+    setAssistantMenuVisible(true);
   }
 
   function handleGeneratedPictureLongPress(picture: GeneratedPicture) {
@@ -965,31 +1088,28 @@ export const ChatBubble = React.memo(function ChatBubble({
   }
 
   const assistantBubbleEnabled = assistantBubbleStyle === 'bubble';
-  const shouldBlurAssistantBubble = assistantBubbleEnabled && !messageIsStickerOnly && assistantBubbleBlurIntensity > 0;
-  const assistantContentStyle = assistantBubbleEnabled
-    ? [
-        styles.assistantBubble,
-        {
-          maxWidth: percentWidth(assistantBubbleWidthPercent),
-          backgroundColor: assistantBubbleTransparent
-            ? 'transparent'
-            : shouldBlurAssistantBubble
-              ? bubbleGlassBackground
-              : assistantBubbleColor,
-          borderRadius: assistantBubbleRadius,
-        },
-        shouldBlurAssistantBubble && styles.userBubbleGlass,
-        messageHasSticker && styles.userBubbleWithSticker,
-        messageIsStickerOnly && styles.userStickerOnlyBubble,
-        customCssStyles.assistantBubble,
-      ]
-    : [styles.assistantContent, customCssStyles.assistantBubble];
+  const assistantBubbleBaseStyle = [
+    styles.assistantBubble,
+    {
+      maxWidth: percentWidth(assistantBubbleWidthPercent),
+      backgroundColor: assistantBubbleTransparent ? 'transparent' : assistantBubbleColor,
+      borderRadius: assistantBubbleRadius,
+    },
+    customCssStyles.assistantBubble,
+  ];
+  const assistantContentStyle = [styles.assistantContent, customCssStyles.assistantBubble];
   const ASSISTANT_MENU_WIDTH = Math.min(340, SCREEN_WIDTH - 16);
+  const assistantActionMenuWidth = remoteActivityCardVisible ? Math.min(260, SCREEN_WIDTH - 16) : ASSISTANT_MENU_WIDTH;
   const assistantMenuLeft = Math.min(
     Math.max(8, menuAnchor.x),
-    SCREEN_WIDTH - ASSISTANT_MENU_WIDTH - 8
+    SCREEN_WIDTH - assistantActionMenuWidth - 8
   );
   const assistantMenuTop = Math.max(8, menuAnchor.y + menuAnchor.height + 8);
+  const getAssistantBubbleStyle = (content: string) => [
+    ...assistantBubbleBaseStyle,
+    hasStickerToken(content, messageStickers) && styles.userBubbleWithSticker,
+    isStickerOnlyContent(content, messageStickers) && styles.userStickerOnlyBubble,
+  ];
 
   return (
     <View style={[styles.assistantRow, customCssStyles.assistantMessage, isHidden && styles.hiddenBubble]}>
@@ -998,63 +1118,100 @@ export const ChatBubble = React.memo(function ChatBubble({
       {isHidden && <Text style={styles.hiddenLabelLeft}>已隐藏</Text>}
       {/* 思维链：<thinking> 包裹的内容拆出，正文只渲染剩余部分 */}
       {thinking.length > 0 && <ThinkingBlock thinking={thinking} />}
-      <Pressable
-        ref={bubbleRef}
-        style={assistantContentStyle}
-        onPress={onBubblePress}
-        onLongPress={handleAssistantLongPress}
-      >
-        {shouldBlurAssistantBubble && (
-          <BlurView
-            blurTarget={blurTarget}
-            blurMethod="dimezisBlurView"
-            blurReductionFactor={1}
-            intensity={glassBlurIntensity(assistantBubbleBlurIntensity)}
-            tint={glassTint}
-            style={StyleSheet.absoluteFill}
-          />
-        )}
-        {shouldBlurAssistantBubble && (
-          <>
-            <View pointerEvents="none" style={[styles.glassSurfaceOverlay, { backgroundColor: bubbleGlassOverlay }]} />
-            <View pointerEvents="none" style={styles.glassTopHighlight} />
-            <View pointerEvents="none" style={styles.glassInnerGlow} />
-          </>
-        )}
-        <View style={styles.assistantFlow}>
-          {assistantFlowParts.length > 0 ? assistantFlowParts.map((part) => {
+      {remoteActivityCardVisible ? (
+        <RemoteActivityCard
+          message={message}
+          onPress={onBubblePress}
+          onLongPress={handleAssistantBubbleLongPress}
+        />
+      ) : assistantBubbleEnabled ? (
+        <View style={styles.assistantBubbleStack}>
+          {assistantBubbleFlowParts.length > 0 ? assistantBubbleFlowParts.map((part) => {
             if (part.type === 'tool') {
               return renderToolInvocation(part.invocation, part.invocationIndex);
             }
 
             const pictureCount = countPicTokens(part.content);
             return (
-              <StickerContent
+              <Pressable
                 key={part.key}
-                content={part.content}
+                style={getAssistantBubbleStyle(part.content)}
+                onPress={onBubblePress}
+                onLongPress={handleAssistantBubbleLongPress}
+              >
+                <StickerContent
+                  content={part.content}
+                  variant="assistant"
+                  markdownStyle={markdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                  generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                  onPicturePress={handleGeneratedPicturePress}
+                  onPictureLongPress={handleGeneratedPictureLongPress}
+                />
+              </Pressable>
+            );
+          }) : (
+            <Pressable
+              style={getAssistantBubbleStyle(' ')}
+              onPress={onBubblePress}
+              onLongPress={handleAssistantBubbleLongPress}
+            >
+              <StickerContent
+                content=" "
                 variant="assistant"
                 markdownStyle={markdownStyles}
                 markdownRules={markdownRules}
                 stickers={messageStickers}
-                generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                generatedPics={message.generatedPics}
                 onPicturePress={handleGeneratedPicturePress}
                 onPictureLongPress={handleGeneratedPictureLongPress}
               />
-            );
-          }) : (
-            <StickerContent
-              content=" "
-              variant="assistant"
-              markdownStyle={markdownStyles}
-              markdownRules={markdownRules}
-              stickers={messageStickers}
-              generatedPics={message.generatedPics}
-              onPicturePress={handleGeneratedPicturePress}
-              onPictureLongPress={handleGeneratedPictureLongPress}
-            />
+            </Pressable>
           )}
         </View>
-      </Pressable>
+      ) : (
+        <Pressable
+          ref={bubbleRef}
+          style={assistantContentStyle}
+          onPress={onBubblePress}
+          onLongPress={handleAssistantLongPress}
+        >
+          <View style={styles.assistantFlow}>
+            {assistantFlowParts.length > 0 ? assistantFlowParts.map((part) => {
+              if (part.type === 'tool') {
+                return renderToolInvocation(part.invocation, part.invocationIndex);
+              }
+
+              const pictureCount = countPicTokens(part.content);
+              return (
+                <StickerContent
+                  key={part.key}
+                  content={part.content}
+                  variant="assistant"
+                  markdownStyle={markdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                  generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                  onPicturePress={handleGeneratedPicturePress}
+                  onPictureLongPress={handleGeneratedPictureLongPress}
+                />
+              );
+            }) : (
+              <StickerContent
+                content=" "
+                variant="assistant"
+                markdownStyle={markdownStyles}
+                markdownRules={markdownRules}
+                stickers={messageStickers}
+                generatedPics={message.generatedPics}
+                onPicturePress={handleGeneratedPicturePress}
+                onPictureLongPress={handleGeneratedPictureLongPress}
+              />
+            )}
+          </View>
+        </Pressable>
+      )}
       <Modal
         transparent
         visible={assistantMenuVisible}
@@ -1062,7 +1219,7 @@ export const ChatBubble = React.memo(function ChatBubble({
         onRequestClose={() => setAssistantMenuVisible(false)}
       >
         <Pressable style={styles.menuDismissOverlay} onPress={() => setAssistantMenuVisible(false)}>
-          <View style={[styles.bubbleMenu, styles.assistantActionMenu, { left: assistantMenuLeft, top: assistantMenuTop, width: ASSISTANT_MENU_WIDTH }]}>
+          <View style={[styles.bubbleMenu, styles.assistantActionMenu, { left: assistantMenuLeft, top: assistantMenuTop, width: assistantActionMenuWidth }]}>
             <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={() => handleAssistantMenuAction(0)}>
               <Text style={styles.bubbleMenuText}>编辑</Text>
             </Pressable>
@@ -1084,22 +1241,26 @@ export const ChatBubble = React.memo(function ChatBubble({
             <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={() => handleAssistantMenuAction(1)}>
               <Text style={[styles.bubbleMenuText, styles.bubbleMenuTextDanger]}>删除</Text>
             </Pressable>
-            <View style={styles.bubbleMenuDivider} />
-            <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={() => handleAssistantMenuAction(2)}>
-              <Text style={styles.bubbleMenuText}>语音播放</Text>
-            </Pressable>
-            <View style={styles.bubbleMenuDivider} />
-            <Pressable
-              style={[
-                styles.bubbleMenuItem,
-                styles.assistantActionMenuItem,
-                !isLastAssistant && styles.bubbleMenuItemDisabled,
-              ]}
-              onPress={() => handleAssistantMenuAction(5)}
-              disabled={!isLastAssistant}
-            >
-              <Text style={[styles.bubbleMenuText, !isLastAssistant && styles.bubbleMenuTextDisabled]}>重生成</Text>
-            </Pressable>
+            {!remoteActivityCardVisible && (
+              <>
+                <View style={styles.bubbleMenuDivider} />
+                <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={() => handleAssistantMenuAction(2)}>
+                  <Text style={styles.bubbleMenuText}>语音播放</Text>
+                </Pressable>
+                <View style={styles.bubbleMenuDivider} />
+                <Pressable
+                  style={[
+                    styles.bubbleMenuItem,
+                    styles.assistantActionMenuItem,
+                    !isLastAssistant && styles.bubbleMenuItemDisabled,
+                  ]}
+                  onPress={() => handleAssistantMenuAction(5)}
+                  disabled={!isLastAssistant}
+                >
+                  <Text style={[styles.bubbleMenuText, !isLastAssistant && styles.bubbleMenuTextDisabled]}>重生成</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -1154,7 +1315,7 @@ export const ChatBubble = React.memo(function ChatBubble({
           </View>
         </Pressable>
       </Modal>
-      {message.content.length > 0 && (
+      {message.content.length > 0 && !remoteActivityCardVisible && (
         <>
           {!assistantActionsHidden && (
             <View style={styles.actions}>
@@ -1426,35 +1587,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
-  userBubbleGlass: {
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.42)',
-    shadowColor: '#000',
-    shadowOpacity: 0.10,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-  glassSurfaceOverlay: {
-    ...StyleSheet.absoluteFill,
-  },
-  glassTopHighlight: {
-    position: 'absolute',
-    left: 8,
-    right: 8,
-    top: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.72)',
-  },
-  glassInnerGlow: {
-    position: 'absolute',
-    left: 1,
-    right: 1,
-    top: 1,
-    height: 28,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
   userBubbleWithSticker: {
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -1643,6 +1775,98 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     overflow: 'hidden',
+  },
+  assistantBubbleStack: {
+    alignItems: 'flex-start',
+    gap: 8,
+    maxWidth: '100%',
+  },
+  remoteActivityCard: {
+    alignSelf: 'flex-start',
+    width: '88%',
+    maxWidth: 360,
+    borderRadius: 8,
+    padding: 14,
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  remoteActivityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  remoteActivityStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minWidth: 0,
+  },
+  remoteActivityDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  remoteActivityEyebrow: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+    fontWeight: '700',
+  },
+  remoteActivityTime: {
+    flexShrink: 0,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+    fontFamily: fonts.mono,
+  },
+  remoteActivityTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  remoteActivitySummary: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.textSecondary,
+  },
+  remoteActivityTools: {
+    gap: 6,
+    paddingTop: 2,
+  },
+  remoteActivityToolItem: {
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: colors.inputBackground,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.inputBorder,
+  },
+  remoteActivityToolName: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  remoteActivityToolResult: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+  },
+  remoteActivityMoreTools: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.textTertiary,
   },
   assistantFlow: {
     width: '100%',

@@ -12,7 +12,7 @@ export type ChatInputIconKey =
   | 'sendFocused'
   | 'stop';
 
-export type ChatInputAppearanceStyle = 'default' | 'glass' | 'compact';
+export type ChatInputAppearanceStyle = 'default' | 'compact';
 export type AssistantBubbleAppearanceStyle = 'plain' | 'bubble';
 
 export interface AppearanceThemeSnapshot {
@@ -26,13 +26,11 @@ export interface AppearanceThemeSnapshot {
   userBubbleColor?: string;
   userBubbleTransparent?: boolean;
   userBubbleRadius?: number;
-  userBubbleBlurIntensity?: number;
   userBubbleWidthPercent?: number;
   assistantBubbleStyle?: AssistantBubbleAppearanceStyle;
   assistantBubbleColor?: string;
   assistantBubbleTransparent?: boolean;
   assistantBubbleRadius?: number;
-  assistantBubbleBlurIntensity?: number;
   assistantBubbleWidthPercent?: number;
   messageAvatarsVisible?: boolean;
   messageMetaVisible?: boolean;
@@ -54,7 +52,6 @@ export interface AppearanceThemeSnapshot {
   inputBackgroundImageUri?: string;
   inputBackgroundTransparent?: boolean;
   inputStyle?: ChatInputAppearanceStyle;
-  inputBlurIntensity?: number;
   inputBorderRadius?: number;
   inputIconUris?: Partial<Record<ChatInputIconKey, string>>;
 }
@@ -552,7 +549,6 @@ const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
   assistantActionsHidden: false,
   inputIconUris: {},
   inputStyle: 'default',
-  inputBlurIntensity: 72,
   inputBorderRadius: 24,
   customCss: '',
   appearanceThemes: [],
@@ -583,13 +579,11 @@ function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSna
     userBubbleColor: source.userBubbleColor,
     userBubbleTransparent: source.userBubbleTransparent,
     userBubbleRadius: source.userBubbleRadius,
-    userBubbleBlurIntensity: source.userBubbleBlurIntensity,
     userBubbleWidthPercent: source.userBubbleWidthPercent,
     assistantBubbleStyle: source.assistantBubbleStyle,
     assistantBubbleColor: source.assistantBubbleColor,
     assistantBubbleTransparent: source.assistantBubbleTransparent,
     assistantBubbleRadius: source.assistantBubbleRadius,
-    assistantBubbleBlurIntensity: source.assistantBubbleBlurIntensity,
     assistantBubbleWidthPercent: source.assistantBubbleWidthPercent,
     messageAvatarsVisible: source.messageAvatarsVisible,
     messageMetaVisible: source.messageMetaVisible,
@@ -610,8 +604,7 @@ function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSna
     customCss: source.customCss,
     inputBackgroundImageUri: source.inputBackgroundImageUri,
     inputBackgroundTransparent: source.inputBackgroundTransparent,
-    inputStyle: source.inputStyle,
-    inputBlurIntensity: source.inputBlurIntensity,
+    inputStyle: source.inputStyle === 'compact' ? 'compact' : 'default',
     inputBorderRadius: source.inputBorderRadius,
     inputIconUris: { ...(source.inputIconUris || {}) },
   };

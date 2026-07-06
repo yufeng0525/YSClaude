@@ -169,8 +169,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
   const topBarFadeHidden = !!appearanceConfig?.topBarFadeHidden;
   const topBarBackgroundImageUri = appearanceConfig?.topBarBackgroundImageUri;
   const inputIconUris = appearanceConfig?.inputIconUris || {};
-  const inputStyle = appearanceConfig?.inputStyle || 'default';
-  const inputBlurIntensity = appearanceConfig?.inputBlurIntensity ?? 72;
+  const inputStyle = appearanceConfig?.inputStyle === 'compact' ? 'compact' : 'default';
   const inputBorderRadius = appearanceConfig?.inputBorderRadius ?? 24;
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
   const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
@@ -188,9 +187,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
   const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
   const assistantActionsHidden = !!appearanceConfig?.assistantActionsHidden;
   const userBubbleRadius = appearanceConfig?.userBubbleRadius ?? 20;
-  const userBubbleBlurIntensity = appearanceConfig?.userBubbleBlurIntensity ?? 0;
   const assistantBubbleRadius = appearanceConfig?.assistantBubbleRadius ?? 20;
-  const assistantBubbleBlurIntensity = appearanceConfig?.assistantBubbleBlurIntensity ?? 0;
   const userFontSize = appearanceConfig?.userFontSize ?? 16;
   const assistantFontSize = appearanceConfig?.assistantFontSize ?? 16;
   const assistantTextStrokeWidth = appearanceConfig?.assistantTextStrokeWidth ?? 0;
@@ -378,33 +375,13 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
     showToast(
       nextStyle === 'compact'
         ? '输入框已切换为单行样式'
-        : nextStyle === 'glass'
-          ? '输入框已切换为磨砂玻璃'
-          : '输入框已切换为默认风格'
+        : '输入框已切换为默认风格'
     );
   }
 
   function setAssistantBubbleStyle(nextStyle: AssistantBubbleAppearanceStyle) {
     setAppearanceConfig({ assistantBubbleStyle: nextStyle });
     showToast(nextStyle === 'bubble' ? 'AI 气泡已切换为用户气泡样式' : 'AI 气泡已恢复原样式');
-  }
-
-  function applyExampleGlassAppearance() {
-    setAppearanceConfig({
-      userBubbleTransparent: false,
-      userBubbleRadius: 28,
-      userBubbleBlurIntensity: 86,
-      userBubbleWidthPercent: 86,
-      assistantBubbleStyle: 'bubble',
-      assistantBubbleTransparent: false,
-      assistantBubbleRadius: 28,
-      assistantBubbleBlurIntensity: 86,
-      assistantBubbleWidthPercent: 86,
-      inputStyle: 'glass',
-      inputBlurIntensity: 86,
-      inputBorderRadius: 18,
-    });
-    showToast('已套用示例玻璃气泡和底栏');
   }
 
   function handleSaveAppearanceTheme() {
@@ -852,12 +829,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
       })}
 
       <Text style={styles.sectionTitle}>聊天气泡与文字</Text>
-      <Text style={styles.hint}>颜色使用 #RRGGBB 格式；磨砂系数为 0 时关闭玻璃效果。</Text>
-      <View style={styles.actions}>
-        <Pressable style={styles.testButton} onPress={applyExampleGlassAppearance}>
-          <Text style={styles.testButtonText}>套用示例玻璃效果</Text>
-        </Pressable>
-      </View>
+      <Text style={styles.hint}>颜色使用 #RRGGBB 格式。</Text>
       <View style={styles.switchRow}>
         <View style={styles.switchText}>
           <Text style={styles.label}>隐藏 AI 回复尾部标识</Text>
@@ -901,7 +873,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
       <View style={styles.switchRow}>
         <View style={styles.switchText}>
           <Text style={styles.label}>用户气泡透明</Text>
-          <Text style={styles.hint}>保留文字和磨砂效果，不叠加气泡底色。</Text>
+          <Text style={styles.hint}>保留文字，不叠加气泡底色。</Text>
         </View>
         <Switch
           value={userBubbleTransparent}
@@ -949,17 +921,6 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
             onCommit={(value) => setAppearanceConfig({ userBubbleRadius: value })}
           />
         </View>
-        <View style={styles.appearanceNumberField}>
-          <Text style={styles.label}>磨砂系数</Text>
-          <ClampedNumberInput
-            value={userBubbleBlurIntensity}
-            fallback={0}
-            min={0}
-            max={100}
-            placeholder="0"
-            onCommit={(value) => setAppearanceConfig({ userBubbleBlurIntensity: value })}
-          />
-        </View>
       </View>
 
       <View style={styles.appearanceNumberGrid}>
@@ -995,7 +956,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
           <View style={styles.switchRow}>
             <View style={styles.switchText}>
               <Text style={styles.label}>AI 气泡透明</Text>
-              <Text style={styles.hint}>保留文字和磨砂效果，不叠加 AI 气泡底色。</Text>
+              <Text style={styles.hint}>保留文字，不叠加 AI 气泡底色。</Text>
             </View>
             <Switch
               value={assistantBubbleTransparent}
@@ -1042,17 +1003,6 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
                 max={36}
                 placeholder="20"
                 onCommit={(value) => setAppearanceConfig({ assistantBubbleRadius: value })}
-              />
-            </View>
-            <View style={styles.appearanceNumberField}>
-              <Text style={styles.label}>AI 磨砂系数</Text>
-              <ClampedNumberInput
-                value={assistantBubbleBlurIntensity}
-                fallback={0}
-                min={0}
-                max={100}
-                placeholder="0"
-                onCommit={(value) => setAppearanceConfig({ assistantBubbleBlurIntensity: value })}
               />
             </View>
           </View>
@@ -1179,31 +1129,20 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
 
       <Text style={styles.sectionTitle}>输入框自定义</Text>
       <View style={styles.segmentedRow}>
-        {(['default', 'glass', 'compact'] as ChatInputAppearanceStyle[]).map((styleKey) => (
+        {(['default', 'compact'] as ChatInputAppearanceStyle[]).map((styleKey) => (
           <Pressable
             key={styleKey}
             style={[styles.segmentedButton, inputStyle === styleKey && styles.segmentedButtonActive]}
             onPress={() => setInputStyle(styleKey)}
           >
             <Text style={[styles.segmentedText, inputStyle === styleKey && styles.segmentedTextActive]}>
-              {styleKey === 'default' ? '默认原版' : styleKey === 'glass' ? '磨砂玻璃' : '单行'}
+              {styleKey === 'default' ? '默认原版' : '单行'}
             </Text>
           </Pressable>
         ))}
       </View>
 
       <View style={styles.appearanceNumberGrid}>
-        <View style={styles.appearanceNumberField}>
-          <Text style={styles.label}>输入框磨砂系数</Text>
-          <ClampedNumberInput
-            value={inputBlurIntensity}
-            fallback={72}
-            min={0}
-            max={100}
-            placeholder="72"
-            onCommit={(value) => setAppearanceConfig({ inputBlurIntensity: value })}
-          />
-        </View>
         <View style={styles.appearanceNumberField}>
           <Text style={styles.label}>输入框圆角</Text>
           <ClampedNumberInput
@@ -1220,7 +1159,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
       <View style={styles.switchRow}>
         <View style={styles.switchText}>
           <Text style={styles.label}>输入框背景透明</Text>
-          <Text style={styles.hint}>保留输入框内容、背景图和磨砂效果，不叠加默认底色。</Text>
+          <Text style={styles.hint}>保留输入框内容和背景图，不叠加默认底色。</Text>
         </View>
         <Switch
           value={inputBackgroundTransparent}

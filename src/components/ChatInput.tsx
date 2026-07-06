@@ -1,5 +1,4 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { RefObject } from 'react';
 import {
   View,
   TextInput,
@@ -19,7 +18,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { copyAsync } from 'expo-file-system/legacy';
-import { BlurView } from 'expo-blur';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { useSettingsStore } from '../stores/settings';
@@ -42,11 +40,6 @@ type McpPanelTab = 'tools' | 'resources' | 'prompts';
 function clampNumber(value: number | undefined, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value as number));
-}
-
-function glassBlurIntensity(value: number): number {
-  if (value <= 0) return 0;
-  return Math.min(100, Math.round(20 + value * 0.7));
 }
 
 function getStickerSuggestionQuery(value: string): string {
@@ -77,7 +70,6 @@ async function copyImageGenerationReference(asset: ImagePicker.ImagePickerAsset)
 }
 
 interface Props {
-  blurTarget?: RefObject<View | null>;
   onSend: (text: string, imageUri?: string, imageGenerationReferenceUris?: string[]) => void | Promise<void>;
   onTriggerResponse: () => void | Promise<void>;
   onEnableWebCruise?: () => void | Promise<void>;
@@ -88,7 +80,6 @@ interface Props {
 }
 
 export function ChatInput({
-  blurTarget,
   onSend,
   onTriggerResponse,
   onEnableWebCruise,
@@ -155,30 +146,21 @@ export function ChatInput({
   ]);
 
   const inputIconUris = appearanceConfig?.inputIconUris || {};
-  const inputStyle = appearanceConfig?.inputStyle || 'default';
+  const inputStyle = appearanceConfig?.inputStyle === 'compact' ? 'compact' : 'default';
   const inputBackgroundImageUri = appearanceConfig?.inputBackgroundImageUri;
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
-  const inputBlurIntensity = clampNumber(appearanceConfig?.inputBlurIntensity, 72, 0, 100);
   const inputBorderRadius = clampNumber(appearanceConfig?.inputBorderRadius, 24, 0, 36);
   const inputPanelRadius = typeof customCssStyles.inputBar?.borderRadius === 'number'
     ? customCssStyles.inputBar.borderRadius
     : inputBorderRadius;
   const isCompactInput = inputStyle === 'compact';
-  const isGlassInput = inputStyle === 'glass' || isCompactInput;
-  const glassBlur = glassBlurIntensity(inputBlurIntensity);
-  const glassTint = isDarkTheme ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight';
-  const glassAlpha = isDarkTheme ? 0.06 + (inputBlurIntensity / 100) * 0.06 : 0.04 + (inputBlurIntensity / 100) * 0.08;
-  const hasCustomInputSurface = isGlassInput || !!inputBackgroundImageUri || inputBackgroundTransparent;
+  const hasCustomInputSurface = !!inputBackgroundImageUri || inputBackgroundTransparent;
   const inputPanelBackground = inputBackgroundTransparent
     ? 'transparent'
-    : isGlassInput || inputBackgroundImageUri
-    ? (isDarkTheme ? `rgba(255,255,255,${glassAlpha})` : `rgba(255,255,255,${glassAlpha})`)
     : colors.inputBackground;
   const inputOverlayBackground = inputBackgroundTransparent
     ? 'transparent'
-    : isGlassInput
-      ? (isDarkTheme ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.12)')
-      : colors.background === '#12100D'
+    : colors.background === '#12100D'
         ? 'rgba(18,16,13,0.08)'
         : 'rgba(255,255,255,0.08)';
 
@@ -434,7 +416,6 @@ export function ChatInput({
           styles.container,
           { backgroundColor: inputPanelBackground, borderRadius: inputPanelRadius },
           hasCustomInputSurface && styles.customContainer,
-          isGlassInput && styles.glassContainer,
           isCompactInput && styles.compactContainer,
           customCssStyles.inputBar,
         ]}
@@ -442,33 +423,8 @@ export function ChatInput({
         {inputBackgroundImageUri && (
           <Image source={{ uri: inputBackgroundImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         )}
-        {isGlassInput && (
-          <BlurView
-            blurTarget={blurTarget}
-            blurMethod="dimezisBlurView"
-            blurReductionFactor={1}
-            intensity={glassBlur}
-            tint={glassTint}
-            style={StyleSheet.absoluteFill}
-          />
-        )}
         {hasCustomInputSurface && (
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: inputOverlayBackground }]} />
-        )}
-        {isGlassInput && (
-          <>
-            <View pointerEvents="none" style={styles.glassTopHighlight} />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.glassInnerSheen,
-                {
-                  borderTopLeftRadius: Math.max(0, inputPanelRadius - 1),
-                  borderTopRightRadius: Math.max(0, inputPanelRadius - 1),
-                },
-              ]}
-            />
-          </>
         )}
         {pendingImage && !isCompactInput && (
           <View style={styles.previewRow}>
@@ -859,14 +815,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
   },
-  glassContainer: {
-    borderColor: 'rgba(255,255,255,0.38)',
-    shadowColor: '#000',
-    shadowOpacity: 0.10,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
   compactContainer: {
     minHeight: 52,
     paddingTop: 8,
@@ -878,24 +826,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  glassTopHighlight: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    top: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.70)',
-  },
-  glassInnerSheen: {
-    position: 'absolute',
-    left: 1,
-    right: 1,
-    top: 1,
-    height: 32,
-    borderTopLeftRadius: 23,
-    borderTopRightRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.14)',
   },
   suggestionPanel: {
     minHeight: 84,
