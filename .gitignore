@@ -50,5 +50,10 @@ yarn-error.*
 # IDE
 .idea/
 
+# Agent local config
+.agents/
+.claude/
+AGENTS.md
+
 # generated native folders
 /ios
