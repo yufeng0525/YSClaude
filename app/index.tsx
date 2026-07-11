@@ -797,12 +797,18 @@ export default function ChatScreen() {
     const conversationChanged = conversationId !== initialPositioningConversationRef.current;
     const hasOpenRequest = openToBottomRequestId > handledOpenToBottomRequestRef.current;
 
-    if (conversationChanged || hasOpenRequest) {
-      if (hasOpenRequest) {
-        handledOpenToBottomRequestRef.current = openToBottomRequestId;
-      }
+    if (hasOpenRequest) {
+      handledOpenToBottomRequestRef.current = openToBottomRequestId;
+    }
+
+    if (conversationChanged) {
       initialPositioningConversationRef.current = conversationId;
       beginInitialPositioning();
+      return;
+    }
+
+    if (hasOpenRequest) {
+      scheduleScrollToEnd(32, true);
     }
   }, [
     beginInitialPositioning,
@@ -810,6 +816,7 @@ export default function ChatScreen() {
     messages.length,
     openToBottomRequestId,
     pendingScrollMessageId,
+    scheduleScrollToEnd,
   ]);
 
   useEffect(() => {
