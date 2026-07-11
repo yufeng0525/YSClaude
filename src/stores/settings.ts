@@ -228,6 +228,12 @@ export interface NativeToolConfig {
   accessibilityControlEnabled?: boolean;
 }
 
+export interface LocationShareConfig {
+  enabled: boolean;
+  provider: 'tencent';
+  tencentKey: string;
+}
+
 export interface McpToolSnapshot {
   name: string;
   title?: string;
@@ -293,6 +299,7 @@ export interface McpToolConfig {
 interface ToolSettingsUiConfig {
   builtInToolsExpanded: boolean;
   customMcpExpanded: boolean;
+  otherFeaturesExpanded?: boolean;
 }
 
 interface ReadingConfig {
@@ -698,6 +705,7 @@ interface SettingsState {
   runCommandConfig: RunCommandConfig;
   qqBotConfig: QQBotConfig;
   nativeToolConfig: NativeToolConfig;
+  locationShareConfig: LocationShareConfig;
   mcpToolConfig: McpToolConfig;
   toolSettingsUiConfig: ToolSettingsUiConfig;
   readingConfig: ReadingConfig;
@@ -731,6 +739,7 @@ interface SettingsState {
   setRunCommandConfig: (config: Partial<RunCommandConfig>) => void;
   setQqBotConfig: (config: Partial<QQBotConfig>) => void;
   setNativeToolConfig: (config: Partial<NativeToolConfig>) => void;
+  setLocationShareConfig: (config: Partial<LocationShareConfig>) => void;
   setMcpToolConfig: (config: Partial<McpToolConfig>) => void;
   setToolSettingsUiConfig: (config: Partial<ToolSettingsUiConfig>) => void;
   setReadingConfig: (config: Partial<ReadingConfig>) => void;
@@ -877,6 +886,11 @@ export const useSettingsStore = create<SettingsState>()(
         appUsageStatsEnabled: false,
         calendarEnabled: false,
         accessibilityControlEnabled: false,
+      },
+      locationShareConfig: {
+        enabled: false,
+        provider: 'tencent',
+        tencentKey: '',
       },
       mcpToolConfig: {
         enabled: false,
@@ -1026,6 +1040,14 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ qqBotConfig: { ...state.qqBotConfig, ...config } })),
       setNativeToolConfig: (config) =>
         set((state) => ({ nativeToolConfig: { ...state.nativeToolConfig, ...config } })),
+      setLocationShareConfig: (config) =>
+        set((state) => ({
+          locationShareConfig: {
+            ...(state.locationShareConfig || { enabled: false, provider: 'tencent', tencentKey: '' }),
+            ...config,
+            provider: 'tencent',
+          },
+        })),
       setMcpToolConfig: (config) =>
         set((state) => ({
           mcpToolConfig: {
@@ -1335,6 +1357,7 @@ export const useSettingsStore = create<SettingsState>()(
         runCommandConfig: state.runCommandConfig,
         qqBotConfig: state.qqBotConfig,
         nativeToolConfig: state.nativeToolConfig,
+        locationShareConfig: state.locationShareConfig,
         mcpToolConfig: state.mcpToolConfig,
         toolSettingsUiConfig: state.toolSettingsUiConfig,
         readingConfig: state.readingConfig,
@@ -1362,6 +1385,11 @@ export const useSettingsStore = create<SettingsState>()(
           promptCacheConfig: normalizePromptCacheConfig(state?.promptCacheConfig),
           ttsConfig: normalizeTTSConfig(state?.ttsConfig),
           sttConfig: normalizeSTTConfig(state?.sttConfig),
+          locationShareConfig: {
+            enabled: state?.locationShareConfig?.enabled ?? false,
+            provider: 'tencent',
+            tencentKey: state?.locationShareConfig?.tencentKey || '',
+          },
           imageGenerationConfig: normalizeImageGenerationConfig(state?.imageGenerationConfig),
           incomingLetterConfig: normalizeIncomingLetterConfig(state?.incomingLetterConfig),
           dailyPaperConfig: normalizeDailyPaperConfig(state?.dailyPaperConfig),

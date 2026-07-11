@@ -12,8 +12,26 @@ export interface Message {
   generatedPics?: GeneratedPicture[];
   imageUri?: string;
   voiceAttachment?: VoiceAttachment;
+  locationAttachment?: LocationAttachment;
   // 生图参考图，仅用于后续 [Pic:...] 的 img2img/edit 调用。
   imageGenerationReferenceUris?: string[];
+  createdAt: number;
+}
+
+export interface LocationAttachment {
+  id: string;
+  provider: 'tencent';
+  latitude: number;
+  longitude: number;
+  mapLatitude?: number;
+  mapLongitude?: number;
+  title: string;
+  address: string;
+  city?: string;
+  province?: string;
+  district?: string;
+  thumbnailUrl?: string;
+  mapUrl?: string;
   createdAt: number;
 }
 

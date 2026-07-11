@@ -315,6 +315,7 @@ export default function ChatScreen() {
     remoteInboxSyncConversationId,
     error,
     addUserMessage,
+    addLocationMessage,
     addVoiceMessage,
     attachConversationFile,
     loadOlderMessages,
@@ -1556,6 +1557,7 @@ export default function ChatScreen() {
           onSendVoice={async (recording) => {
             await addVoiceMessage(recording);
           }}
+          onSendLocation={addLocationMessage}
           onTriggerResponse={triggerResponse}
           onEnableWebCruise={handleEnableWebCruise}
           onAttachFile={attachConversationFile}

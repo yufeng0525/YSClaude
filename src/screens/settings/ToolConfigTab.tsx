@@ -30,7 +30,7 @@ import {
   McpToolModal,
   QqConversationModal,
 } from './tool/ToolConfigModals';
-import { BuiltInToolsSection, McpToolsSection } from './tool/ToolConfigSections';
+import { BuiltInToolsSection, McpToolsSection, OtherFeaturesSection } from './tool/ToolConfigSections';
 import { McpServerEditor } from './tool/McpServerEditor';
 
 type SettingsTabProps = {
@@ -70,6 +70,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     runCommandConfig,
     qqBotConfig,
     nativeToolConfig,
+    locationShareConfig,
     mcpToolConfig,
     toolSettingsUiConfig,
     setMemoryVaultConfig,
@@ -82,6 +83,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     setRunCommandConfig,
     setQqBotConfig,
     setNativeToolConfig,
+    setLocationShareConfig,
     setMcpToolConfig,
     setToolSettingsUiConfig,
   } = useSettingsStore();
@@ -245,6 +247,9 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const [mcpResourceToolsEnabled, setMcpResourceToolsEnabled] = useState(!!mcpToolConfig?.resourceToolsEnabled);
   const builtInToolsExpanded = toolSettingsUiConfig?.builtInToolsExpanded ?? true;
   const customMcpExpanded = toolSettingsUiConfig?.customMcpExpanded ?? true;
+  const otherFeaturesExpanded = toolSettingsUiConfig?.otherFeaturesExpanded ?? true;
+  const [locationEnabled, setLocationEnabled] = useState(!!locationShareConfig?.enabled);
+  const [locationTencentKey, setLocationTencentKey] = useState(locationShareConfig?.tencentKey || '');
   const [selectedBuiltInToolKey, setSelectedBuiltInToolKey] = useState<string | null>(null);
   const [selectedMcpServerId, setSelectedMcpServerId] = useState<string | null>(null);
   const [selectedMcpToolRef, setSelectedMcpToolRef] = useState<{ serverId: string; toolName: string } | null>(null);
@@ -259,6 +264,11 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const [batteryStatusEnabled, setBatteryStatusEnabled] = useState(!!nativeToolConfig?.batteryStatusEnabled);
   const [appUsageStatsEnabled, setAppUsageStatsEnabled] = useState(!!nativeToolConfig?.appUsageStatsEnabled);
   const [calendarEnabled, setCalendarEnabled] = useState(!!nativeToolConfig?.calendarEnabled);
+
+  useEffect(() => {
+    setLocationEnabled(!!locationShareConfig?.enabled);
+    setLocationTencentKey(locationShareConfig?.tencentKey || '');
+  }, [locationShareConfig]);
 
   function handleSaveMemory() {
     const topK = parseInt(mvTopK, 10);
@@ -353,6 +363,19 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       platforms: hbPlatformTypes.join(','),
     });
     showToast(hbEnabled ? 'AI 网页巡游热榜配置已保存' : 'AI 网页巡游热榜已关闭');
+  }
+
+  function handleSaveLocationShare() {
+    if (locationEnabled && !locationTencentKey.trim()) {
+      Alert.alert('提示', '启用位置分享时请填写腾讯地图 Key');
+      return;
+    }
+    setLocationShareConfig({
+      enabled: locationEnabled,
+      provider: 'tencent',
+      tencentKey: locationTencentKey.trim(),
+    });
+    showToast(locationEnabled ? '位置分享配置已保存' : '位置分享已关闭');
   }
 
   function handleAddDailySource() {
@@ -2113,6 +2136,17 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
           onSave={handleSaveMcpTools}
           getEnabledToolCount={getEnabledMcpToolCount}
           getEnabledResourceCount={getEnabledMcpResourceCount}
+        />
+        <OtherFeaturesSection
+          styles={styles}
+          colors={colors}
+          expanded={otherFeaturesExpanded}
+          locationEnabled={locationEnabled}
+          locationTencentKey={locationTencentKey}
+          onToggleExpanded={() => setToolSettingsUiConfig({ otherFeaturesExpanded: !otherFeaturesExpanded })}
+          onChangeLocationEnabled={setLocationEnabled}
+          onChangeLocationTencentKey={setLocationTencentKey}
+          onSaveLocation={handleSaveLocationShare}
         />
       </ScrollView>
       <BuiltInToolModal

@@ -1,5 +1,5 @@
 ﻿import { create } from 'zustand';
-import { Message, Conversation, HiddenRange, ToolInvocation, GeneratedPicture, DailyPaper, ConversationArtifact, VoiceAttachment } from '../types';
+import { Message, Conversation, HiddenRange, ToolInvocation, GeneratedPicture, DailyPaper, ConversationArtifact, VoiceAttachment, LocationAttachment } from '../types';
 import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Alert } from 'react-native';
@@ -84,6 +84,7 @@ import {
   getAllConversations,
 } from '../db/operations';
 import { extensionFromUri, mimeTypeFromUri, transcribeVoice } from '../services/voiceTranscription';
+import { createCurrentLocationAttachment, formatLocationForAi } from '../services/locationShare';
 
 const MESSAGE_PAGE_SIZE = 20;
 const FLOATING_STREAM_MAX_CHARS = 180;
@@ -476,6 +477,13 @@ function formatVoiceMessageForAi(content: string, voice?: VoiceAttachment): stri
   return lines.join('\n');
 }
 
+function formatMessageContentForAi(message: Message): string {
+  if (message.locationAttachment) {
+    return formatLocationForAi(message.locationAttachment);
+  }
+  return formatVoiceMessageForAi(formatDailyPaperCardForAi(message.content), message.voiceAttachment);
+}
+
 async function persistVoiceRecording(recording: VoiceRecordingInput, voiceId: string): Promise<VoiceAttachment> {
   const extension = extensionFromUri(recording.uri);
   const dir = new Directory(Paths.document, 'voice-messages');
@@ -592,6 +600,7 @@ interface ChatState {
 
   sendMessage: (content: string, imageUri?: string, imageGenerationReferenceUris?: string[]) => Promise<void>;
   addUserMessage: (content: string, imageUri?: string, imageGenerationReferenceUris?: string[]) => Promise<Message | null>;
+  addLocationMessage: (locationAttachment?: LocationAttachment) => Promise<Message | null>;
   addVoiceMessage: (recording: VoiceRecordingInput) => Promise<Message | null>;
   attachConversationFile: () => Promise<ConversationArtifact | null>;
   addSharedLinkToLatestConversation: (url: string) => Promise<string>;
@@ -1513,7 +1522,7 @@ async function buildPromptCacheKeepaliveRequest(
     }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
-    let msgContent = formatVoiceMessageForAi(formatDailyPaperCardForAi(m.content), m.voiceAttachment);
+    let msgContent = formatMessageContentForAi(m);
     if (settings.stripThinking) {
       msgContent = msgContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
     }
@@ -1870,7 +1879,7 @@ async function streamAssistantResponse(
     }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
-    let msgContent = formatVoiceMessageForAi(formatDailyPaperCardForAi(m.content), m.voiceAttachment);
+    let msgContent = formatMessageContentForAi(m);
     if (settings.stripThinking) {
       msgContent = msgContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
     }
@@ -2349,6 +2358,74 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       messages: [...state.messages, userMessage],
       error: null,
+    }));
+
+    await insertMessage(conversationId, userMessage);
+    await updateConversation(conversationId, { updatedAt: Date.now() });
+    return userMessage;
+  },
+
+  addLocationMessage: async (selectedLocationAttachment?: LocationAttachment) => {
+    const { isStreaming } = get();
+    if (isStreaming) return null;
+
+    let { conversationId } = get();
+    const settings = useSettingsStore.getState();
+    if (!settings._hydrated) return null;
+    const config = settings.apiConfigs[settings.activeConfigIndex];
+
+    if (!config || !config.baseUrl || !config.apiKey) {
+      set({ error: '请先在设置中配置 API' });
+      return null;
+    }
+
+    const locationAttachment: LocationAttachment =
+      selectedLocationAttachment || await createCurrentLocationAttachment(settings.locationShareConfig);
+    const content = formatLocationForAi(locationAttachment);
+
+    if (!conversationId) {
+      conversationId = randomUUID();
+      const now = Date.now();
+      const conv: Conversation = {
+        id: conversationId,
+        title: locationAttachment.title || '[位置]',
+        systemPrompt: settings.systemPrompt,
+        model: config.model,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await createConversation(conv);
+      set({
+        conversationId,
+        hasOlderMessages: false,
+        hasNewerMessages: false,
+        isLoadingNewerMessages: false,
+        messageFloorOffset: 0,
+      });
+    }
+
+    if ((await getPendingResponseBoundaryMessageId(conversationId)) === undefined) {
+      const inMemoryBoundaryMessage = [...get().messages]
+        .reverse()
+        .find((message) => message.role === 'user' || message.role === 'assistant');
+      const boundaryMessage = inMemoryBoundaryMessage ?? [...await getMessagesByConversation(conversationId)]
+        .reverse()
+        .find((message) => message.role === 'user' || message.role === 'assistant');
+      await setPendingResponseBoundaryMessageId(conversationId, boundaryMessage?.id ?? null);
+    }
+
+    const userMessage: Message = {
+      id: randomUUID(),
+      role: 'user',
+      content,
+      locationAttachment,
+      createdAt: Date.now(),
+    };
+
+    set((state) => ({
+      messages: [...state.messages, userMessage],
+      error: null,
+      openToBottomRequestId: state.openToBottomRequestId + 1,
     }));
 
     await insertMessage(conversationId, userMessage);

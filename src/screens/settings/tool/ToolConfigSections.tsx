@@ -40,6 +40,18 @@ type McpToolsSectionProps = {
   getEnabledResourceCount: (server: any) => number;
 };
 
+type OtherFeaturesSectionProps = {
+  styles: any;
+  colors: any;
+  expanded: boolean;
+  locationEnabled: boolean;
+  locationTencentKey: string;
+  onToggleExpanded: () => void;
+  onChangeLocationEnabled: (value: boolean) => void;
+  onChangeLocationTencentKey: (value: string) => void;
+  onSaveLocation: () => void;
+};
+
 export function BuiltInToolsSection({
   styles,
   colors,
@@ -176,6 +188,64 @@ export function McpToolsSection({
           <View style={styles.actions}>
             <Pressable style={styles.saveButton} onPress={onSave}>
               <Text style={styles.saveButtonText}>保存 MCP 能力</Text>
+            </Pressable>
+          </View>
+        </>
+      )}
+    </>
+  );
+}
+
+export function OtherFeaturesSection({
+  styles,
+  colors,
+  expanded,
+  locationEnabled,
+  locationTencentKey,
+  onToggleExpanded,
+  onChangeLocationEnabled,
+  onChangeLocationTencentKey,
+  onSaveLocation,
+}: OtherFeaturesSectionProps) {
+  return (
+    <>
+      <Pressable style={styles.toolGroupHeader} onPress={onToggleExpanded}>
+        <View style={styles.switchText}>
+          <Text style={styles.toolGroupTitle}>其他功能</Text>
+          <Text style={styles.hint}>配置不属于 AI 工具调用的本地辅助能力。</Text>
+        </View>
+        <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
+      </Pressable>
+      {expanded && (
+        <>
+          <View style={styles.switchRow}>
+            <View style={styles.switchText}>
+              <Text style={styles.label}>启用位置分享</Text>
+              <Text style={styles.hint}>加号菜单可发送当前位置卡片；默认使用腾讯地图解析地址和缩略图。</Text>
+            </View>
+            <Switch
+              value={locationEnabled}
+              onValueChange={onChangeLocationEnabled}
+              trackColor={{ false: colors.inputBorder, true: colors.primary }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>腾讯地图 Key</Text>
+            <TextInput
+              style={styles.input}
+              value={locationTencentKey}
+              onChangeText={onChangeLocationTencentKey}
+              placeholder="填写腾讯位置服务 WebService Key"
+              placeholderTextColor={colors.textTertiary}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            <Text style={styles.hint}>开源版本不内置 Key；请使用者在腾讯位置服务控制台创建自己的 Key，并启用 WebService API。</Text>
+          </View>
+          <View style={styles.actions}>
+            <Pressable style={styles.saveButton} onPress={onSaveLocation}>
+              <Text style={styles.saveButtonText}>保存位置分享</Text>
             </Pressable>
           </View>
         </>

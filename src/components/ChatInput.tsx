@@ -17,6 +17,16 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  FolderOpen,
+  Globe2,
+  Image as ImageIcon,
+  MapPin,
+  Palette,
+  Paperclip,
+  Sparkles,
+  Wrench,
+} from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   RecordingPresets,
@@ -26,6 +36,7 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
@@ -33,7 +44,7 @@ import { fonts } from '../theme/fonts';
 
 import { useSettingsStore } from '../stores/settings';
 import { useChatStore } from '../stores/chat';
-import type { ConversationArtifact, ConversationArtifactVersion } from '../types';
+import type { ConversationArtifact, ConversationArtifactVersion, LocationAttachment } from '../types';
 import { buildStickerDefinitions, normalizeStickerName, type StickerDefinition } from '../utils/stickers';
 import { getAppearanceCssStyle, getAppearancePlaceholderTextColor, parseAppearanceCss } from '../utils/appearanceCss';
 import {
@@ -49,6 +60,15 @@ import {
   readMcpResource,
 } from '../services/mcpHttpClient';
 import { copyFileFromUri } from '../utils/fileSystem';
+import {
+  createCurrentLocationDraft,
+  createLocationDraftFromSearchResult,
+  finalizeLocationDraft,
+  resolveTencentLocationDraft,
+  searchLocationDrafts,
+  type LocationDraft,
+  type LocationSearchResult,
+} from '../services/locationShare';
 
 
 let colors = lightColors;
@@ -132,12 +152,75 @@ async function copyImageGenerationReference(asset: ImagePicker.ImagePickerAsset)
   return destination.uri;
 }
 
+function buildLocationMapHtml(key: string, latitude: number, longitude: number): string {
+  const safeKey = encodeURIComponent(key);
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <style>
+    html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    .hint {
+      position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+      z-index: 20; padding: 7px 12px; border-radius: 999px;
+      background: rgba(20, 20, 20, 0.68); color: white;
+      font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      white-space: nowrap;
+    }
+  </style>
+  <script charset="utf-8" src="https://map.qq.com/api/js?v=2.exp&key=${safeKey}"></script>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="hint">拖动定位点或点击地图调整位置</div>
+  <script>
+    (function () {
+      function post(type, latLng) {
+        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: type,
+          latitude: latLng.getLat(),
+          longitude: latLng.getLng()
+        }));
+      }
+      function init() {
+        var center = new qq.maps.LatLng(${latitude}, ${longitude});
+        var map = new qq.maps.Map(document.getElementById('map'), {
+          center: center,
+          zoom: 16,
+          mapTypeControl: false,
+          panControl: false,
+          zoomControl: true
+        });
+        var marker = new qq.maps.Marker({
+          position: center,
+          map: map,
+          draggable: true
+        });
+        qq.maps.event.addListener(marker, 'dragend', function () {
+          post('pin_drag_end', marker.getPosition());
+        });
+        qq.maps.event.addListener(map, 'click', function (event) {
+          marker.setPosition(event.latLng);
+          map.panTo(event.latLng);
+          post('pin_drag_end', event.latLng);
+        });
+      }
+      if (window.qq && qq.maps) init();
+      else window.onload = init;
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 interface Props {
   onSend: (text: string, imageUri?: string, imageGenerationReferenceUris?: string[]) => void | Promise<void>;
   onSendVoice?: (recording: { uri: string; durationMs: number; mimeType?: string }) => void | Promise<void>;
   onTriggerResponse: () => void | Promise<void>;
   onEnableWebCruise?: () => void | Promise<void>;
   onAttachFile?: () => void | Promise<unknown>;
+  onSendLocation?: (location: LocationAttachment) => void | Promise<unknown>;
   disabled?: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -150,6 +233,7 @@ export function ChatInput({
   onTriggerResponse,
   onEnableWebCruise,
   onAttachFile,
+  onSendLocation,
   disabled,
   isStreaming,
   onStop,
@@ -186,6 +270,15 @@ export function ChatInput({
   const [mcpPromptArgs, setMcpPromptArgs] = useState<Record<string, string>>({});
   const [mcpBusyKey, setMcpBusyKey] = useState<string | null>(null);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [isSendingLocation, setIsSendingLocation] = useState(false);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [locationPickerLoading, setLocationPickerLoading] = useState(false);
+  const [locationPickerMessage, setLocationPickerMessage] = useState('');
+  const [locationDraft, setLocationDraft] = useState<LocationDraft | null>(null);
+  const [locationMapVersion, setLocationMapVersion] = useState(0);
+  const [locationSearchQuery, setLocationSearchQuery] = useState('');
+  const [locationSearchResults, setLocationSearchResults] = useState<LocationSearchResult[]>([]);
+  const [locationSearchLoading, setLocationSearchLoading] = useState(false);
   const shouldInvertResponseIcon = isDarkTheme && (isStreaming || !isInputFocused);
   const responseTouchStartedRef = useRef(false);
   const sendInFlightRef = useRef(false);
@@ -203,6 +296,7 @@ export function ChatInput({
     appearanceConfig,
     stickerConfig,
     mcpToolConfig,
+    locationShareConfig,
     setAppearanceConfig,
     setMcpToolConfig,
   } = useSettingsStore();
@@ -215,6 +309,21 @@ export function ChatInput({
   const inputPlaceholderTextColor = getAppearancePlaceholderTextColor(inputPlaceholderStyle, colors.textTertiary);
   const current = apiConfigs[activeConfigIndex];
   const currentModel = current?.name || current?.model || '未配置';
+  const locationMapHtml = useMemo(() => {
+    if (!locationDraft || !locationShareConfig?.tencentKey?.trim()) return '';
+    return buildLocationMapHtml(
+      locationShareConfig.tencentKey.trim(),
+      locationDraft.mapLatitude ?? locationDraft.latitude,
+      locationDraft.mapLongitude ?? locationDraft.longitude
+    );
+  }, [
+    locationDraft?.latitude,
+    locationDraft?.longitude,
+    locationDraft?.mapLatitude,
+    locationDraft?.mapLongitude,
+    locationMapVersion,
+    locationShareConfig?.tencentKey,
+  ]);
   const mcpServers = mcpToolConfig?.servers || [];
   const selectedMcpServer =
     mcpServers.find((server) => server.id === mcpSelectedServerId) ||
@@ -315,6 +424,106 @@ export function ChatInput({
       await onAttachFile?.();
     } catch (error: any) {
       Alert.alert('上传文件失败', error?.message || '无法读取所选文件');
+    }
+  };
+
+  const handleSendLocation = async () => {
+    if (disabled || isStreaming || isSendingLocation) return;
+    setOptionsMenuVisible(false);
+    Keyboard.dismiss();
+    setIsSendingLocation(true);
+    setLocationPickerVisible(true);
+    setLocationPickerLoading(true);
+    setLocationPickerMessage('正在定位...');
+    setLocationSearchQuery('');
+    setLocationSearchResults([]);
+    try {
+      const draft = await createCurrentLocationDraft(locationShareConfig);
+      setLocationDraft(draft);
+      setLocationMapVersion((value) => value + 1);
+      setLocationPickerMessage('');
+    } catch (error: any) {
+      setLocationPickerVisible(false);
+      Alert.alert('发送位置失败', error?.message || '无法获取当前位置');
+    } finally {
+      setLocationPickerLoading(false);
+      setIsSendingLocation(false);
+    }
+  };
+
+  const handleCloseLocationPicker = () => {
+    setLocationPickerVisible(false);
+    setLocationPickerLoading(false);
+    setLocationPickerMessage('');
+    setLocationSearchResults([]);
+  };
+
+  const handleLocationMapMessage = async (event: WebViewMessageEvent) => {
+    let payload: any;
+    try {
+      payload = JSON.parse(event.nativeEvent.data);
+    } catch {
+      return;
+    }
+    if (payload?.type !== 'pin_drag_end') return;
+    const latitude = Number(payload.latitude);
+    const longitude = Number(payload.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    setLocationPickerMessage('正在解析位置...');
+    try {
+      const draft = await resolveTencentLocationDraft(locationShareConfig, latitude, longitude);
+      setLocationDraft(draft);
+      setLocationPickerMessage('');
+    } catch (error: any) {
+      setLocationPickerMessage(error?.message || '位置解析失败');
+    }
+  };
+
+  const handleSearchLocations = async () => {
+    const query = locationSearchQuery.trim();
+    if (!query || locationSearchLoading) return;
+    setLocationSearchLoading(true);
+    setLocationPickerMessage('');
+    try {
+      const results = await searchLocationDrafts(locationShareConfig, query, locationDraft);
+      setLocationSearchResults(results);
+      if (results.length === 0) {
+        setLocationPickerMessage('没有找到相关地点');
+      }
+    } catch (error: any) {
+      setLocationPickerMessage(error?.message || '地点搜索失败');
+    } finally {
+      setLocationSearchLoading(false);
+    }
+  };
+
+  const handleSelectLocationSearchResult = async (result: LocationSearchResult) => {
+    setLocationSearchLoading(true);
+    setLocationPickerMessage('正在定位到搜索结果...');
+    try {
+      const draft = await createLocationDraftFromSearchResult(locationShareConfig, result);
+      setLocationDraft(draft);
+      setLocationSearchQuery(result.title);
+      setLocationSearchResults([]);
+      setLocationMapVersion((value) => value + 1);
+      setLocationPickerMessage('');
+    } catch (error: any) {
+      setLocationPickerMessage(error?.message || '无法选择该地点');
+    } finally {
+      setLocationSearchLoading(false);
+    }
+  };
+
+  const handleConfirmLocation = async () => {
+    if (!locationDraft || isSendingLocation) return;
+    setIsSendingLocation(true);
+    try {
+      await onSendLocation?.(finalizeLocationDraft(locationDraft));
+      handleCloseLocationPicker();
+    } catch (error: any) {
+      Alert.alert('发送位置失败', error?.message || '无法发送当前位置');
+    } finally {
+      setIsSendingLocation(false);
     }
   };
 
@@ -560,6 +769,8 @@ export function ChatInput({
     if (disabled) return;
     if (sendInFlightRef.current) return;
     sendInFlightRef.current = true;
+    setStickerPickerVisible(false);
+    setOptionsMenuVisible(false);
     const submittedImage = pendingImage || undefined;
     const submittedImageRefs = pendingImageRefs.length > 0 ? pendingImageRefs : undefined;
     setText('');
@@ -661,7 +872,23 @@ export function ChatInput({
       suppressStickerPressAfterVoiceRef.current = false;
       return;
     }
-    setStickerPickerVisible(true);
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setOptionsMenuVisible(false);
+    setStickerPickerVisible((visible) => !visible);
+  };
+
+  const handleOptionsButtonPress = () => {
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setStickerPickerVisible(false);
+    setOptionsMenuVisible((visible) => !visible);
+  };
+
+  const handleInputFocus = () => {
+    setIsInputFocused(true);
+    setStickerPickerVisible(false);
+    setOptionsMenuVisible(false);
   };
 
   const handleChangeText = (next: string) => {
@@ -700,6 +927,7 @@ export function ChatInput({
   const handleSendSticker = async (token: string) => {
     if (disabled || isStreaming) return;
     setStickerPickerVisible(false);
+    setOptionsMenuVisible(false);
     setText('');
     setPendingImage(null);
     setPendingImageRefs([]);
@@ -731,6 +959,23 @@ export function ChatInput({
     setCssDraft('');
     setAppearanceConfig({ customCss: '' });
   };
+
+  const optionActions = [
+    { key: 'web', label: 'AI网页巡游', Icon: Globe2, onPress: () => void handleEnableWebCruise() },
+    { key: 'mcp', label: 'MCP 管理', Icon: Wrench, onPress: handleOpenMcpPanel },
+    { key: 'image', label: '图片', Icon: ImageIcon, onPress: () => void pickImage() },
+    { key: 'reference', label: '生图参考图', Icon: Sparkles, onPress: () => void pickImageReferences() },
+    { key: 'file', label: '文件', Icon: Paperclip, onPress: () => void handleAttachFile() },
+    {
+      key: 'location',
+      label: isSendingLocation ? '定位中...' : '发送位置',
+      Icon: MapPin,
+      onPress: () => void handleSendLocation(),
+      disabled: isSendingLocation,
+    },
+    { key: 'manager', label: '文件管理', Icon: FolderOpen, onPress: () => void openFileManager() },
+    { key: 'css', label: '自定义 CSS', Icon: Palette, onPress: handleOpenCssEditor },
+  ];
 
   return (
     <View
@@ -815,7 +1060,7 @@ export function ChatInput({
         )}
         {isCompactInput ? (
           <View style={[styles.compactRow, cssStyle('.input-compact-row')]}>
-            <Pressable style={[styles.optionsButton, cssStyle('.options-button')]} onPress={() => setOptionsMenuVisible(true)}>
+            <Pressable style={[styles.optionsButton, cssStyle('.options-button')]} onPress={handleOptionsButtonPress}>
               <Image
                 source={inputIconUris.options ? { uri: inputIconUris.options } : require('../../assets/optionsbutton.png')}
                 style={styles.optionsImage}
@@ -856,7 +1101,7 @@ export function ChatInput({
                 maxLength={10000}
                 scrollEnabled={false}
                 editable={!disabled && !isVoiceRecording}
-                onFocus={() => setIsInputFocused(true)}
+                onFocus={handleInputFocus}
                 onBlur={() => setIsInputFocused(false)}
               />
             </Pressable>
@@ -908,12 +1153,12 @@ export function ChatInput({
                 maxLength={10000}
                 scrollEnabled
                 editable={!disabled && !isVoiceRecording}
-                onFocus={() => setIsInputFocused(true)}
+                onFocus={handleInputFocus}
                 onBlur={() => setIsInputFocused(false)}
               />
             </Pressable>
             <View style={[styles.toolbar, cssStyle('.input-toolbar')]}>
-          <Pressable style={[styles.optionsButton, cssStyle('.options-button')]} onPress={() => setOptionsMenuVisible(true)}>
+          <Pressable style={[styles.optionsButton, cssStyle('.options-button')]} onPress={handleOptionsButtonPress}>
             <Image
               source={inputIconUris.options ? { uri: inputIconUris.options } : require('../../assets/optionsbutton.png')}
               style={styles.optionsImage}
@@ -957,9 +1202,8 @@ export function ChatInput({
         )}
       </View>
 
-      <Modal transparent visible={stickerPickerVisible} animationType="fade" onRequestClose={() => setStickerPickerVisible(false)}>
-        <Pressable style={styles.stickerOverlay} onPress={() => setStickerPickerVisible(false)}>
-          <View style={styles.stickerPanel} onStartShouldSetResponder={() => true}>
+      {stickerPickerVisible && (
+        <View style={[styles.inlinePanel, styles.stickerPanel]}>
             <ScrollView
               style={styles.stickerScroll}
               contentContainerStyle={styles.stickerGrid}
@@ -985,42 +1229,138 @@ export function ChatInput({
                 ))
               )}
             </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+        </View>
+      )}
 
-      <Modal transparent visible={optionsMenuVisible} animationType="fade" onRequestClose={() => setOptionsMenuVisible(false)}>
-        <Pressable style={styles.optionsOverlay} onPress={() => setOptionsMenuVisible(false)}>
-          <View style={styles.optionsPanel} onStartShouldSetResponder={() => true}>
-            <Pressable style={styles.optionItem} onPress={() => void handleEnableWebCruise()}>
-              <Text style={styles.optionText}>AI网页巡游</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={handleOpenMcpPanel}>
-              <Text style={styles.optionText}>MCP 管理</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={() => void pickImage()}>
-              <Text style={styles.optionText}>图片</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={() => void pickImageReferences()}>
-              <Text style={styles.optionText}>生图参考图</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={() => void handleAttachFile()}>
-              <Text style={styles.optionText}>文件</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={() => void openFileManager()}>
-              <Text style={styles.optionText}>文件管理</Text>
-            </Pressable>
-            <View style={styles.optionDivider} />
-            <Pressable style={styles.optionItem} onPress={handleOpenCssEditor}>
-              <Text style={styles.optionText}>自定义 CSS</Text>
-            </Pressable>
+      {optionsMenuVisible && (
+        <View style={[styles.inlinePanel, styles.optionsPanel]}>
+          <View style={styles.optionsGrid}>
+            {optionActions.map((action) => {
+              const Icon = action.Icon;
+              const disabledAction = !!action.disabled;
+              return (
+                <Pressable
+                  key={action.key}
+                  style={[styles.optionItem, disabledAction && styles.optionItemDisabled]}
+                  onPress={action.onPress}
+                  disabled={disabledAction}
+                >
+                  <View style={styles.optionIconWrap}>
+                    <Icon
+                      size={24}
+                      color={disabledAction ? colors.textTertiary : colors.textSecondary}
+                      strokeWidth={2}
+                    />
+                  </View>
+                  <Text
+                    style={[styles.optionText, disabledAction && styles.optionTextDisabled]}
+                    numberOfLines={1}
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-        </Pressable>
+        </View>
+      )}
+
+      <Modal visible={locationPickerVisible} transparent animationType="slide" onRequestClose={handleCloseLocationPicker}>
+        <View style={styles.locationPickerOverlay}>
+          <View style={styles.locationPickerPanel}>
+            <View style={styles.locationPickerHeader}>
+              <Pressable style={styles.locationPickerHeaderButton} onPress={handleCloseLocationPicker}>
+                <Text style={styles.locationPickerHeaderButtonText}>取消</Text>
+              </Pressable>
+              <Text style={styles.locationPickerTitle}>发送位置</Text>
+              <Pressable
+                style={[styles.locationPickerHeaderButton, (!locationDraft || isSendingLocation) && styles.locationPickerHeaderButtonDisabled]}
+                onPress={() => void handleConfirmLocation()}
+                disabled={!locationDraft || isSendingLocation}
+              >
+                <Text style={[styles.locationPickerHeaderButtonText, styles.locationPickerSendText]}>
+                  {isSendingLocation ? '发送中' : '发送'}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.locationSearchBar}>
+              <TextInput
+                style={styles.locationSearchInput}
+                value={locationSearchQuery}
+                onChangeText={setLocationSearchQuery}
+                onSubmitEditing={() => void handleSearchLocations()}
+                placeholder="搜索地点"
+                placeholderTextColor={colors.textTertiary}
+                returnKeyType="search"
+                autoCapitalize="none"
+              />
+              <Pressable
+                style={[styles.locationSearchButton, locationSearchLoading && styles.locationPickerHeaderButtonDisabled]}
+                onPress={() => void handleSearchLocations()}
+                disabled={locationSearchLoading}
+              >
+                {locationSearchLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.locationSearchButtonText}>搜索</Text>
+                )}
+              </Pressable>
+            </View>
+            {locationSearchResults.length > 0 && (
+              <ScrollView
+                style={styles.locationSearchResults}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.locationSearchResultsContent}
+              >
+                {locationSearchResults.map((result) => (
+                  <Pressable
+                    key={result.id}
+                    style={styles.locationSearchResultItem}
+                    onPress={() => void handleSelectLocationSearchResult(result)}
+                  >
+                    <Text style={styles.locationSearchResultTitle} numberOfLines={1}>{result.title}</Text>
+                    <Text style={styles.locationSearchResultAddress} numberOfLines={1}>{result.address || `${result.latitude.toFixed(6)}, ${result.longitude.toFixed(6)}`}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            <View style={styles.locationMapContainer}>
+              {locationDraft && locationMapHtml ? (
+                <WebView
+                  key={`location-map-${locationMapVersion}`}
+                  originWhitelist={['*']}
+                  source={{ html: locationMapHtml, baseUrl: 'https://map.qq.com/' }}
+                  javaScriptEnabled
+                  domStorageEnabled
+                  onMessage={(event) => void handleLocationMapMessage(event)}
+                  onError={() => setLocationPickerMessage('地图加载失败，请检查网络或腾讯地图 Key')}
+                  style={styles.locationMapWebView}
+                />
+              ) : (
+                <View style={styles.locationMapLoading}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={styles.locationMapLoadingText}>{locationPickerMessage || '正在加载地图...'}</Text>
+                </View>
+              )}
+              {locationPickerLoading && (
+                <View style={styles.locationMapBusyOverlay}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+              )}
+            </View>
+            <View style={styles.locationSelectionPanel}>
+              <Text style={styles.locationSelectionTitle} numberOfLines={1}>
+                {locationDraft?.title || '正在获取位置'}
+              </Text>
+              <Text style={styles.locationSelectionAddress} numberOfLines={2}>
+                {locationDraft?.address || locationPickerMessage || '拖动定位点或搜索地点后选择'}
+              </Text>
+              {!!locationPickerMessage && !!locationDraft && (
+                <Text style={styles.locationSelectionStatus} numberOfLines={1}>{locationPickerMessage}</Text>
+              )}
+            </View>
+          </View>
+        </View>
       </Modal>
 
       <Modal transparent visible={fileManagerVisible} animationType="fade" onRequestClose={closeFileManager}>
@@ -1623,23 +1963,17 @@ const createStyles = (
   invertedImageIcon: {
     tintColor: colors.text,
   },
-  stickerOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.12)',
+  inlinePanel: {
+    marginTop: 8,
+    backgroundColor: colors.inputBackground,
+    borderTopWidth: 1,
+    borderTopColor: colors.inputBorder,
   },
   stickerPanel: {
-    marginHorizontal: 12,
-    marginBottom: 96,
-    backgroundColor: colors.inputBackground,
-    borderRadius: 20,
-    padding: 12,
     height: STICKER_PANEL_HEIGHT,
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 8,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 10,
   },
   stickerScroll: {
     flex: 1,
@@ -1686,44 +2020,200 @@ const createStyles = (
     fontSize: 12,
     color: colors.textSecondary,
   },
-  optionsOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.08)',
-  },
   optionsPanel: {
-    marginLeft: 18,
-    marginBottom: 96,
-    minWidth: 148,
-    backgroundColor: colors.inputBackground,
-    borderRadius: 14,
-    paddingVertical: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 8,
+    minHeight: 212,
+    paddingHorizontal: 8,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  optionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 16,
   },
   optionItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    width: '25%',
+    minHeight: 82,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 4,
   },
   optionItemDisabled: {
     opacity: 0.55,
   },
+  optionIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceHover,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 7,
+  },
   optionText: {
-    fontSize: 15,
-    color: colors.text,
+    width: '100%',
+    fontSize: 12,
+    color: colors.textSecondary,
     fontWeight: '500',
+    textAlign: 'center',
   },
   optionTextDisabled: {
     color: colors.textTertiary,
   },
-  optionDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.inputBorder,
-    marginHorizontal: 10,
+  locationPickerOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.24)',
+  },
+  locationPickerPanel: {
+    height: Math.min(720, Math.max(520, viewportHeight - 36)),
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: 'hidden',
+  },
+  locationPickerHeader: {
+    height: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  locationPickerTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  locationPickerHeaderButton: {
+    minWidth: 62,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  locationPickerHeaderButtonDisabled: {
+    opacity: 0.5,
+  },
+  locationPickerHeaderButtonText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  locationPickerSendText: {
+    color: colors.primary,
+  },
+  locationSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.background,
+  },
+  locationSearchInput: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.inputBackground,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    color: colors.text,
+    fontSize: 15,
+  },
+  locationSearchButton: {
+    width: 64,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight,
+  },
+  locationSearchButtonText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  locationSearchResults: {
+    maxHeight: 168,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.inputBackground,
+  },
+  locationSearchResultsContent: {
+    paddingVertical: 4,
+  },
+  locationSearchResultItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  locationSearchResultTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  locationSearchResultAddress: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  locationMapContainer: {
+    flex: 1,
+    minHeight: 260,
+    backgroundColor: colors.surface,
+  },
+  locationMapWebView: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
+  locationMapLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  locationMapLoadingText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  locationMapBusyOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  locationSelectionPanel: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 92,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  locationSelectionTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  locationSelectionAddress: {
+    marginTop: 5,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  locationSelectionStatus: {
+    marginTop: 6,
+    color: colors.textTertiary,
+    fontSize: 12,
   },
   fileManagerKeyboardAvoider: {
     flex: 1,

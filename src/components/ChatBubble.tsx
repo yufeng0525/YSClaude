@@ -5,7 +5,7 @@ import Markdown from '@ronradtke/react-native-markdown-display';
 import { BlurView } from 'expo-blur';
 import { createAudioPlayer, type AudioStatus } from 'expo-audio';
 import Svg, { Path } from 'react-native-svg';
-import { Message, type GeneratedPicture, type ToolInvocation, type VoiceAttachment } from '../types';
+import { Message, type GeneratedPicture, type LocationAttachment, type ToolInvocation, type VoiceAttachment } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts, fontWeights } from '../theme/fonts';
 import { useChatStore } from '../stores/chat';
@@ -84,6 +84,64 @@ function buildVoiceEditText(content: string, voice?: VoiceAttachment): string {
   if (transcript) return transcript;
   if (voiceToken && content.trim() === voiceToken) return '';
   return content;
+}
+
+function normalizeLocationThumbnailUrl(thumbnailUrl?: string): string | undefined {
+  if (!thumbnailUrl) return undefined;
+  try {
+    const url = new URL(thumbnailUrl);
+    if (!url.hostname.includes('apis.map.qq.com') || !url.pathname.includes('/ws/staticmap/')) {
+      return thumbnailUrl;
+    }
+
+    const markers = url.searchParams.get('markers');
+    if (markers) {
+      url.searchParams.set(
+        'markers',
+        markers
+          .replace(/color:0x[0-9a-fA-F]+/g, 'color:red')
+          .replace(/\|label:\|/g, '|')
+          .replace(/^label:\|/g, '')
+      );
+    }
+    if (!url.searchParams.has('maptype')) url.searchParams.set('maptype', 'roadmap');
+    if (!url.searchParams.has('format')) url.searchParams.set('format', 'png');
+    return url.toString();
+  } catch {
+    return thumbnailUrl;
+  }
+}
+
+function LocationCard({ location }: { location: LocationAttachment }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailUrl = normalizeLocationThumbnailUrl(location.thumbnailUrl);
+
+  useEffect(() => {
+    setThumbnailFailed(false);
+  }, [thumbnailUrl]);
+
+  const shouldShowThumbnail = !!thumbnailUrl && !thumbnailFailed;
+
+  return (
+    <View style={styles.locationCard}>
+      {shouldShowThumbnail ? (
+        <Image
+          source={{ uri: thumbnailUrl }}
+          style={styles.locationMapImage}
+          resizeMode="cover"
+          onError={() => setThumbnailFailed(true)}
+        />
+      ) : (
+        <View style={styles.locationMapFallback}>
+          <Text style={styles.locationMapFallbackText}>地图</Text>
+        </View>
+      )}
+      <View style={styles.locationCardBody}>
+        <Text style={styles.locationTitle} numberOfLines={1}>{location.title || '我的位置'}</Text>
+        <Text style={styles.locationAddress} numberOfLines={2}>{location.address || `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`}</Text>
+      </View>
+    </View>
+  );
 }
 
 function getSvgTailFill(style: StyleProp<TailSvgStyle>, fallbackColor: string): string {
@@ -1181,6 +1239,7 @@ export const ChatBubble = React.memo(function ChatBubble({
     const userBubbleMaxWidth = Math.round(messageAvailableWidth * (userBubbleWidthPercent / 100));
     const expandUserMarkdownBlockBubble = shouldExpandMarkdownBlockBubble(message.content);
     const voiceAttachment = message.voiceAttachment;
+    const locationAttachment = message.locationAttachment;
     const voiceToken = voiceAttachment ? `[Voice:${voiceAttachment.id}]` : '';
     const isVoiceOnlyMessage = !!voiceAttachment && message.content.trim() === voiceToken;
     const userStickerOnlyMessage = messageIsStickerOnly && !dailyPaperCard && !sharedLinkUrl;
@@ -1226,6 +1285,15 @@ export const ChatBubble = React.memo(function ChatBubble({
           {avatarHeader}
           {floorLabel && <Text style={styles.floorLabelRight}>{floorLabel}</Text>}
           {isHidden && <Text style={styles.hiddenLabelRight}>已隐藏</Text>}
+          {locationAttachment && (
+            <Pressable
+              ref={bubbleRef}
+              onPress={handleBubbleTap}
+              onLongPress={handleUserLongPress}
+            >
+              <LocationCard location={locationAttachment} />
+            </Pressable>
+          )}
           {message.imageUri && (
             <Pressable
               ref={!message.content ? bubbleRef : undefined}
@@ -1300,7 +1368,7 @@ export const ChatBubble = React.memo(function ChatBubble({
               </Text>
             </>
           )}
-          {message.content.length > 0 && !isVoiceOnlyMessage && (
+          {message.content.length > 0 && !isVoiceOnlyMessage && !locationAttachment && (
             <Pressable
               ref={bubbleRef}
               onPress={dailyPaperCard ? () => setDailyPaperVisible(true) : sharedLinkUrl ? openSharedLinkCard : handleBubbleTap}
@@ -1334,7 +1402,7 @@ export const ChatBubble = React.memo(function ChatBubble({
               )}
             </Pressable>
           )}
-          {message.content.length === 0 && !message.imageUri && !message.voiceAttachment && !(message.imageGenerationReferenceUris?.length) && (
+          {message.content.length === 0 && !message.imageUri && !message.voiceAttachment && !locationAttachment && !(message.imageGenerationReferenceUris?.length) && (
             <Pressable
               ref={bubbleRef}
               onPress={handleBubbleTap}
@@ -2365,6 +2433,46 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 0,
     paddingHorizontal: 0,
     overflow: 'visible',
+  },
+  locationCard: {
+    width: Math.min(300, IMAGE_MAX_WIDTH + 48),
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: colors.inputBackground,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    marginBottom: 6,
+  },
+  locationMapImage: {
+    width: '100%',
+    height: 128,
+    backgroundColor: colors.surface,
+  },
+  locationMapFallback: {
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  locationMapFallbackText: {
+    color: colors.textTertiary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  locationCardBody: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  locationTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  locationAddress: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
   },
   userImage: {
     width: IMAGE_MAX_WIDTH,

@@ -70,6 +70,7 @@ async function initTables(database: SQLite.SQLiteDatabase) {
       tool_invocations TEXT,
       generated_pics TEXT,
       voice_attachment TEXT,
+      location_attachment TEXT,
       image_generation_reference_uris TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -673,6 +674,15 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   }
   if (version < 21) {
     await database.execAsync('PRAGMA user_version = 21;');
+  }
+
+  if (!(await hasColumn(database, 'messages', 'location_attachment'))) {
+    await database.execAsync(
+      `ALTER TABLE messages ADD COLUMN location_attachment TEXT;`
+    );
+  }
+  if (version < 22) {
+    await database.execAsync('PRAGMA user_version = 22;');
   }
 }
 

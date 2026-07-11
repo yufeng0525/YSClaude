@@ -32,6 +32,7 @@ import {
   ConversationArtifact,
   ConversationArtifactKind,
   ConversationArtifactVersion,
+  LocationAttachment,
   VoiceAttachment,
 } from '../types';
 import {
@@ -59,6 +60,7 @@ interface MessageRow {
   tool_invocations: string | null;
   generated_pics: string | null;
   voice_attachment: string | null;
+  location_attachment: string | null;
   image_uri: string | null;
   image_generation_reference_uris: string | null;
   created_at: number;
@@ -391,8 +393,8 @@ export async function clearPendingResponseBoundaryMessageId(
 export async function insertMessage(conversationId: string, msg: Message): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT OR REPLACE INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, tool_invocations, generated_pics, voice_attachment, image_uri, image_generation_reference_uris, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, conversation_id, role, content, tool_calls, tool_call_id, tool_invocations, generated_pics, voice_attachment, location_attachment, image_uri, image_generation_reference_uris, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       msg.id,
       conversationId,
@@ -403,6 +405,7 @@ export async function insertMessage(conversationId: string, msg: Message): Promi
       msg.toolInvocations && msg.toolInvocations.length > 0 ? JSON.stringify(msg.toolInvocations) : null,
       msg.generatedPics && msg.generatedPics.length > 0 ? JSON.stringify(msg.generatedPics) : null,
       msg.voiceAttachment ? JSON.stringify(msg.voiceAttachment) : null,
+      msg.locationAttachment ? JSON.stringify(msg.locationAttachment) : null,
       msg.imageUri || null,
       msg.imageGenerationReferenceUris && msg.imageGenerationReferenceUris.length > 0
         ? JSON.stringify(msg.imageGenerationReferenceUris)
@@ -1026,6 +1029,7 @@ function mapMessageRow(row: MessageRow): Message {
     toolInvocations: parseJsonArray<ToolInvocation>(row.tool_invocations),
     generatedPics: parseJsonArray<GeneratedPicture>(row.generated_pics),
     voiceAttachment: parseJsonObject<VoiceAttachment>(row.voice_attachment),
+    locationAttachment: parseJsonObject<LocationAttachment>(row.location_attachment),
     imageUri: row.image_uri || undefined,
     imageGenerationReferenceUris: parseStringArray(row.image_generation_reference_uris),
     createdAt: row.created_at,
