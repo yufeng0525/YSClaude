@@ -20,6 +20,7 @@ import {
   FocusSession,
   FocusTimerMode,
   FocusSessionStatus,
+  CalendarTodo,
   ToolCall,
   GeneratedPicture,
   ApiUsageEvent,
@@ -2948,6 +2949,106 @@ export async function incrementFocusTaskCompletedCount(taskId: string, updatedAt
       WHERE id = ?`,
     [updatedAt, taskId]
   );
+}
+
+/* ==================== Calendar Todo CRUD ==================== */
+
+interface CalendarTodoRow {
+  id: string;
+  title: string;
+  date_key: string;
+  scheduled_time: string | null;
+  completed_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+function mapCalendarTodoRow(row: CalendarTodoRow): CalendarTodo {
+  return {
+    id: row.id,
+    title: row.title,
+    dateKey: row.date_key,
+    scheduledTime: row.scheduled_time || undefined,
+    completedAt: row.completed_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function createCalendarTodo(todo: CalendarTodo): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT INTO calendar_todos
+      (id, title, date_key, scheduled_time, completed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      todo.id,
+      todo.title,
+      todo.dateKey,
+      todo.scheduledTime || null,
+      todo.completedAt || null,
+      todo.createdAt,
+      todo.updatedAt,
+    ]
+  );
+}
+
+export async function updateCalendarTodo(
+  id: string,
+  updates: Partial<Pick<CalendarTodo, 'title' | 'dateKey' | 'updatedAt'>> & {
+    scheduledTime?: CalendarTodo['scheduledTime'] | null;
+    completedAt?: CalendarTodo['completedAt'] | null;
+  }
+): Promise<void> {
+  const db = await getDatabase();
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  if (updates.title !== undefined) {
+    sets.push('title = ?');
+    values.push(updates.title);
+  }
+  if (updates.dateKey !== undefined) {
+    sets.push('date_key = ?');
+    values.push(updates.dateKey);
+  }
+  if (updates.scheduledTime !== undefined) {
+    sets.push('scheduled_time = ?');
+    values.push(updates.scheduledTime || null);
+  }
+  if (updates.completedAt !== undefined) {
+    sets.push('completed_at = ?');
+    values.push(updates.completedAt || null);
+  }
+  if (updates.updatedAt !== undefined) {
+    sets.push('updated_at = ?');
+    values.push(updates.updatedAt);
+  }
+
+  if (sets.length === 0) return;
+  values.push(id);
+  await db.runAsync(`UPDATE calendar_todos SET ${sets.join(', ')} WHERE id = ?`, values);
+}
+
+export async function deleteCalendarTodo(id: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM calendar_todos WHERE id = ?', [id]);
+}
+
+export async function getCalendarTodosByDate(dateKey: string): Promise<CalendarTodo[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<CalendarTodoRow>(
+    `SELECT *
+       FROM calendar_todos
+      WHERE date_key = ?
+      ORDER BY
+        CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END ASC,
+        CASE WHEN scheduled_time IS NULL OR scheduled_time = '' THEN 1 ELSE 0 END ASC,
+        scheduled_time ASC,
+        created_at ASC`,
+    [dateKey]
+  );
+  return rows.map(mapCalendarTodoRow);
 }
 
 /* ==================== API usage logs ==================== */

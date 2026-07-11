@@ -1,5 +1,6 @@
 import { randomUUID } from 'expo-crypto';
-import { File } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import {
   deleteConversationArtifact,
   getConversationArtifact,
@@ -16,6 +17,7 @@ import type {
 
 const FILE_TOKEN_PATTERN = /\[File:([^\]\r\n]+)\]/g;
 const MAX_TEXT_FILE_BYTES = 512 * 1024;
+const ARTIFACT_DOWNLOAD_DIR = 'artifact-downloads';
 
 const KIND_EXTENSIONS: Record<ConversationArtifactKind, string[]> = {
   text: ['txt'],
@@ -38,6 +40,12 @@ const KIND_MIME: Record<ConversationArtifactKind, string> = {
   json: 'application/json',
   csv: 'text/csv',
 };
+
+export interface ConversationArtifactDownloadResult {
+  fileName: string;
+  uri: string;
+  shared: boolean;
+}
 
 function extensionOf(name: string): string {
   const clean = name.toLowerCase().split('?')[0].split('#')[0];
@@ -109,6 +117,17 @@ function normalizeArtifactName(name: string, kind: ConversationArtifactKind): st
   const clean = name.trim().replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
   if (clean) return clean;
   return `untitled.${KIND_EXTENSIONS[kind][0] || 'txt'}`;
+}
+
+function normalizeDownloadFileName(artifact: ConversationArtifact): string {
+  const fallbackName = `artifact-${artifact.id.slice(0, 8)}.${KIND_EXTENSIONS[artifact.kind][0] || 'txt'}`;
+  const clean = (artifact.name || fallbackName)
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 140);
+  const fileName = clean || fallbackName;
+  return extensionOf(fileName) ? fileName : `${fileName}.${KIND_EXTENSIONS[artifact.kind][0] || 'txt'}`;
 }
 
 export async function createConversationArtifactFromContent({
@@ -227,6 +246,33 @@ export async function replaceConversationArtifactContent({
     createdAt: Date.now(),
     size: byteSizeOf(content),
   });
+}
+
+export async function downloadConversationArtifactFile({
+  artifact,
+  content,
+}: {
+  artifact: ConversationArtifact;
+  content: string;
+}): Promise<ConversationArtifactDownloadResult> {
+  const dir = new Directory(Paths.document, ARTIFACT_DOWNLOAD_DIR);
+  dir.create({ intermediates: true, idempotent: true });
+
+  const fileName = normalizeDownloadFileName(artifact);
+  const file = new File(dir, fileName);
+  file.create({ intermediates: true, overwrite: true });
+  file.write(content);
+
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(file.uri, {
+      dialogTitle: '保存 Artifact',
+      mimeType: artifact.mimeType || KIND_MIME[artifact.kind] || 'text/plain',
+      UTI: 'public.text',
+    });
+    return { fileName, uri: file.uri, shared: true };
+  }
+
+  return { fileName, uri: file.uri, shared: false };
 }
 
 export async function deleteConversationArtifactFile(

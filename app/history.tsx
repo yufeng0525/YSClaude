@@ -19,6 +19,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronLeft,
+  Download,
   Edit3,
   FileText,
   FolderPlus,
@@ -56,6 +57,7 @@ import { useChatStore } from '../src/stores/chat';
 import { deleteGeneratedImageFile } from '../src/services/imageGeneration';
 import { deleteConversationVoiceFiles } from '../src/services/voiceFiles';
 import {
+  downloadConversationArtifactFile,
   readConversationArtifact,
   replaceConversationArtifactContent,
 } from '../src/services/conversationArtifacts';
@@ -120,6 +122,7 @@ export default function HistoryScreen() {
   const [artifactContent, setArtifactContent] = useState('');
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactSaving, setArtifactSaving] = useState(false);
+  const [artifactDownloading, setArtifactDownloading] = useState(false);
   const [galleryItems, setGalleryItems] = useState<GeneratedPictureGalleryItem[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [previewPicture, setPreviewPicture] = useState<GeneratedPictureGalleryItem | null>(null);
@@ -292,6 +295,24 @@ export default function HistoryScreen() {
       Alert.alert('保存失败', error?.message || '无法保存这个 Artifact');
     } finally {
       setArtifactSaving(false);
+    }
+  }
+
+  async function handleDownloadArtifact() {
+    if (!previewArtifact) return;
+    setArtifactDownloading(true);
+    try {
+      const result = await downloadConversationArtifactFile({
+        artifact: previewArtifact,
+        content: artifactContent,
+      });
+      if (!result.shared) {
+        Alert.alert('已保存', `Artifact 已保存到应用文件：${result.fileName}`);
+      }
+    } catch (error: any) {
+      Alert.alert('下载失败', error?.message || '无法下载这个 Artifact');
+    } finally {
+      setArtifactDownloading(false);
     }
   }
 
@@ -988,9 +1009,26 @@ export default function HistoryScreen() {
                     <Text style={styles.previewCancelText}>打开对话</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.previewOpen, (artifactLoading || artifactSaving) && styles.previewButtonDisabled]}
+                    style={[
+                      styles.previewCancel,
+                      (artifactLoading || artifactDownloading) && styles.previewButtonDisabled,
+                    ]}
+                    onPress={handleDownloadArtifact}
+                    disabled={artifactLoading || artifactDownloading}
+                  >
+                    {artifactDownloading ? (
+                      <ActivityIndicator size="small" color={colors.textSecondary} />
+                    ) : (
+                      <View style={styles.previewButtonContent}>
+                        <Download size={16} color={colors.textSecondary} strokeWidth={2.2} />
+                        <Text style={styles.previewCancelText}>下载</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.previewOpen, (artifactLoading || artifactSaving || artifactDownloading) && styles.previewButtonDisabled]}
                     onPress={handleSaveArtifact}
-                    disabled={artifactLoading || artifactSaving}
+                    disabled={artifactLoading || artifactSaving || artifactDownloading}
                   >
                     {artifactSaving ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
@@ -1702,6 +1740,11 @@ const createStyles = (
     fontSize: 14,
     fontWeight: '700',
     color: colors.textSecondary,
+  },
+  previewButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   previewOpen: {
     minHeight: 36,

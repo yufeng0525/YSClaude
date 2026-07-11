@@ -228,6 +228,10 @@ export interface NativeToolConfig {
   accessibilityControlEnabled?: boolean;
 }
 
+export interface CalendarAiSyncConfig {
+  sendTodayTodosToAI: boolean;
+}
+
 export interface LocationShareConfig {
   enabled: boolean;
   provider: 'tencent';
@@ -705,6 +709,7 @@ interface SettingsState {
   runCommandConfig: RunCommandConfig;
   qqBotConfig: QQBotConfig;
   nativeToolConfig: NativeToolConfig;
+  calendarAiSyncConfig: CalendarAiSyncConfig;
   locationShareConfig: LocationShareConfig;
   mcpToolConfig: McpToolConfig;
   toolSettingsUiConfig: ToolSettingsUiConfig;
@@ -739,6 +744,7 @@ interface SettingsState {
   setRunCommandConfig: (config: Partial<RunCommandConfig>) => void;
   setQqBotConfig: (config: Partial<QQBotConfig>) => void;
   setNativeToolConfig: (config: Partial<NativeToolConfig>) => void;
+  setCalendarAiSyncConfig: (config: Partial<CalendarAiSyncConfig>) => void;
   setLocationShareConfig: (config: Partial<LocationShareConfig>) => void;
   setMcpToolConfig: (config: Partial<McpToolConfig>) => void;
   setToolSettingsUiConfig: (config: Partial<ToolSettingsUiConfig>) => void;
@@ -886,6 +892,9 @@ export const useSettingsStore = create<SettingsState>()(
         appUsageStatsEnabled: false,
         calendarEnabled: false,
         accessibilityControlEnabled: false,
+      },
+      calendarAiSyncConfig: {
+        sendTodayTodosToAI: false,
       },
       locationShareConfig: {
         enabled: false,
@@ -1040,6 +1049,13 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ qqBotConfig: { ...state.qqBotConfig, ...config } })),
       setNativeToolConfig: (config) =>
         set((state) => ({ nativeToolConfig: { ...state.nativeToolConfig, ...config } })),
+      setCalendarAiSyncConfig: (config) =>
+        set((state) => ({
+          calendarAiSyncConfig: {
+            ...(state.calendarAiSyncConfig || { sendTodayTodosToAI: false }),
+            ...config,
+          },
+        })),
       setLocationShareConfig: (config) =>
         set((state) => ({
           locationShareConfig: {
@@ -1357,6 +1373,7 @@ export const useSettingsStore = create<SettingsState>()(
         runCommandConfig: state.runCommandConfig,
         qqBotConfig: state.qqBotConfig,
         nativeToolConfig: state.nativeToolConfig,
+        calendarAiSyncConfig: state.calendarAiSyncConfig,
         locationShareConfig: state.locationShareConfig,
         mcpToolConfig: state.mcpToolConfig,
         toolSettingsUiConfig: state.toolSettingsUiConfig,
@@ -1382,6 +1399,9 @@ export const useSettingsStore = create<SettingsState>()(
             },
           stickerConfig: normalizeStickerConfig(state?.stickerConfig),
           floatingBallConfig: normalizeFloatingBallConfig(state?.floatingBallConfig),
+          calendarAiSyncConfig: {
+            sendTodayTodosToAI: state?.calendarAiSyncConfig?.sendTodayTodosToAI ?? false,
+          },
           promptCacheConfig: normalizePromptCacheConfig(state?.promptCacheConfig),
           ttsConfig: normalizeTTSConfig(state?.ttsConfig),
           sttConfig: normalizeSTTConfig(state?.sttConfig),

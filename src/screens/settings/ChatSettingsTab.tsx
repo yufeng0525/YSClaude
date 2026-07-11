@@ -155,7 +155,6 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     systemPrompt,
     stablePromptRole,
     stripThinking,
-    periodConfig,
     promptCacheConfig,
     imageGenerationConfig,
     imageGenerationPrompt,
@@ -164,7 +163,6 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     setMaxOutputTokens,
     setTokenWarningThreshold,
     setStripThinking,
-    setPeriodConfig,
     setPromptCacheConfig,
     setImageGenerationConfig,
     setImageGenerationPrompt,
@@ -1127,19 +1125,6 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
         </View>
       )}
 
-      <Text style={styles.sectionTitle}>生理信息</Text>
-      <Text style={styles.hint}>开启后，仅在预计生理期前两天或经期内，把本地记录推算出的简短提醒附带给 AI。默认关闭。</Text>
-      <View style={styles.switchRow}>
-        <Text style={styles.label}>发送生理提醒给 AI</Text>
-        <Switch
-          value={!!periodConfig?.sendToAI}
-          onValueChange={(value) => {
-            setPeriodConfig({ sendToAI: value });
-            showToast(value ? '生理提醒会按条件发送给 AI' : '生理提醒已停止发送给 AI');
-          }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-        />
-      </View>
     </ScrollView>
   );
 }

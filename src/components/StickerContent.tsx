@@ -2,13 +2,17 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ImageSourcePropType, StyleProp, TextStyle } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import { Edit3, Maximize2, Minus, RotateCw, Save, X } from 'lucide-react-native';
+import { Download, Edit3, Maximize2, Minus, RotateCw, Save, X } from 'lucide-react-native';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 
 import { fonts, fontWeights } from '../theme/fonts';
 import { useSettingsStore } from '../stores/settings';
 import { useChatStore } from '../stores/chat';
-import { readConversationArtifact, replaceConversationArtifactContent } from '../services/conversationArtifacts';
+import {
+  downloadConversationArtifactFile,
+  readConversationArtifact,
+  replaceConversationArtifactContent,
+} from '../services/conversationArtifacts';
 import { openHtmlArtifact } from '../services/webviewController';
 import type { ConversationArtifact, ConversationArtifactVersion, GeneratedPicture } from '../types';
 import { buildStickerDefinitions, getStickerByName, type StickerDefinition } from '../utils/stickers';
@@ -146,6 +150,7 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
   const [draftContent, setDraftContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadArtifact = useCallback(async () => {
@@ -203,6 +208,28 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
       setLoading(false);
     }
   }, [loadArtifact]);
+
+  const handleDownloadPress = useCallback(async (event?: any) => {
+    event?.stopPropagation?.();
+    setDownloading(true);
+    try {
+      const result = artifact && version ? { artifact, version } : await loadArtifact();
+      const content = previewVisible ? draftContent : result.version.content;
+      const downloadResult = await downloadConversationArtifactFile({
+        artifact: result.artifact,
+        content,
+      });
+      if (!downloadResult.shared) {
+        Alert.alert('已保存', `文件已保存到应用文件：${downloadResult.fileName}`);
+      }
+    } catch (err: any) {
+      Alert.alert('下载失败', err?.message || '无法下载文件');
+    } finally {
+      setDownloading(false);
+    }
+  }, [artifact, draftContent, loadArtifact, previewVisible, version]);
+
+  const isBusy = loading || saving || downloading;
 
   const title = artifact?.name || `文件 ${artifactId.slice(0, 8)}`;
   const meta = artifact
@@ -272,6 +299,24 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
     }
   }, [artifact, conversationId, draftContent]);
 
+  const downloadPreview = useCallback(async () => {
+    if (!artifact) return;
+    setDownloading(true);
+    try {
+      const result = await downloadConversationArtifactFile({
+        artifact,
+        content: draftContent,
+      });
+      if (!result.shared) {
+        Alert.alert('已保存', `文件已保存到应用文件：${result.fileName}`);
+      }
+    } catch (err: any) {
+      Alert.alert('下载失败', err?.message || '无法下载文件');
+    } finally {
+      setDownloading(false);
+    }
+  }, [artifact, draftContent]);
+
   const updateDraftContent = useCallback((value: string) => {
     setDraftContent(value);
     setDirty(value !== (version?.content || ''));
@@ -291,7 +336,17 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
           <Text style={styles.fileTitle} numberOfLines={1}>{title}</Text>
           <Text style={[styles.fileMeta, error && styles.fileMetaError]} numberOfLines={1}>{meta}</Text>
         </View>
-        {loading && <ActivityIndicator size="small" color={colors.primary} />}
+        {isBusy ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Pressable
+            style={styles.fileCardIconButton}
+            onPress={handleDownloadPress}
+            accessibilityLabel={`下载文件：${title}`}
+          >
+            <Download size={16} color={colors.textSecondary} strokeWidth={2.2} />
+          </Pressable>
+        )}
       </Pressable>
       <Modal
         transparent
@@ -318,7 +373,7 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
                   <Text style={styles.filePreviewTitle} numberOfLines={1}>{title}</Text>
                   <Text style={styles.filePreviewMeta} numberOfLines={1}>{meta}{dirty ? ' · 未保存' : ''}</Text>
                 </View>
-                {loading || saving ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                {isBusy ? <ActivityIndicator size="small" color={colors.primary} /> : null}
                 <Pressable style={styles.filePreviewIconButton} onPress={() => setEditing((current) => !current)}>
                   <Edit3 size={16} color={editing ? colors.primary : colors.textSecondary} strokeWidth={2.2} />
                 </Pressable>
@@ -331,6 +386,13 @@ function ConversationFileCard({ artifactId }: { artifactId: string }) {
                 </Pressable>
                 <Pressable style={styles.filePreviewIconButton} onPress={() => void refreshPreview()}>
                   <RotateCw size={16} color={colors.textSecondary} strokeWidth={2.2} />
+                </Pressable>
+                <Pressable
+                  style={[styles.filePreviewIconButton, downloading && styles.filePreviewIconButtonDisabled]}
+                  onPress={() => void downloadPreview()}
+                  disabled={downloading}
+                >
+                  <Download size={16} color={downloading ? colors.textTertiary : colors.textSecondary} strokeWidth={2.2} />
                 </Pressable>
                 <Pressable style={styles.filePreviewIconButton} onPress={() => setPreviewMinimized(true)}>
                   <Minus size={17} color={colors.textSecondary} strokeWidth={2.4} />
@@ -645,6 +707,14 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   fileMetaError: {
     color: colors.danger,
+  },
+  fileCardIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
   },
   filePreviewOverlay: {
     flex: 1,

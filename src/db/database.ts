@@ -248,6 +248,18 @@ async function initTables(database: SQLite.SQLiteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_focus_sessions_started ON focus_sessions(started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_focus_sessions_task ON focus_sessions(task_id);
 
+    CREATE TABLE IF NOT EXISTS calendar_todos (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      date_key TEXT NOT NULL,
+      scheduled_time TEXT,
+      completed_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_todos_date ON calendar_todos(date_key, completed_at, scheduled_time, created_at);
+
     CREATE TABLE IF NOT EXISTS api_usage_events (
       id TEXT PRIMARY KEY,
       feature TEXT NOT NULL DEFAULT 'unknown',
@@ -730,6 +742,25 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
         ON chat_group_members(conversation_id);
 
       PRAGMA user_version = 23;
+    `);
+  }
+
+  if (version < 24) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS calendar_todos (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        date_key TEXT NOT NULL,
+        scheduled_time TEXT,
+        completed_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_calendar_todos_date
+        ON calendar_todos(date_key, completed_at, scheduled_time, created_at);
+
+      PRAGMA user_version = 24;
     `);
   }
 }

@@ -157,6 +157,10 @@ export default function RootLayout() {
           options={{ animation: 'slide_from_right', presentation: 'modal' }}
         />
         <Stack.Screen
+          name="calendar"
+          options={{ animation: 'slide_from_right', presentation: 'modal' }}
+        />
+        <Stack.Screen
           name="daily-paper/[date]"
           options={{ animation: 'slide_from_right', presentation: 'modal' }}
         />

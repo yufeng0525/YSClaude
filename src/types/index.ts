@@ -332,6 +332,16 @@ export interface FocusSession {
   updatedAt: number;
 }
 
+export interface CalendarTodo {
+  id: string;
+  title: string;
+  dateKey: string;
+  scheduledTime?: string;
+  completedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ModelOption {
   id: string;
   name: string;

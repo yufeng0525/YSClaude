@@ -1430,7 +1430,7 @@ export default function ChatScreen() {
           <Pressable style={[styles.headerButton, topBarButtonStyle('focus')]} onPress={() => router.push('/focus')}>
             {!topBarIconsHidden && renderTopBarIcon('focus')}
           </Pressable>
-          <Pressable style={[styles.headerButton, topBarButtonStyle('calendar')]} onPress={openCalendar}>
+          <Pressable style={[styles.headerButton, topBarButtonStyle('calendar')]} onPress={() => router.push('/calendar')}>
             {!topBarIconsHidden && renderTopBarIcon('calendar')}
           </Pressable>
           <Pressable style={[styles.headerButton, topBarButtonStyle('music')]} onPress={() => router.push('/music')}>
