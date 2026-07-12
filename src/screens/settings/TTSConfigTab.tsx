@@ -15,6 +15,16 @@ const TTS_PROVIDERS: Array<{ key: TTSProvider; label: string }> = [
   { key: 'fish', label: 'Fish Audio' },
   { key: 'deepgram', label: 'Deepgram' },
 ];
+const MINIMAX_TTS_MODELS = [
+  'speech-2.8-hd',
+  'speech-2.8-turbo',
+  'speech-2.6-hd',
+  'speech-2.6-turbo',
+  'speech-02-hd',
+  'speech-02-turbo',
+  'speech-01-hd',
+  'speech-01-turbo',
+];
 const FISH_TTS_MODELS = ['s2-pro', 's1'];
 const FISH_TTS_FORMATS: Array<TTSConfig['fishFormat']> = ['mp3', 'wav', 'pcm'];
 const STT_PROVIDERS: Array<{ key: STTProvider; label: string }> = [
@@ -177,15 +187,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
 
   async function fetchVoiceModels(target: VoiceModelTarget): Promise<string[]> {
     if (target === 'tts-minimax') {
-      if (!apiKey.trim()) {
-        throw new Error('请先填写 MiniMax API Key');
-      }
-      const data = await fetchFirstJson(
-        ['https://api.minimax.chat/v1/models', 'https://api.minimax.io/v1/models'],
-        { Authorization: `Bearer ${apiKey.trim()}` }
-      );
-      const ids = extractModelIds(data).filter((id) => /speech|audio|tts|t2a/i.test(id));
-      return ids.length > 0 ? ids : extractModelIds(data);
+      return [...MINIMAX_TTS_MODELS];
     }
 
     if (target === 'tts-fish') {
@@ -755,18 +757,6 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       </Modal>
     </ScrollView>
   );
-}
-
-async function fetchFirstJson(urls: string[], headers: Record<string, string>): Promise<any> {
-  let lastError: any;
-  for (const url of urls) {
-    try {
-      return await fetchJson(url, headers);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError || new Error('无法获取模型列表');
 }
 
 async function fetchJson(url: string, headers: Record<string, string>): Promise<any> {
