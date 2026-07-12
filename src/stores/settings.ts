@@ -74,7 +74,7 @@ export type { PromptCacheCompatibility, PromptCacheTtl, ThinkingCompatibility, T
 // HiddenRange 已迁移到 src/types，这里 re-export 保持旧的 import 路径兼容。
 export type { HiddenRange } from '../types';
 
-export type TTSProvider = 'minimax' | 'fish';
+export type TTSProvider = 'minimax' | 'fish' | 'deepgram';
 
 export interface TTSConfig {
   provider: TTSProvider;
@@ -92,6 +92,9 @@ export interface TTSConfig {
   fishFormat: 'mp3' | 'wav' | 'pcm';
   fishSpeed: number;
   fishVolume: number;
+  deepgramBaseUrl: string;
+  deepgramApiKey: string;
+  deepgramModel: string;
 }
 
 export type STTProvider = 'openai' | 'fish' | 'deepgram';
@@ -545,8 +548,12 @@ function normalizeSTTConfig(config?: Partial<STTConfig>): STTConfig {
 }
 
 function normalizeTTSConfig(config?: Partial<TTSConfig>): TTSConfig {
+  const provider =
+    config?.provider === 'fish' || config?.provider === 'deepgram'
+      ? config.provider
+      : 'minimax';
   return {
-    provider: config?.provider === 'fish' ? 'fish' : 'minimax',
+    provider,
     groupId: config?.groupId || '',
     apiKey: config?.apiKey || '',
     model: config?.model || 'speech-02-hd',
@@ -564,6 +571,9 @@ function normalizeTTSConfig(config?: Partial<TTSConfig>): TTSConfig {
         : 'mp3',
     fishSpeed: config?.fishSpeed ?? 1,
     fishVolume: config?.fishVolume ?? 0,
+    deepgramBaseUrl: config?.deepgramBaseUrl || 'https://api.deepgram.com/v1',
+    deepgramApiKey: config?.deepgramApiKey || '',
+    deepgramModel: config?.deepgramModel || 'aura-2-thalia-en',
   };
 }
 

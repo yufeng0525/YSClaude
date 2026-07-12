@@ -10,12 +10,18 @@ export function isTTSConfigReady(config: TTSConfig): boolean {
   if (config.provider === 'fish') {
     return !!config.fishApiKey.trim() && !!config.fishReferenceId.trim();
   }
+  if (config.provider === 'deepgram') {
+    return !!config.deepgramApiKey.trim() && !!config.deepgramModel.trim();
+  }
   return !!config.apiKey.trim() && !!config.groupId.trim() && !!config.voiceId.trim();
 }
 
 export function getTTSConfigMissingMessage(config: TTSConfig): string {
   if (config.provider === 'fish') {
     return '请先配置 Fish Audio API Key 和 Reference ID';
+  }
+  if (config.provider === 'deepgram') {
+    return '请先配置 Deepgram API Key 和模型';
   }
   return '请先配置 MiniMax Group ID、API Key 和 Voice ID';
 }
@@ -27,6 +33,9 @@ async function createTTSPlayer(text: string, config: TTSConfig): Promise<ReturnT
   }
   if (config.provider === 'fish') {
     return createFishTTSPlayer(speakableText, config);
+  }
+  if (config.provider === 'deepgram') {
+    return createDeepgramTTSPlayer(speakableText, config);
   }
   return createMiniMaxTTSPlayer(speakableText, config);
 }
@@ -141,6 +150,59 @@ async function createFishTTSPlayer(speakableText: string, config: TTSConfig): Pr
   await writer.close();
 
   return createAudioPlayer(file.uri);
+}
+
+async function createDeepgramTTSPlayer(speakableText: string, config: TTSConfig): Promise<ReturnType<typeof createAudioPlayer>> {
+  const apiKey = config.deepgramApiKey.trim();
+  if (!apiKey) {
+    throw new Error('请先配置 Deepgram API Key');
+  }
+
+  const endpoint = buildDeepgramSpeakEndpoint(
+    config.deepgramBaseUrl || 'https://api.deepgram.com/v1',
+    config.deepgramModel || 'aura-2-thalia-en'
+  );
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'audio/mpeg',
+    },
+    body: JSON.stringify({ text: speakableText }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Deepgram TTS Error ${response.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const audioBytes = new Uint8Array(await response.arrayBuffer());
+  if (audioBytes.length === 0) {
+    throw new Error('Deepgram 未返回音频数据');
+  }
+
+  const file = new File(Paths.cache, 'tts_audio_deepgram.mp3');
+  const writable = file.writableStream();
+  const writer = writable.getWriter();
+  await writer.write(audioBytes);
+  await writer.close();
+
+  return createAudioPlayer(file.uri);
+}
+
+function buildDeepgramSpeakEndpoint(baseUrl: string, model: string): string {
+  const url = new URL(baseUrl.trim() || 'https://api.deepgram.com/v1');
+  const path = url.pathname.replace(/\/$/, '');
+  if (!path || path === '/') {
+    url.pathname = '/v1/speak';
+  } else if (path.endsWith('/speak')) {
+    url.pathname = path;
+  } else {
+    url.pathname = `${path}/speak`;
+  }
+  url.searchParams.set('model', model.trim() || 'aura-2-thalia-en');
+  return url.toString();
 }
 
 export async function playTTS(text: string, config: TTSConfig): Promise<void> {

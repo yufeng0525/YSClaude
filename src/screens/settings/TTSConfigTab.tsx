@@ -13,6 +13,7 @@ type TTSConfigTabProps = {
 const TTS_PROVIDERS: Array<{ key: TTSProvider; label: string }> = [
   { key: 'minimax', label: 'MiniMax' },
   { key: 'fish', label: 'Fish Audio' },
+  { key: 'deepgram', label: 'Deepgram' },
 ];
 const FISH_TTS_MODELS = ['s2-pro', 's1'];
 const FISH_TTS_FORMATS: Array<TTSConfig['fishFormat']> = ['mp3', 'wav', 'pcm'];
@@ -21,7 +22,7 @@ const STT_PROVIDERS: Array<{ key: STTProvider; label: string }> = [
   { key: 'fish', label: 'Fish Audio' },
   { key: 'deepgram', label: 'Deepgram' },
 ];
-type VoiceModelTarget = 'tts-minimax' | 'tts-fish' | 'stt-openai' | 'stt-deepgram';
+type VoiceModelTarget = 'tts-minimax' | 'tts-fish' | 'tts-deepgram' | 'stt-openai' | 'stt-deepgram';
 
 export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabProps) {
   const colors = useSettingsPageColors();
@@ -42,6 +43,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
   const [ttsFishFormat, setTtsFishFormat] = useState<TTSConfig['fishFormat']>(ttsConfig.fishFormat);
   const [ttsFishSpeed, setTtsFishSpeed] = useState(String(ttsConfig.fishSpeed));
   const [ttsFishVolume, setTtsFishVolume] = useState(String(ttsConfig.fishVolume));
+  const [ttsDeepgramBaseUrl, setTtsDeepgramBaseUrl] = useState(ttsConfig.deepgramBaseUrl);
+  const [ttsDeepgramApiKey, setTtsDeepgramApiKey] = useState(ttsConfig.deepgramApiKey);
+  const [ttsDeepgramModel, setTtsDeepgramModel] = useState(ttsConfig.deepgramModel);
   const [sttProvider, setSttProvider] = useState<STTProvider>(sttConfig.provider);
   const [openAiBaseUrl, setOpenAiBaseUrl] = useState(sttConfig.openAiBaseUrl);
   const [openAiApiKey, setOpenAiApiKey] = useState(sttConfig.openAiApiKey);
@@ -77,6 +81,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       fishFormat: ttsFishFormat,
       fishSpeed: parseFloat(ttsFishSpeed) || 1,
       fishVolume: Number.isFinite(parseFloat(ttsFishVolume)) ? parseFloat(ttsFishVolume) : 0,
+      deepgramBaseUrl: ttsDeepgramBaseUrl.trim() || 'https://api.deepgram.com/v1',
+      deepgramApiKey: ttsDeepgramApiKey.trim(),
+      deepgramModel: ttsDeepgramModel.trim() || 'aura-2-thalia-en',
     });
     setSTTConfig({
       provider: sttProvider,
@@ -101,6 +108,8 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         return model;
       case 'tts-fish':
         return ttsFishModel;
+      case 'tts-deepgram':
+        return ttsDeepgramModel;
       case 'stt-openai':
         return openAiModel;
       case 'stt-deepgram':
@@ -116,6 +125,8 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         return '选择 MiniMax TTS 模型';
       case 'tts-fish':
         return '选择 Fish Audio TTS 模型';
+      case 'tts-deepgram':
+        return '选择 Deepgram TTS 模型';
       case 'stt-openai':
         return '选择 OpenAI STT 模型';
       case 'stt-deepgram':
@@ -132,6 +143,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         break;
       case 'tts-fish':
         setTtsFishModel(item);
+        break;
+      case 'tts-deepgram':
+        setTtsDeepgramModel(item);
         break;
       case 'stt-openai':
         setOpenAiModel(item);
@@ -195,6 +209,17 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       return ids.length > 0 ? ids : extractModelIds(data);
     }
 
+    if (target === 'tts-deepgram') {
+      const baseUrl = ttsDeepgramBaseUrl.trim() || 'https://api.deepgram.com/v1';
+      if (!ttsDeepgramApiKey.trim()) {
+        throw new Error('请先填写 Deepgram API Key');
+      }
+      const data = await fetchJson(buildDeepgramModelsUrl(baseUrl), {
+        Authorization: `Token ${ttsDeepgramApiKey.trim()}`,
+      });
+      return extractDeepgramTTSModelIds(data);
+    }
+
     const baseUrl = deepgramBaseUrl.trim() || 'https://api.deepgram.com/v1';
     if (!deepgramApiKey.trim()) {
       throw new Error('请先填写 Deepgram API Key');
@@ -222,6 +247,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         fishFormat: ttsFishFormat,
         fishSpeed: parseFloat(ttsFishSpeed) || 1,
         fishVolume: Number.isFinite(parseFloat(ttsFishVolume)) ? parseFloat(ttsFishVolume) : 0,
+        deepgramBaseUrl: ttsDeepgramBaseUrl.trim() || 'https://api.deepgram.com/v1',
+        deepgramApiKey: ttsDeepgramApiKey.trim(),
+        deepgramModel: ttsDeepgramModel.trim() || 'aura-2-thalia-en',
     };
     if (!isTTSConfigReady(testConfig)) {
       Alert.alert('提示', getTTSConfigMissingMessage(testConfig));
@@ -362,7 +390,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
             />
           </View>
         </>
-      ) : (
+      ) : ttsProvider === 'fish' ? (
         <>
           <View style={styles.field}>
             <Text style={styles.label}>Fish Audio Base URL</Text>
@@ -455,6 +483,54 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
               placeholder="0"
               placeholderTextColor={colors.textTertiary}
             />
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram Base URL</Text>
+            <TextInput
+              style={styles.input}
+              value={ttsDeepgramBaseUrl}
+              onChangeText={setTtsDeepgramBaseUrl}
+              placeholder="https://api.deepgram.com/v1"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram API Key</Text>
+            <TextInput
+              style={styles.input}
+              value={ttsDeepgramApiKey}
+              onChangeText={setTtsDeepgramApiKey}
+              placeholder="Deepgram API Key"
+              placeholderTextColor={colors.textTertiary}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram TTS 模型</Text>
+            <View style={styles.modelRow}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={ttsDeepgramModel}
+                onChangeText={setTtsDeepgramModel}
+                placeholder="aura-2-thalia-en"
+                placeholderTextColor={colors.textTertiary}
+                autoCapitalize="none"
+              />
+              <Pressable
+                style={styles.fetchButton}
+                onPress={() => handleFetchVoiceModels('tts-deepgram')}
+                disabled={fetchingModelTarget !== null}
+              >
+                {fetchingModelTarget === 'tts-deepgram'
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={styles.fetchButtonText}>拉取</Text>}
+              </Pressable>
+            </View>
           </View>
         </>
       )}
@@ -752,8 +828,9 @@ function buildDeepgramModelsUrl(baseUrl: string): string {
     url.pathname = '/v1/models';
   } else if (path.endsWith('/models')) {
     url.pathname = path;
-  } else if (path.endsWith('/listen')) {
-    url.pathname = `${path.slice(0, -'/listen'.length)}/models`;
+  } else if (path.endsWith('/listen') || path.endsWith('/speak')) {
+    const endpointSuffix = path.endsWith('/listen') ? '/listen' : '/speak';
+    url.pathname = `${path.slice(0, -endpointSuffix.length)}/models`;
   } else {
     url.pathname = `${path}/models`;
   }
@@ -784,6 +861,33 @@ function extractDeepgramSTTModelIds(data: any): string[] {
     .filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
     .map((id: string) => id.trim())
     .filter((id: string) => !/^aura/i.test(id));
+  return uniqueSorted(ids);
+}
+
+function extractDeepgramTTSModelIds(data: any): string[] {
+  const candidates = Array.isArray(data?.tts)
+    ? data.tts
+    : Array.isArray(data?.text_to_speech)
+      ? data.text_to_speech
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.models)
+          ? data.models
+          : [];
+  const ids: string[] = candidates
+    .flatMap((item: any) => {
+      if (typeof item === 'string') return [item];
+      return [
+        item?.architecture,
+        item?.canonical_name,
+        item?.id,
+        item?.model,
+        item?.name,
+      ];
+    })
+    .filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+    .map((id: string) => id.trim())
+    .filter((id: string) => /^aura/i.test(id));
   return uniqueSorted(ids);
 }
 
