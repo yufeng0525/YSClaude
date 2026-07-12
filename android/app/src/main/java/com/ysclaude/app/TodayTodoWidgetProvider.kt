@@ -24,6 +24,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import android.widget.RemoteViewsService.RemoteViewsFactory
@@ -39,10 +40,47 @@ import org.json.JSONObject
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 private const val WIDGET_LARGE_MIN_HEIGHT_DP = 280
 private const val WIDGET_MAX_SMALL_TODOS = 3
 private const val WIDGET_MAX_LARGE_TODOS = 5
+private const val EXTRA_WIDGET_WIDTH_DP = "widget_width_dp"
+private const val EXTRA_WIDGET_HEIGHT_DP = "widget_height_dp"
+
+private fun normalizedWidgetWidthDp(options: Bundle): Int {
+  return max(
+    280,
+    max(
+      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0),
+      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+    ).takeIf { it > 0 } ?: 360
+  )
+}
+
+private fun normalizedWidgetHeightDp(options: Bundle): Int {
+  return max(
+    130,
+    max(
+      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0),
+      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+    ).takeIf { it > 0 } ?: 205
+  )
+}
+
+private data class FooterAction(
+  val iconRes: Int,
+  val label: String,
+  val color: Int
+)
+
+private data class FooterLayout(
+  val iconSize: Float,
+  val iconTextGap: Float,
+  val actionGap: Float,
+  val actionWidths: List<Float>,
+  val textSize: Float
+)
 
 class TodayTodoWidgetProvider : AppWidgetProvider() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -111,13 +149,17 @@ class TodayTodoWidgetProvider : AppWidgetProvider() {
     }
 
     private fun buildViews(context: Context, snapshot: JSONObject, options: Bundle): RemoteViews {
+      val widthDp = normalizedWidgetWidthDp(options)
+      val heightDp = normalizedWidgetHeightDp(options)
       val views = RemoteViews(context.packageName, R.layout.widget_today_todos)
       views.setOnClickPendingIntent(R.id.widget_root, openCalendarPendingIntent(context))
       views.setImageViewBitmap(R.id.widget_canvas, WidgetCardRenderer(context, snapshot, options).render())
       views.setRemoteAdapter(
         R.id.widget_todo_list,
         Intent(context, TodayTodoWidgetService::class.java).apply {
-          data = Uri.parse("ysclaude://today-widget/todos/${snapshot.optLong("updatedAt", 0)}")
+          data = Uri.parse("ysclaude://today-widget/todos/${snapshot.optLong("updatedAt", 0)}/$widthDp/$heightDp")
+          putExtra(EXTRA_WIDGET_WIDTH_DP, widthDp)
+          putExtra(EXTRA_WIDGET_HEIGHT_DP, heightDp)
         }
       )
       views.setPendingIntentTemplate(R.id.widget_todo_list, widgetActionTemplatePendingIntent(context))
@@ -320,15 +362,18 @@ class TodayTodoWidgetProvider : AppWidgetProvider() {
 
 class TodayTodoWidgetService : RemoteViewsService() {
   override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
-    return TodayTodoWidgetFactory(applicationContext)
+    return TodayTodoWidgetFactory(applicationContext, intent)
   }
 }
 
 private class TodayTodoWidgetFactory(
-  private val context: Context
+  private val context: Context,
+  intent: Intent
 ) : RemoteViewsService.RemoteViewsFactory {
   private var snapshot = JSONObject()
   private var todos = JSONArray()
+  private val widgetWidthDp = intent.getIntExtra(EXTRA_WIDGET_WIDTH_DP, 360).coerceAtLeast(280)
+  private val widgetHeightDp = intent.getIntExtra(EXTRA_WIDGET_HEIGHT_DP, 205).coerceAtLeast(130)
 
   override fun onCreate() {
     load()
@@ -353,9 +398,11 @@ private class TodayTodoWidgetFactory(
     val paintFlags = Paint.ANTI_ALIAS_FLAG or if (done) Paint.STRIKE_THRU_TEXT_FLAG else 0
 
     views.setTextViewText(R.id.widget_todo_text, text)
+    views.setTextViewTextSize(R.id.widget_todo_text, TypedValue.COMPLEX_UNIT_SP, todoTextSizeSp(text))
     views.setTextColor(R.id.widget_todo_text, rowTextColor)
     views.setInt(R.id.widget_todo_text, "setPaintFlags", paintFlags)
     views.setTextViewText(R.id.widget_todo_checkbox, if (done) "\u2713" else "")
+    views.setTextViewTextSize(R.id.widget_todo_checkbox, TypedValue.COMPLEX_UNIT_SP, checkboxTextSizeSp())
     views.setTextColor(R.id.widget_todo_checkbox, Color.WHITE)
     views.setInt(
       R.id.widget_todo_checkbox,
@@ -390,6 +437,31 @@ private class TodayTodoWidgetFactory(
     snapshot = TodayTodoWidgetProvider.readSnapshot(context)
     todos = snapshot.optJSONArray("todos") ?: JSONArray()
   }
+
+  private fun todoTextSizeSp(text: String): Float {
+    val widthSize = when {
+      widgetWidthDp < 300 -> 13.2f
+      widgetWidthDp < 330 -> 14.0f
+      widgetWidthDp < 380 -> 15.0f
+      widgetWidthDp < 430 -> 15.6f
+      else -> 16.2f
+    }
+    val heightBonus = when {
+      widgetHeightDp >= WIDGET_LARGE_MIN_HEIGHT_DP + 80 -> 0.4f
+      widgetHeightDp >= WIDGET_LARGE_MIN_HEIGHT_DP -> 0.2f
+      else -> 0f
+    }
+    val longTextAdjustment = when {
+      text.length > 36 && widgetWidthDp < 330 -> -0.8f
+      text.length > 28 && widgetWidthDp < 330 -> -0.4f
+      else -> 0f
+    }
+    return (widthSize + heightBonus + longTextAdjustment).coerceIn(12.4f, 16.4f)
+  }
+
+  private fun checkboxTextSizeSp(): Float {
+    return (todoTextSizeSp("") - 3f).coerceIn(10f, 13f)
+  }
 }
 
 private class WidgetCardRenderer(
@@ -401,20 +473,8 @@ private class WidgetCardRenderer(
   private val scaledDensity = context.resources.displayMetrics.scaledDensity
   private val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
     Configuration.UI_MODE_NIGHT_YES
-  private val widthDp = max(
-    280,
-    max(
-      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0),
-      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
-    ).takeIf { it > 0 } ?: 360
-  )
-  private val heightDp = max(
-    130,
-    max(
-      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0),
-      options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
-    ).takeIf { it > 0 } ?: 205
-  )
+  private val widthDp = normalizedWidgetWidthDp(options)
+  private val heightDp = normalizedWidgetHeightDp(options)
   private val large = heightDp >= WIDGET_LARGE_MIN_HEIGHT_DP
   private val width = dp(widthDp.toFloat())
   private val height = dp(heightDp.toFloat())
@@ -437,7 +497,7 @@ private class WidgetCardRenderer(
     canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
     drawCard(canvas)
     drawHeader(canvas)
-    val footerTop = drawFooter(canvas)
+    val footerTop = drawSvgFooter(canvas)
     if (large) {
       drawLargeContent(canvas, footerTop)
     }
@@ -568,6 +628,94 @@ private class WidgetCardRenderer(
     drawStat(canvas, "${snapshot.optInt("todayMessages", 0)}", "条消息", left + (right - left) / 3f, statsTop + dp(22f), (right - left) / 3f)
     drawStat(canvas, compactCount(snapshot.optLong("todayTokens", 0)), "tokens", left + (right - left) * 2f / 3f, statsTop + dp(22f), (right - left) / 3f)
     return quoteTop - dp(6f)
+  }
+
+  private fun drawSvgFooter(canvas: Canvas): Float {
+    val footerHeight = dp(40f).toFloat()
+    val footerTop = height - footerHeight - dp(4f)
+    val left = dp(16f).toFloat()
+    val right = width - dp(16f).toFloat()
+    paint.color = borderColor
+    canvas.drawRect(left, footerTop, right, footerTop + dp(1f), paint)
+
+    textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+    textPaint.textSize = sp(13f)
+    val actions = listOf(
+      FooterAction(R.drawable.widget_action_comment, "520", mutedColor),
+      FooterAction(R.drawable.widget_action_repost, "1314", mutedColor),
+      FooterAction(R.drawable.widget_action_heart, "9999", likedColor),
+      FooterAction(R.drawable.widget_action_article, "3.1\u4e07", mutedColor),
+      FooterAction(R.drawable.widget_action_bookmark, "", mutedColor),
+      FooterAction(R.drawable.widget_action_share, "", mutedColor)
+    )
+    val layout = measureFooterLayout(actions, right - left)
+    val actionTop = footerTop + (footerHeight - layout.iconSize) / 2f
+    textPaint.textSize = layout.textSize
+    val baseline = actionTop + layout.iconSize / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
+    var x = left
+    actions.forEachIndexed { index, action ->
+      drawFooterIcon(canvas, action.iconRes, x, actionTop, layout.iconSize, action.color)
+      if (action.label.isNotBlank()) {
+        textPaint.color = action.color
+        canvas.drawText(action.label, x + layout.iconSize + layout.iconTextGap, baseline, textPaint)
+      }
+      x += layout.actionWidths[index] + layout.actionGap
+    }
+    return footerTop
+  }
+
+  private fun measureFooterLayout(actions: List<FooterAction>, available: Float): FooterLayout {
+    val variants = listOf(
+      Triple(18f, 6f, 13f),
+      Triple(17f, 5f, 12.5f),
+      Triple(16f, 5f, 12f),
+      Triple(15f, 4f, 11.5f),
+      Triple(14f, 4f, 11f),
+      Triple(13f, 3f, 10.5f)
+    )
+    val minActionGap = dp(1f).toFloat()
+    for ((iconDp, iconTextGapDp, textDp) in variants) {
+      val iconSize = dp(iconDp).toFloat()
+      val iconTextGap = dp(iconTextGapDp).toFloat()
+      val textSize = dp(textDp).toFloat()
+      textPaint.textSize = textSize
+      val actionWidths = actions.map { action ->
+        iconSize + if (action.label.isBlank()) 0f else iconTextGap + textPaint.measureText(action.label)
+      }
+      val used = actionWidths.fold(0f) { total, value -> total + value }
+      val minimumNeeded = used + minActionGap * (actions.size - 1)
+      if (minimumNeeded <= available) {
+        val actionGap = if (actions.size > 1) (available - used) / (actions.size - 1) else 0f
+        return FooterLayout(iconSize, iconTextGap, actionGap, actionWidths, textSize)
+      }
+    }
+
+    val rawIconSize = dp(12f).toFloat()
+    val rawIconTextGap = dp(2f).toFloat()
+    val rawTextSize = dp(10f).toFloat()
+    textPaint.textSize = rawTextSize
+    val rawActionWidths = actions.map { action ->
+      rawIconSize + if (action.label.isBlank()) 0f else rawIconTextGap + textPaint.measureText(action.label)
+    }
+    val rawUsed = rawActionWidths.fold(0f) { total, value -> total + value }
+    val scale = min(1f, available / max(1f, rawUsed))
+    val iconSize = rawIconSize * scale
+    val iconTextGap = rawIconTextGap * scale
+    val textSize = rawTextSize * scale
+    textPaint.textSize = textSize
+    val actionWidths = actions.map { action ->
+      iconSize + if (action.label.isBlank()) 0f else iconTextGap + textPaint.measureText(action.label)
+    }
+    val used = actionWidths.fold(0f) { total, value -> total + value }
+    val actionGap = if (actions.size > 1) max(0f, (available - used) / (actions.size - 1)) else 0f
+    return FooterLayout(iconSize, iconTextGap, actionGap, actionWidths, textSize)
+  }
+
+  private fun drawFooterIcon(canvas: Canvas, iconRes: Int, left: Float, top: Float, size: Float, color: Int) {
+    val drawable = context.getDrawable(iconRes)?.mutate() ?: return
+    drawable.setTint(color)
+    drawable.setBounds(left.roundToInt(), top.roundToInt(), (left + size).roundToInt(), (top + size).roundToInt())
+    drawable.draw(canvas)
   }
 
   private fun drawFooter(canvas: Canvas): Float {

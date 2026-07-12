@@ -2,6 +2,7 @@
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -252,6 +253,7 @@ export default function CalendarScreen() {
   const [todoHour, setTodoHour] = useState('18');
   const [todoMinute, setTodoMinute] = useState('00');
   const busyRef = useRef(false);
+  const todoInputRef = useRef<TextInput>(null);
 
   const conversationId = useChatStore((state) => state.conversationId);
   const loadConversationAroundMessage = useChatStore((state) => state.loadConversationAroundMessage);
@@ -448,6 +450,14 @@ export default function CalendarScreen() {
     setTodoHour(hour);
     setTodoMinute(minute);
     setCreateVisible(true);
+  }, []);
+
+  const handleTodoUsesTimeChange = useCallback((value: boolean) => {
+    if (value) {
+      todoInputRef.current?.blur();
+      Keyboard.dismiss();
+    }
+    setTodoUsesTime(value);
   }, []);
 
   const submitTodo = useCallback(async () => {
@@ -707,7 +717,7 @@ export default function CalendarScreen() {
 
       <Modal visible={createVisible} transparent animationType="fade" onRequestClose={() => setCreateVisible(false)}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalKeyboardRoot}
         >
           <Pressable style={styles.modalOverlay} onPress={() => setCreateVisible(false)}>
@@ -719,6 +729,7 @@ export default function CalendarScreen() {
               </Pressable>
             </View>
             <TextInput
+              ref={todoInputRef}
               style={styles.input}
               value={todoTitle}
               onChangeText={setTodoTitle}
@@ -730,7 +741,7 @@ export default function CalendarScreen() {
               title="执行时间"
               text={todoUsesTime ? `${todoHour}:${todoMinute}` : '不设置具体时间'}
               value={todoUsesTime}
-              onValueChange={setTodoUsesTime}
+              onValueChange={handleTodoUsesTimeChange}
             />
             {todoUsesTime ? (
               <TimeWheelPicker
