@@ -20,6 +20,7 @@ const FISH_TTS_FORMATS: Array<TTSConfig['fishFormat']> = ['mp3', 'wav', 'pcm'];
 const STT_PROVIDERS: Array<{ key: STTProvider; label: string }> = [
   { key: 'openai', label: 'OpenAI Whisper' },
   { key: 'fish', label: 'Fish Audio' },
+  { key: 'deepgram', label: 'Deepgram' },
 ];
 
 export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabProps) {
@@ -49,6 +50,10 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
   const [sttFishApiKey, setSttFishApiKey] = useState(sttConfig.fishApiKey);
   const [sttFishLanguage, setSttFishLanguage] = useState(sttConfig.fishLanguage);
   const [sttFishIgnoreTimestamps, setSttFishIgnoreTimestamps] = useState(sttConfig.fishIgnoreTimestamps);
+  const [deepgramBaseUrl, setDeepgramBaseUrl] = useState(sttConfig.deepgramBaseUrl);
+  const [deepgramApiKey, setDeepgramApiKey] = useState(sttConfig.deepgramApiKey);
+  const [deepgramModel, setDeepgramModel] = useState(sttConfig.deepgramModel);
+  const [deepgramLanguage, setDeepgramLanguage] = useState(sttConfig.deepgramLanguage);
   const [testing, setTesting] = useState(false);
 
   function handleSave() {
@@ -78,6 +83,10 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       fishApiKey: sttFishApiKey.trim(),
       fishLanguage: sttFishLanguage.trim() || 'zh',
       fishIgnoreTimestamps: sttFishIgnoreTimestamps,
+      deepgramBaseUrl: deepgramBaseUrl.trim() || 'https://api.deepgram.com/v1',
+      deepgramApiKey: deepgramApiKey.trim(),
+      deepgramModel: deepgramModel.trim() || 'nova-3',
+      deepgramLanguage: deepgramLanguage.trim(),
     });
     showToast('语音配置已保存');
   }
@@ -327,7 +336,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       </View>
 
       <Text style={styles.sectionTitle}>STT 语音转文字</Text>
-      <Text style={styles.hint}>用于长按输入框发送语音后的自动转写。</Text>
+      <Text style={styles.hint}>长按语音按键发送语音。</Text>
 
       <View style={styles.field}>
         <Text style={styles.label}>服务商</Text>
@@ -383,7 +392,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
             />
           </View>
         </>
-      ) : (
+      ) : sttProvider === 'fish' ? (
         <>
           <View style={styles.field}>
             <Text style={styles.label}>Fish Audio Base URL</Text>
@@ -435,6 +444,54 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
                 <Text style={[styles.configChipText, !sttFishIgnoreTimestamps && styles.configChipTextActive]}>返回分段</Text>
               </Pressable>
             </ScrollView>
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram Base URL</Text>
+            <TextInput
+              style={styles.input}
+              value={deepgramBaseUrl}
+              onChangeText={setDeepgramBaseUrl}
+              placeholder="https://api.deepgram.com/v1"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram API Key</Text>
+            <TextInput
+              style={styles.input}
+              value={deepgramApiKey}
+              onChangeText={setDeepgramApiKey}
+              placeholder="Deepgram API Key"
+              placeholderTextColor={colors.textTertiary}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Deepgram 模型</Text>
+            <TextInput
+              style={styles.input}
+              value={deepgramModel}
+              onChangeText={setDeepgramModel}
+              placeholder="nova-3"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>语言（可选）</Text>
+            <TextInput
+              style={styles.input}
+              value={deepgramLanguage}
+              onChangeText={setDeepgramLanguage}
+              placeholder="例如 zh / en，留空自动识别"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+            />
           </View>
         </>
       )}

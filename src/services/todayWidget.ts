@@ -48,10 +48,7 @@ export async function syncTodayWidget(): Promise<boolean> {
 
   const { todayWidgetConfig, appearanceConfig } = useSettingsStore.getState();
   const snapshot: TodayWidgetSnapshot = {
-    displayName:
-      todayWidgetConfig.displayName ||
-      appearanceConfig?.userDisplayName ||
-      'You',
+    displayName: todayWidgetConfig.displayName || 'user',
     handle: todayWidgetConfig.handle || 'ysclaude',
     avatarUri:
       todayWidgetConfig.avatarUri ||

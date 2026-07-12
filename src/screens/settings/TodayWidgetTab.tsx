@@ -56,7 +56,7 @@ export function TodayWidgetTab({ showToast, keyboardBottomInset }: TodayWidgetTa
   const [syncing, setSyncing] = useState(false);
 
   const effectiveAvatarUri = todayWidgetConfig.avatarUri || appearanceConfig?.userAvatarImageUri;
-  const effectiveDisplayName = todayWidgetConfig.displayName || appearanceConfig?.userDisplayName || 'You';
+  const effectiveDisplayName = todayWidgetConfig.displayName || 'user';
   const effectiveHandle = todayWidgetConfig.handle || 'ysclaude';
 
   async function pickAvatar() {

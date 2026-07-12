@@ -550,17 +550,27 @@ async function transcribeMessageVoice(
   const baseUrl =
     provider === 'fish'
       ? sttConfig.fishBaseUrl
-      : sttConfig.openAiBaseUrl.trim() || chatConfig?.baseUrl || '';
+      : provider === 'deepgram'
+        ? sttConfig.deepgramBaseUrl
+        : sttConfig.openAiBaseUrl.trim() || chatConfig?.baseUrl || '';
   const apiKey =
     provider === 'fish'
       ? sttConfig.fishApiKey
-      : sttConfig.openAiApiKey.trim() || chatConfig?.apiKey || '';
+      : provider === 'deepgram'
+        ? sttConfig.deepgramApiKey
+        : sttConfig.openAiApiKey.trim() || chatConfig?.apiKey || '';
 
   if (!baseUrl || !apiKey) {
+    const providerLabel =
+      provider === 'fish'
+        ? 'Fish Audio'
+        : provider === 'deepgram'
+          ? 'Deepgram'
+          : 'STT 或主聊天';
     const failed = {
       ...voice,
       transcriptStatus: 'failed' as const,
-      errorMessage: provider === 'fish' ? '请先在设置中配置 Fish Audio STT API Key' : '请先在设置中配置 STT 或主聊天 API',
+      errorMessage: `请先在设置中配置 ${providerLabel} API`,
       updatedAt: Date.now(),
     };
     set((state) => ({
@@ -580,8 +590,12 @@ async function transcribeMessageVoice(
       uri: voice.uri,
       mimeType: voice.mimeType,
       fileName: `${voice.id}${extensionFromUri(voice.uri)}`,
-      model: sttConfig.openAiModel || 'whisper-1',
-      language: sttConfig.fishLanguage,
+      model: provider === 'deepgram'
+        ? sttConfig.deepgramModel || 'nova-3'
+        : sttConfig.openAiModel || 'whisper-1',
+      language: provider === 'deepgram'
+        ? sttConfig.deepgramLanguage
+        : sttConfig.fishLanguage,
       ignoreTimestamps: sttConfig.fishIgnoreTimestamps,
     });
     const completed = {

@@ -72,7 +72,10 @@ import {
 
 
 let colors = lightColors;
-const STICKER_PANEL_HEIGHT = Math.min(420, Dimensions.get('window').height * 0.48);
+const STICKER_ITEM_HEIGHT = 98;
+const STICKER_PANEL_VERTICAL_PADDING = 26;
+const STICKER_PANEL_ROW_GAP = 8;
+const STICKER_PANEL_HEIGHT = STICKER_ITEM_HEIGHT * 2 + STICKER_PANEL_ROW_GAP + STICKER_PANEL_VERTICAL_PADDING;
 const MCP_PANEL_HEIGHT = Math.min(560, Dimensions.get('window').height * 0.68);
 const MAX_IMAGE_REFERENCE_COUNT = 16;
 const CUSTOM_CSS_MAX_LENGTH = 12000;

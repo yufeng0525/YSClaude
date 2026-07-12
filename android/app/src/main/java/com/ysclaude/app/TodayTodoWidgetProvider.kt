@@ -133,7 +133,7 @@ class TodayTodoWidgetProvider : AppWidgetProvider() {
 
     private fun defaultSnapshot(): JSONObject {
       return JSONObject()
-        .put("displayName", "You")
+        .put("displayName", "user")
         .put("handle", "ysclaude")
         .put("dateLabel", "Today")
         .put("quote", "One thing at a time.")
@@ -437,7 +437,10 @@ private class WidgetCardRenderer(
     canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
     drawCard(canvas)
     drawHeader(canvas)
-    drawFooter(canvas)
+    val footerTop = drawFooter(canvas)
+    if (large) {
+      drawLargeContent(canvas, footerTop)
+    }
     if ((snapshot.optJSONArray("todos") ?: JSONArray()).length() == 0) {
       drawEmptyTodos(canvas)
     }
@@ -474,7 +477,7 @@ private class WidgetCardRenderer(
     textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     textPaint.textSize = sp(15f)
     textPaint.color = textColor
-    val displayName = stringValue("displayName", "You")
+    val displayName = stringValue("displayName", "user")
     val nameMax = right - textLeft - dp(42f)
     val drawnName = drawEllipsized(canvas, displayName, textLeft, top + dp(16f), nameMax, textPaint)
     drawVerified(canvas, min(textLeft + drawnName + dp(7f), right - dp(34f)), top + dp(3f))
@@ -577,7 +580,7 @@ private class WidgetCardRenderer(
 
     textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
     textPaint.textSize = sp(13f)
-    val labels = listOf("○ 520", "↻ 1314", "♥ 9999", "▤ 3.1万", "⌑", "⌯")
+    val labels = listOf("○ 520", "↻ 1314", "♥ 9999", "▤ 3.1万")
     val step = (right - left) / labels.size
     labels.forEachIndexed { index, label ->
       textPaint.color = if (index == 2) likedColor else mutedColor

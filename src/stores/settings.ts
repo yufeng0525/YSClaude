@@ -94,7 +94,7 @@ export interface TTSConfig {
   fishVolume: number;
 }
 
-export type STTProvider = 'openai' | 'fish';
+export type STTProvider = 'openai' | 'fish' | 'deepgram';
 
 export interface STTConfig {
   provider: STTProvider;
@@ -105,6 +105,10 @@ export interface STTConfig {
   fishApiKey: string;
   fishLanguage: string;
   fishIgnoreTimestamps: boolean;
+  deepgramBaseUrl: string;
+  deepgramApiKey: string;
+  deepgramModel: string;
+  deepgramLanguage: string;
 }
 
 export interface MemoryVaultConfig {
@@ -520,8 +524,12 @@ function normalizeImageGenerationConfig(config?: Partial<ImageGenerationConfig>)
 }
 
 function normalizeSTTConfig(config?: Partial<STTConfig>): STTConfig {
+  const provider =
+    config?.provider === 'fish' || config?.provider === 'deepgram'
+      ? config.provider
+      : 'openai';
   return {
-    provider: config?.provider === 'fish' ? 'fish' : 'openai',
+    provider,
     openAiBaseUrl: config?.openAiBaseUrl || '',
     openAiApiKey: config?.openAiApiKey || '',
     openAiModel: config?.openAiModel || 'whisper-1',
@@ -529,6 +537,10 @@ function normalizeSTTConfig(config?: Partial<STTConfig>): STTConfig {
     fishApiKey: config?.fishApiKey || '',
     fishLanguage: config?.fishLanguage || 'zh',
     fishIgnoreTimestamps: config?.fishIgnoreTimestamps ?? true,
+    deepgramBaseUrl: config?.deepgramBaseUrl || 'https://api.deepgram.com/v1',
+    deepgramApiKey: config?.deepgramApiKey || '',
+    deepgramModel: config?.deepgramModel || 'nova-3',
+    deepgramLanguage: config?.deepgramLanguage || '',
   };
 }
 

@@ -4,7 +4,7 @@ import { File } from 'expo-file-system';
 const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
 
 export interface TranscribeVoiceRequest {
-  provider?: 'openai' | 'fish';
+  provider?: 'openai' | 'fish' | 'deepgram';
   baseUrl: string;
   apiKey: string;
   uri: string;
@@ -35,6 +35,17 @@ export async function transcribeVoice({
       fileName,
       language,
       ignoreTimestamps,
+    });
+  }
+
+  if (provider === 'deepgram') {
+    return transcribeDeepgram({
+      baseUrl,
+      apiKey,
+      uri,
+      mimeType,
+      model,
+      language,
     });
   }
 
@@ -120,6 +131,66 @@ async function transcribeFishAudio({
     throw new Error('Fish Audio STT 未返回文字');
   }
   return text;
+}
+
+async function transcribeDeepgram({
+  baseUrl,
+  apiKey,
+  uri,
+  mimeType,
+  model = 'nova-3',
+  language,
+}: TranscribeVoiceRequest): Promise<string> {
+  const endpoint = buildDeepgramEndpoint(baseUrl, model, language);
+  const file = new File(uri);
+  const response = await expoFetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${apiKey.trim()}`,
+      'Content-Type': mimeType || mimeTypeFromUri(uri),
+    },
+    body: await file.bytes() as any,
+  }) as Response;
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Deepgram STT Error ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+
+  const json = await response.json();
+  const text = extractDeepgramTranscript(json);
+  if (!text) {
+    throw new Error('Deepgram STT 未返回文字');
+  }
+  return text;
+}
+
+function buildDeepgramEndpoint(baseUrl: string, model?: string, language?: string): string {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/$/, '');
+  const endpoint = normalizedBaseUrl.endsWith('/listen')
+    ? normalizedBaseUrl
+    : `${normalizedBaseUrl}/listen`;
+  const params = new URLSearchParams();
+  const normalizedModel = model?.trim() || 'nova-3';
+  if (normalizedModel) {
+    params.set('model', normalizedModel);
+  }
+  const normalizedLanguage = language?.trim();
+  if (normalizedLanguage) {
+    params.set('language', normalizedLanguage);
+  }
+  params.set('smart_format', 'true');
+  return `${endpoint}?${params.toString()}`;
+}
+
+function extractDeepgramTranscript(json: any): string {
+  const channels = json?.results?.channels;
+  if (!Array.isArray(channels)) return '';
+  const transcripts = channels
+    .flatMap((channel) => Array.isArray(channel?.alternatives) ? channel.alternatives : [])
+    .map((alternative) => typeof alternative?.transcript === 'string' ? alternative.transcript.trim() : '')
+    .filter(Boolean);
+  return transcripts.join('\n').trim();
 }
 
 async function appendAudioFile(
