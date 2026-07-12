@@ -65,6 +65,8 @@ interface FloatingBallModule {
     radioActionEnabled: boolean
   ) => Promise<boolean>;
   hideDesktopLyric: () => Promise<boolean>;
+  showVoiceCall?: (durationText: string) => Promise<boolean>;
+  hideVoiceCall?: () => Promise<boolean>;
   openApp: () => Promise<boolean>;
   captureScreen: () => Promise<string | null>;
 }
@@ -95,6 +97,8 @@ export type DesktopLyricAction =
   | 'toggle_view'
   | 'radio_action'
   | 'close';
+
+export type VoiceCallFloatingAction = 'open';
 
 const nativeModule = NativeModules.FloatingBall as FloatingBallModule | undefined;
 
@@ -252,6 +256,22 @@ export async function hideDesktopLyric(): Promise<void> {
   await ensureFloatingBall().hideDesktopLyric();
 }
 
+export async function showVoiceCallFloatingBall(durationText = ''): Promise<void> {
+  const floatingBall = ensureFloatingBall();
+  if (!floatingBall.showVoiceCall) {
+    await floatingBall.show();
+    return;
+  }
+  await floatingBall.showVoiceCall(durationText);
+}
+
+export async function hideVoiceCallFloatingBall(): Promise<void> {
+  const floatingBall = ensureFloatingBall();
+  if (floatingBall.hideVoiceCall) {
+    await floatingBall.hideVoiceCall();
+  }
+}
+
 export async function openYSClaudeFromFloatingBall(): Promise<void> {
   await ensureFloatingBall().openApp();
 }
@@ -270,6 +290,12 @@ export function addDesktopLyricActionListener(
   listener: (action: DesktopLyricAction) => void
 ): { remove: () => void } {
   return DeviceEventEmitter.addListener('DesktopLyricAction', listener);
+}
+
+export function addVoiceCallFloatingActionListener(
+  listener: (action: VoiceCallFloatingAction) => void
+): { remove: () => void } {
+  return DeviceEventEmitter.addListener('VoiceCallFloatingAction', listener);
 }
 
 function playFloatingBallTTS(text: string): void {

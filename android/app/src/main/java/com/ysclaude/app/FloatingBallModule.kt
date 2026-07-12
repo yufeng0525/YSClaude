@@ -12,6 +12,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.LinearGradient
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
@@ -114,6 +115,9 @@ class FloatingBallModule(
   private var messageSequenceScheduled = false
   private var desktopLyricView: DesktopLyricCardView? = null
   private var desktopLyricParams: WindowManager.LayoutParams? = null
+  private var voiceCallFloatingView: LinearLayout? = null
+  private var voiceCallFloatingDurationView: TextView? = null
+  private var voiceCallFloatingParams: WindowManager.LayoutParams? = null
   private var inputView: LinearLayout? = null
   private var inputParams: WindowManager.LayoutParams? = null
   private var toolbarViews: List<View> = emptyList()
@@ -491,6 +495,34 @@ class FloatingBallModule(
   }
 
   @ReactMethod
+  fun showVoiceCall(durationText: String, promise: Promise) {
+    mainHandler.post {
+      try {
+        if (!canDrawOverlays()) {
+          promise.reject("OVERLAY_PERMISSION_REQUIRED", "Voice call overlay permission is not granted")
+          return@post
+        }
+        showVoiceCallFloatingInternal(durationText)
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("SHOW_VOICE_CALL_FLOATING_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun hideVoiceCall(promise: Promise) {
+    mainHandler.post {
+      try {
+        hideVoiceCallFloatingInternal()
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("HIDE_VOICE_CALL_FLOATING_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
   fun openApp(promise: Promise) {
     try {
       openAppInternal()
@@ -643,7 +675,7 @@ class FloatingBallModule(
   }
 
   private fun stopForegroundServiceIfNoOverlay() {
-    if (rootView == null && desktopLyricView == null) {
+    if (rootView == null && desktopLyricView == null && voiceCallFloatingView == null) {
       FloatingBallForegroundService.stop(reactContext)
     }
   }
@@ -1148,6 +1180,113 @@ class FloatingBallModule(
     stopForegroundServiceIfNoOverlay()
   }
 
+  private fun showVoiceCallFloatingInternal(durationText: String) {
+    voiceCallFloatingDurationView?.text = durationText.ifBlank { "00:00" }
+    if (voiceCallFloatingView != null) return
+
+    val icon = TextView(reactContext).apply {
+      text = "☎"
+      textSize = 32f
+      setTextColor(Color.rgb(7, 193, 96))
+      gravity = Gravity.CENTER
+      includeFontPadding = false
+    }
+    val duration = TextView(reactContext).apply {
+      text = durationText.ifBlank { "00:00" }
+      textSize = 13f
+      setTextColor(Color.rgb(7, 193, 96))
+      gravity = Gravity.CENTER
+      setTypeface(typeface, android.graphics.Typeface.BOLD)
+      includeFontPadding = false
+    }
+    val root = LinearLayout(reactContext).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setPadding(dp(8), dp(9), dp(8), dp(8))
+      background = roundedDrawable(Color.WHITE, dp(18))
+      elevation = dp(8).toFloat()
+      addView(VoiceCallPhoneIconView(reactContext), LinearLayout.LayoutParams(dp(34), dp(34)))
+      addView(duration, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(22)).apply {
+        topMargin = dp(4)
+      })
+    }
+
+    val width = dp(86)
+    val height = dp(96)
+    var downRawX = 0f
+    var downRawY = 0f
+    var downParamX = 0
+    var downParamY = 0
+    var dragged = false
+    root.setOnTouchListener { _, event ->
+      val params = voiceCallFloatingParams ?: return@setOnTouchListener true
+      when (event.actionMasked) {
+        MotionEvent.ACTION_DOWN -> {
+          downRawX = event.rawX
+          downRawY = event.rawY
+          downParamX = params.x
+          downParamY = params.y
+          dragged = false
+          true
+        }
+        MotionEvent.ACTION_MOVE -> {
+          val dx = event.rawX - downRawX
+          val dy = event.rawY - downRawY
+          if (!dragged && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+            dragged = true
+          }
+          if (dragged) {
+            params.x = (downParamX + dx).toInt().coerceIn(0, screenWidth() - width)
+            params.y = (downParamY + dy).toInt().coerceIn(0, screenHeight() - height)
+            voiceCallFloatingView?.let { windowManager.updateViewLayout(it, params) }
+          }
+          true
+        }
+        MotionEvent.ACTION_UP -> {
+          if (!dragged) {
+            openAppInternal()
+            reactContext
+              .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+              .emit(VOICE_CALL_FLOATING_ACTION_EVENT, "open")
+          }
+          dragged = false
+          true
+        }
+        else -> true
+      }
+    }
+
+    val params = WindowManager.LayoutParams(
+      width,
+      height,
+      overlayType(),
+      overlayFlags(),
+      android.graphics.PixelFormat.TRANSLUCENT
+    ).apply {
+      gravity = Gravity.TOP or Gravity.START
+      x = screenWidth() - width - dp(24)
+      y = screenHeight() / 2 - height / 2
+    }
+
+    voiceCallFloatingView = root
+    voiceCallFloatingDurationView = duration
+    voiceCallFloatingParams = params
+    windowManager.addView(root, params)
+    FloatingBallForegroundService.start(reactContext)
+  }
+
+  private fun hideVoiceCallFloatingInternal() {
+    voiceCallFloatingView?.let { view ->
+      if (view.parent != null) {
+        runCatching { windowManager.removeView(view) }
+      }
+    }
+    voiceCallFloatingView = null
+    voiceCallFloatingDurationView = null
+    voiceCallFloatingParams = null
+    stopForegroundServiceIfNoOverlay()
+  }
+
   private fun handleDesktopLyricTouch(view: View, event: MotionEvent): Boolean {
     val params = desktopLyricParams ?: return true
     when (event.actionMasked) {
@@ -1448,6 +1587,7 @@ class FloatingBallModule(
   companion object {
     private const val TOOL_ACTION_EVENT = "FloatingBallToolAction"
     private const val DESKTOP_LYRIC_ACTION_EVENT = "DesktopLyricAction"
+    private const val VOICE_CALL_FLOATING_ACTION_EVENT = "VoiceCallFloatingAction"
     private const val ACTION_SCREEN_SHARE = "screen_share"
     private const val ACTION_SCREEN_CONTROL = "screen_control"
     private const val ACTION_TEXT_INPUT = "text_input"
@@ -1508,6 +1648,42 @@ class ScreenCapturePermissionActivity : Activity() {
   companion object {
     private const val REQUEST_SCREEN_CAPTURE = 5102
     private const val KEY_REQUESTED = "requested"
+  }
+}
+
+private class VoiceCallPhoneIconView(context: Context) : View(context) {
+  private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.rgb(7, 193, 96)
+    style = Paint.Style.FILL
+  }
+  private val phonePath = Path().apply {
+    moveTo(6.62f, 10.79f)
+    cubicTo(8.12f, 13.72f, 10.28f, 15.88f, 13.21f, 17.38f)
+    lineTo(15.41f, 15.18f)
+    cubicTo(15.68f, 14.91f, 16.08f, 14.82f, 16.43f, 14.94f)
+    cubicTo(17.60f, 15.33f, 18.82f, 15.53f, 20.10f, 15.53f)
+    cubicTo(20.65f, 15.53f, 21.10f, 15.98f, 21.10f, 16.53f)
+    lineTo(21.10f, 20.00f)
+    cubicTo(21.10f, 20.55f, 20.65f, 21.00f, 20.10f, 21.00f)
+    cubicTo(10.66f, 21.00f, 3.00f, 13.34f, 3.00f, 4.00f)
+    cubicTo(3.00f, 3.45f, 3.45f, 3.00f, 4.00f, 3.00f)
+    lineTo(7.50f, 3.00f)
+    cubicTo(8.05f, 3.00f, 8.50f, 3.45f, 8.50f, 4.00f)
+    cubicTo(8.50f, 5.25f, 8.70f, 6.45f, 9.07f, 7.57f)
+    cubicTo(9.19f, 7.94f, 9.10f, 8.34f, 8.82f, 8.59f)
+    lineTo(6.62f, 10.79f)
+    close()
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    val iconSize = minOf(width, height).toFloat()
+    if (iconSize <= 0f) return
+    canvas.save()
+    canvas.translate((width - iconSize) / 2f, (height - iconSize) / 2f)
+    canvas.scale(iconSize / 24f, iconSize / 24f)
+    canvas.drawPath(phonePath, paint)
+    canvas.restore()
   }
 }
 

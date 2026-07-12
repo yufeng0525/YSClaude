@@ -68,11 +68,8 @@ import {
   subscribePromptCacheRemoteSnapshotStatus,
   type PromptCacheRemoteSnapshotStatus,
 } from '../src/services/promptCacheKeepalive';
-import {
-  AndroidVoiceCallSession,
-  isAndroidVoiceCallAvailable,
-  type VoiceCallSnapshot,
-} from '../src/services/voiceCallSession';
+import { isAndroidVoiceCallAvailable, type VoiceCallSnapshot } from '../src/services/voiceCallSession';
+import { useVoiceCallStore } from '../src/stores/voiceCall';
 
 
 let colors = lightColors;
@@ -84,15 +81,6 @@ const PROGRAMMATIC_JUMP_SUPPRESS_MS = 1200;
 const AUTO_SCROLL_THROTTLE_MS = 72;
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 const CLAWD_STATUS_AUTO_CLOSE_MS = 5200;
-const INITIAL_VOICE_CALL_SNAPSHOT: VoiceCallSnapshot = {
-  active: false,
-  status: 'idle',
-  partialTranscript: '',
-  lastUserText: '',
-  speakingText: '',
-  error: null,
-};
-
 function ChatMessageEntrance({
   animate,
   children,
@@ -385,7 +373,8 @@ export default function ChatScreen() {
   const [clawdStatusVisible, setClawdStatusVisible] = useState(false);
   const [remoteSnapshotStatus, setRemoteSnapshotStatus] = useState(() => getPromptCacheRemoteSnapshotStatus());
   const [refreshingRemoteServerStatus, setRefreshingRemoteServerStatus] = useState(false);
-  const [voiceCallSnapshot, setVoiceCallSnapshot] = useState<VoiceCallSnapshot>(INITIAL_VOICE_CALL_SNAPSHOT);
+  const voiceCallSnapshot = useVoiceCallStore((state) => state.snapshot);
+  const startVoiceCall = useVoiceCallStore((state) => state.startCall);
 
   function resolveTopBarIconStyle(iconKey: TopBarIconKey | 'clawd') {
     const rawStyle = cssStyle('.top-bar-icon', `.top-bar-${iconKey}-icon`);
@@ -456,7 +445,6 @@ export default function ChatScreen() {
   const clawdStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newerMessagesAutoScrollResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enteringMessageTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const voiceCallSessionRef = useRef<AndroidVoiceCallSession | null>(null);
   const listHeightRef = useRef(0);
   const contentHeightRef = useRef(0);
   const lastAutoScrollAtRef = useRef(0);
@@ -684,8 +672,6 @@ export default function ChatScreen() {
       if (newerMessagesAutoScrollResetTimerRef.current !== null) {
         clearTimeout(newerMessagesAutoScrollResetTimerRef.current);
       }
-      voiceCallSessionRef.current?.stop().catch(() => undefined);
-      voiceCallSessionRef.current = null;
       enteringMessageTimersRef.current.forEach((timer) => clearTimeout(timer));
       enteringMessageTimersRef.current.clear();
     };
@@ -702,11 +688,9 @@ export default function ChatScreen() {
     }, 1800);
   }, []);
 
-  const toggleVoiceCall = useCallback(async () => {
+  const openVoiceCall = useCallback(async () => {
     if (voiceCallSnapshot.active) {
-      await voiceCallSessionRef.current?.stop();
-      voiceCallSessionRef.current = null;
-      setVoiceCallSnapshot(INITIAL_VOICE_CALL_SNAPSHOT);
+      router.push('/voice-call');
       return;
     }
 
@@ -715,19 +699,14 @@ export default function ChatScreen() {
       return;
     }
 
-    const session = new AndroidVoiceCallSession();
-    voiceCallSessionRef.current = session;
-    const subscription = session.subscribe(setVoiceCallSnapshot);
     try {
-      await session.start();
+      await startVoiceCall();
       showToast('语音通话已开始');
+      router.push('/voice-call');
     } catch (error: any) {
-      subscription.remove();
-      voiceCallSessionRef.current = null;
-      setVoiceCallSnapshot({ ...INITIAL_VOICE_CALL_SNAPSHOT, status: 'error', error: error?.message || '语音通话启动失败' });
       Alert.alert('语音通话启动失败', error?.message || '请检查 Deepgram 和 MiniMax 配置');
     }
-  }, [showToast, voiceCallSnapshot.active]);
+  }, [router, showToast, startVoiceCall, voiceCallSnapshot.active]);
 
   const closeClawdStatus = useCallback(() => {
     if (clawdStatusTimerRef.current !== null) {
@@ -1622,7 +1601,7 @@ export default function ChatScreen() {
         pointerEvents="box-none"
         onLayout={handleInputLayout}
       >
-        {isAndroidVoiceCallAvailable() && (
+        {false && isAndroidVoiceCallAvailable() && (
           <View style={styles.voiceCallBar}>
             <View style={styles.voiceCallTextBlock}>
               <Text style={styles.voiceCallTitle} numberOfLines={1}>
@@ -1643,7 +1622,7 @@ export default function ChatScreen() {
                 styles.voiceCallButton,
                 voiceCallSnapshot.active && styles.voiceCallButtonActive,
               ]}
-              onPress={() => void toggleVoiceCall()}
+              onPress={() => void openVoiceCall()}
             >
               <Text
                 style={[
@@ -1667,6 +1646,9 @@ export default function ChatScreen() {
           onTriggerResponse={triggerResponse}
           onEnableWebCruise={handleEnableWebCruise}
           onAttachFile={attachConversationFile}
+          onStartVoiceCall={openVoiceCall}
+          voiceCallAvailable={isAndroidVoiceCallAvailable()}
+          voiceCallActive={voiceCallSnapshot.active}
           disabled={isStreaming}
           isStreaming={isStreaming}
           onStop={stopStreaming}

@@ -10,8 +10,10 @@ import {
   clearVoiceCallSpeaker,
   enqueueVoiceCallMp3Clip,
   isAndroidVoiceCallAudioAvailable,
+  setVoiceCallSpeakerphoneOn,
   startVoiceCallMic,
   startVoiceCallSpeaker,
+  stopVoiceCallMic,
   stopVoiceCallAudio,
 } from './androidVoiceCallAudio';
 
@@ -20,10 +22,20 @@ type VoiceCallStatus = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speak
 export interface VoiceCallSnapshot {
   active: boolean;
   status: VoiceCallStatus;
+  startedAt: number | null;
+  micEnabled: boolean;
+  speakerphoneOn: boolean;
   partialTranscript: string;
   lastUserText: string;
   speakingText: string;
+  transcriptItems: VoiceCallTranscriptItem[];
   error: string | null;
+}
+
+export interface VoiceCallTranscriptItem {
+  id: string;
+  speaker: 'user' | 'assistant';
+  text: string;
 }
 
 type SnapshotListener = (snapshot: VoiceCallSnapshot) => void;
@@ -51,9 +63,13 @@ export class AndroidVoiceCallSession {
   private snapshot: VoiceCallSnapshot = {
     active: false,
     status: 'idle',
+    startedAt: null,
+    micEnabled: true,
+    speakerphoneOn: false,
     partialTranscript: '',
     lastUserText: '',
     speakingText: '',
+    transcriptItems: [],
     error: null,
   };
 
@@ -79,6 +95,7 @@ export class AndroidVoiceCallSession {
   private minimaxAudioHexParts: string[] = [];
   private lastSpeakableAssistantText = '';
   private activeAssistantId: string | null = null;
+  private activeAssistantTranscriptId: string | null = null;
   private stopping = false;
   private voiceCallSystemMessageOpen = false;
   private assistantPlaybackActive = false;
@@ -128,7 +145,18 @@ export class AndroidVoiceCallSession {
     }
 
     this.stopping = false;
-    this.update({ active: true, status: 'connecting', error: null, partialTranscript: '' });
+    this.update({
+      active: true,
+      status: 'connecting',
+      startedAt: Date.now(),
+      micEnabled: true,
+      speakerphoneOn: false,
+      error: null,
+      partialTranscript: '',
+      lastUserText: '',
+      speakingText: '',
+      transcriptItems: [],
+    });
     const startSystemMessage = await useChatStore.getState().addSystemMessage(VOICE_CALL_START_SYSTEM_MESSAGE);
     this.voiceCallSystemMessageOpen = !!startSystemMessage;
     this.audioErrorSubscription = addVoiceCallAudioErrorListener((event) => {
@@ -141,7 +169,26 @@ export class AndroidVoiceCallSession {
       this.setAssistantPlaybackActive(!!event.active);
     });
     await startVoiceCallSpeaker(MINIMAX_SAMPLE_RATE, 1);
+    await setVoiceCallSpeakerphoneOn(false).catch(() => undefined);
     await this.connectDeepgram();
+  }
+
+  async setMicrophoneEnabled(enabled: boolean): Promise<void> {
+    if (!this.snapshot.active || this.stopping || this.snapshot.micEnabled === enabled) return;
+    if (enabled) {
+      await startVoiceCallMic(DEEPGRAM_SAMPLE_RATE, 20);
+      this.update({ micEnabled: true, status: this.snapshot.status === 'idle' ? 'listening' : this.snapshot.status });
+      return;
+    }
+    await stopVoiceCallMic();
+    this.clearRecognitionBuffers();
+    this.update({ micEnabled: false, partialTranscript: '' });
+  }
+
+  async setSpeakerphoneOn(enabled: boolean): Promise<void> {
+    if (!this.snapshot.active || this.stopping || this.snapshot.speakerphoneOn === enabled) return;
+    await setVoiceCallSpeakerphoneOn(enabled);
+    this.update({ speakerphoneOn: enabled });
   }
 
   async stop(): Promise<void> {
@@ -171,6 +218,7 @@ export class AndroidVoiceCallSession {
     this.minimaxAudioHexParts = [];
     this.pendingTtsText = '';
     this.activeAssistantId = null;
+    this.activeAssistantTranscriptId = null;
     this.lastSpeakableAssistantText = '';
     this.assistantPlaybackActive = false;
     this.suppressRecognitionUntil = 0;
@@ -180,6 +228,9 @@ export class AndroidVoiceCallSession {
     this.update({
       active: false,
       status: 'idle',
+      startedAt: null,
+      micEnabled: true,
+      speakerphoneOn: false,
       partialTranscript: '',
       speakingText: '',
       error: null,
@@ -325,6 +376,7 @@ export class AndroidVoiceCallSession {
       partialTranscript: '',
       speakingText: '',
     });
+    this.appendTranscriptItem('user', text);
     await chat.addUserMessage(text);
     if (useChatStore.getState().error) {
       throw new Error(useChatStore.getState().error || '发送语音文字失败');
@@ -342,6 +394,7 @@ export class AndroidVoiceCallSession {
     this.cleanupChatBridge();
     this.closeMiniMax();
     this.activeAssistantId = null;
+    this.activeAssistantTranscriptId = null;
     this.lastSpeakableAssistantText = '';
     this.pendingTtsText = '';
     this.ttsTextQueue = [];
@@ -352,6 +405,7 @@ export class AndroidVoiceCallSession {
       if (!last || last.role !== 'assistant') return;
       if (this.activeAssistantId !== last.id) {
         this.activeAssistantId = last.id;
+        this.activeAssistantTranscriptId = null;
         this.lastSpeakableAssistantText = '';
         this.pendingTtsText = '';
       }
@@ -366,6 +420,7 @@ export class AndroidVoiceCallSession {
   private appendTtsText(delta: string): void {
     const clean = delta.replace(/\s+/g, ' ');
     if (!clean.trim()) return;
+    this.appendAssistantTranscriptDelta(clean);
     this.pendingTtsText += clean;
     this.flushPendingTtsText(false);
   }
@@ -672,6 +727,9 @@ export class AndroidVoiceCallSession {
     this.update({
       active: false,
       status: 'error',
+      startedAt: null,
+      micEnabled: true,
+      speakerphoneOn: false,
       partialTranscript: '',
       speakingText: '',
       error: message,
@@ -681,6 +739,45 @@ export class AndroidVoiceCallSession {
   private update(patch: Partial<VoiceCallSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
     this.listeners.forEach((listener) => listener(this.snapshot));
+  }
+
+  private appendTranscriptItem(speaker: VoiceCallTranscriptItem['speaker'], text: string): void {
+    const normalized = text.trim();
+    if (!normalized) return;
+    this.update({
+      transcriptItems: [
+        ...this.snapshot.transcriptItems,
+        {
+          id: `${speaker}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          speaker,
+          text: normalized,
+        },
+      ].slice(-80),
+    });
+  }
+
+  private appendAssistantTranscriptDelta(delta: string): void {
+    const normalized = delta.replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+    const items = [...this.snapshot.transcriptItems];
+    const activeId = this.activeAssistantTranscriptId;
+    const activeIndex = activeId ? items.findIndex((item) => item.id === activeId) : -1;
+    if (activeIndex >= 0) {
+      const current = items[activeIndex];
+      items[activeIndex] = {
+        ...current,
+        text: `${current.text}${current.text.endsWith(' ') ? '' : ' '}${normalized}`.trim(),
+      };
+      this.update({ transcriptItems: items.slice(-80) });
+      return;
+    }
+    const item = {
+      id: `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      speaker: 'assistant' as const,
+      text: normalized,
+    };
+    this.activeAssistantTranscriptId = item.id;
+    this.update({ transcriptItems: [...items, item].slice(-80) });
   }
 
   private async closeVoiceCallSystemMessage(): Promise<void> {

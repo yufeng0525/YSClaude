@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -16,7 +16,9 @@ import { useSettingsStore } from '../src/stores/settings';
 import { IncomingShareHandler } from '../src/components/IncomingShareHandler';
 import {
   addFloatingBallToolActionListener,
+  addVoiceCallFloatingActionListener,
   hideFloatingBall,
+  showVoiceCallFloatingBall,
   showFloatingBall,
 } from '../src/services/floatingBall';
 import { handleFloatingBallToolAction } from '../src/services/floatingToolActions';
@@ -26,9 +28,18 @@ import { startPromptCacheRemoteSnapshotFlushListener } from '../src/services/pro
 import { useChatStore } from '../src/stores/chat';
 import { cleanupExpiredVoiceFiles } from '../src/services/voiceFiles';
 import { syncTodayWidget } from '../src/services/todayWidget';
+import { useVoiceCallStore } from '../src/stores/voiceCall';
 
 
 SplashScreen.preventAutoHideAsync();
+
+function formatVoiceCallDuration(startedAt: number | null): string {
+  if (!startedAt) return '00:00';
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const minutesText = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const secondsText = (seconds % 60).toString().padStart(2, '0');
+  return `${minutesText}:${secondsText}`;
+}
 
 export default function RootLayout() {
   const colors = useThemeColors();
@@ -51,6 +62,8 @@ export default function RootLayout() {
       state.appearanceConfig?.userAvatarImageUri || '',
     ].join('|')
   );
+  const voiceCallSnapshot = useVoiceCallStore((state) => state.snapshot);
+  const voiceCallMinimized = useVoiceCallStore((state) => state.minimized);
 
   useEffect(() => {
     SplashScreen.hideAsync();
@@ -79,6 +92,23 @@ export default function RootLayout() {
     });
     return () => sub.remove();
   }, []);
+
+  useEffect(() => {
+    const sub = addVoiceCallFloatingActionListener(() => {
+      router.push('/voice-call');
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!voiceCallSnapshot.active || !voiceCallMinimized) return;
+    const syncDuration = () => {
+      showVoiceCallFloatingBall(formatVoiceCallDuration(voiceCallSnapshot.startedAt)).catch(() => undefined);
+    };
+    syncDuration();
+    const timer = setInterval(syncDuration, 1000);
+    return () => clearInterval(timer);
+  }, [voiceCallMinimized, voiceCallSnapshot.active, voiceCallSnapshot.startedAt]);
 
   useEffect(() => {
     startDesktopLyricSync();
@@ -160,6 +190,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="music-playlists"
           options={{ animation: 'slide_from_right', presentation: 'modal' }}
+        />
+        <Stack.Screen
+          name="voice-call"
+          options={{ animation: 'fade', presentation: 'fullScreenModal' }}
         />
         <Stack.Screen
           name="focus"

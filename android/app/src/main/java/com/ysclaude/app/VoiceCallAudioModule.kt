@@ -258,6 +258,20 @@ class VoiceCallAudioModule(
   }
 
   @ReactMethod
+  fun setSpeakerphoneOn(enabled: Boolean, promise: Promise) {
+    try {
+      val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      if (previousAudioMode == null) previousAudioMode = audioManager.mode
+      if (previousSpeakerphone == null) previousSpeakerphone = audioManager.isSpeakerphoneOn
+      audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+      audioManager.isSpeakerphoneOn = enabled
+      promise.resolve(true)
+    } catch (error: Exception) {
+      promise.reject("VOICE_CALL_AUDIO_ROUTE", error)
+    }
+  }
+
+  @ReactMethod
   fun writeMp3Chunk(base64: String, promise: Promise) {
     if (!speakerRunning.get()) {
       promise.resolve(false)
@@ -625,7 +639,6 @@ class VoiceCallAudioModule(
     if (previousAudioMode == null) previousAudioMode = audioManager.mode
     if (previousSpeakerphone == null) previousSpeakerphone = audioManager.isSpeakerphoneOn
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-    audioManager.isSpeakerphoneOn = true
   }
 
   private fun restoreAudioModeIfIdle(force: Boolean = false) {

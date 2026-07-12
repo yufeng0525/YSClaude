@@ -24,6 +24,7 @@ import {
   MapPin,
   Palette,
   Paperclip,
+  Phone,
   Sparkles,
   Wrench,
 } from 'lucide-react-native';
@@ -224,6 +225,9 @@ interface Props {
   onEnableWebCruise?: () => void | Promise<void>;
   onAttachFile?: () => void | Promise<unknown>;
   onSendLocation?: (location: LocationAttachment) => void | Promise<unknown>;
+  onStartVoiceCall?: () => void | Promise<void>;
+  voiceCallAvailable?: boolean;
+  voiceCallActive?: boolean;
   disabled?: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -237,6 +241,9 @@ export function ChatInput({
   onEnableWebCruise,
   onAttachFile,
   onSendLocation,
+  onStartVoiceCall,
+  voiceCallAvailable = false,
+  voiceCallActive = false,
   disabled,
   isStreaming,
   onStop,
@@ -256,6 +263,7 @@ export function ChatInput({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const [optionsMenuPage, setOptionsMenuPage] = useState(0);
   const [cssEditorVisible, setCssEditorVisible] = useState(false);
   const [cssDraft, setCssDraft] = useState('');
   const [fileManagerVisible, setFileManagerVisible] = useState(false);
@@ -885,7 +893,12 @@ export function ChatInput({
     Keyboard.dismiss();
     inputRef.current?.blur();
     setStickerPickerVisible(false);
-    setOptionsMenuVisible((visible) => !visible);
+    setOptionsMenuVisible((visible) => {
+      if (!visible) {
+        setOptionsMenuPage(0);
+      }
+      return !visible;
+    });
   };
 
   const handleInputFocus = () => {
@@ -963,8 +976,16 @@ export function ChatInput({
     setAppearanceConfig({ customCss: '' });
   };
 
-  const optionActions = [
-    { key: 'web', label: 'AI网页巡游', Icon: Globe2, onPress: () => void handleEnableWebCruise() },
+  const primaryOptionActions = [
+    ...(voiceCallAvailable ? [{
+      key: 'voice-call',
+      label: voiceCallActive ? '语音通话中' : '语音通话',
+      Icon: Phone,
+      onPress: () => {
+        setOptionsMenuVisible(false);
+        void onStartVoiceCall?.();
+      },
+    }] : []),
     { key: 'mcp', label: 'MCP 管理', Icon: Wrench, onPress: handleOpenMcpPanel },
     { key: 'image', label: '图片', Icon: ImageIcon, onPress: () => void pickImage() },
     { key: 'reference', label: '生图参考图', Icon: Sparkles, onPress: () => void pickImageReferences() },
@@ -979,6 +1000,15 @@ export function ChatInput({
     { key: 'manager', label: '文件管理', Icon: FolderOpen, onPress: () => void openFileManager() },
     { key: 'css', label: '自定义 CSS', Icon: Palette, onPress: handleOpenCssEditor },
   ];
+
+  const secondaryOptionActions = [
+    { key: 'web', label: 'AI网页巡游', Icon: Globe2, onPress: () => void handleEnableWebCruise() },
+  ];
+  const optionPages = [
+    primaryOptionActions,
+    secondaryOptionActions,
+  ];
+  const visibleOptionActions = optionPages[Math.min(optionsMenuPage, optionPages.length - 1)] || optionPages[0];
 
   return (
     <View
@@ -1238,9 +1268,9 @@ export function ChatInput({
       {optionsMenuVisible && (
         <View style={[styles.inlinePanel, styles.optionsPanel]}>
           <View style={styles.optionsGrid}>
-            {optionActions.map((action) => {
+            {visibleOptionActions.map((action) => {
               const Icon = action.Icon;
-              const disabledAction = !!action.disabled;
+              const disabledAction = 'disabled' in action && !!action.disabled;
               return (
                 <Pressable
                   key={action.key}
@@ -1264,6 +1294,18 @@ export function ChatInput({
                 </Pressable>
               );
             })}
+          </View>
+          <View style={styles.optionsPager}>
+            {optionPages.map((_, pageIndex) => (
+              <Pressable
+                key={pageIndex}
+                style={[
+                  styles.optionPageDot,
+                  optionsMenuPage === pageIndex && styles.optionPageDotActive,
+                ]}
+                onPress={() => setOptionsMenuPage(pageIndex)}
+              />
+            ))}
           </View>
         </View>
       )}
@@ -2030,9 +2072,29 @@ const createStyles = (
     paddingBottom: 8,
   },
   optionsGrid: {
+    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     rowGap: 16,
+  },
+  optionsPager: {
+    height: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  optionPageDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.textTertiary,
+    opacity: 0.36,
+  },
+  optionPageDotActive: {
+    width: 18,
+    opacity: 1,
+    backgroundColor: colors.primary,
   },
   optionItem: {
     width: '25%',
