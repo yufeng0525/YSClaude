@@ -51,8 +51,9 @@ const DEEPGRAM_SAMPLE_RATE = 16000;
 const MINIMAX_SAMPLE_RATE = 32000;
 const PLAYBACK_RECOGNITION_SUPPRESS_MS = 900;
 const BARGE_IN_RECOGNITION_OPEN_MS = 2500;
-const PENDING_TRANSCRIPT_FLUSH_MS = 750;
-const LOCAL_SPEECH_END_FLUSH_MS = 260;
+const PENDING_TRANSCRIPT_FLUSH_MS = 1500;
+const LOCAL_SPEECH_END_FLUSH_MS = 900;
+const DUPLICATE_USER_TEXT_WINDOW_MS = 6000;
 const TTS_SEGMENT_BOUNDARY = /[。！？!?；;，,、\n]/;
 const MAX_TTS_SEGMENT_CHARS = 44;
 const MINIMAX_TASK_START_FALLBACK_MS = 350;
@@ -117,6 +118,8 @@ export class AndroidVoiceCallSession {
   private assistantPlaybackActive = false;
   private suppressRecognitionUntil = 0;
   private bargeInRecognitionOpenUntil = 0;
+  private lastSubmittedUserText = '';
+  private lastSubmittedUserTextAt = 0;
 
   subscribe(listener: SnapshotListener): Subscription {
     this.listeners.add(listener);
@@ -244,6 +247,8 @@ export class AndroidVoiceCallSession {
     this.assistantPlaybackActive = false;
     this.suppressRecognitionUntil = 0;
     this.bargeInRecognitionOpenUntil = 0;
+    this.lastSubmittedUserText = '';
+    this.lastSubmittedUserTextAt = 0;
     this.stopping = false;
     await this.closeVoiceCallSystemMessage();
     this.update({
@@ -376,6 +381,10 @@ export class AndroidVoiceCallSession {
     }
 
     if (event.type !== 'Results') return;
+    if (this.snapshot.status !== 'listening') {
+      this.clearRecognitionBuffers();
+      return;
+    }
     const transcript = extractDeepgramTranscript(event);
     if (!transcript) return;
 
@@ -396,11 +405,22 @@ export class AndroidVoiceCallSession {
 
   private flushFinalTranscript(): void {
     this.clearPendingTranscriptFlush();
+    if (this.snapshot.status !== 'listening') {
+      this.finalTranscriptParts = [];
+      this.lastInterimTranscript = '';
+      if (this.snapshot.partialTranscript) {
+        this.update({ partialTranscript: '' });
+      }
+      return;
+    }
     const text = (uniqueJoin(this.finalTranscriptParts) || this.lastInterimTranscript || this.snapshot.partialTranscript).trim();
     this.finalTranscriptParts = [];
     this.lastInterimTranscript = '';
     this.update({ partialTranscript: '' });
     if (!text) return;
+    if (this.isDuplicateSubmittedUserText(text)) return;
+    this.lastSubmittedUserText = text;
+    this.lastSubmittedUserTextAt = Date.now();
     this.handleUserTurn(text).catch((error) => {
       this.fail(error?.message || 'Voice turn failed');
     });
@@ -689,6 +709,15 @@ export class AndroidVoiceCallSession {
     this.schedulePendingTranscriptFlush(LOCAL_SPEECH_END_FLUSH_MS);
   }
 
+  private isDuplicateSubmittedUserText(text: string): boolean {
+    const previous = normalizeTranscriptForCompare(this.lastSubmittedUserText);
+    const next = normalizeTranscriptForCompare(text);
+    if (!previous || !next) return false;
+    if (Date.now() - this.lastSubmittedUserTextAt > DUPLICATE_USER_TEXT_WINDOW_MS) return false;
+    if (previous === next) return true;
+    return previous.includes(next) || next.includes(previous);
+  }
+
   private interruptAssistant(): void {
     clearVoiceCallSpeaker().catch(() => undefined);
     this.closeMiniMax();
@@ -791,6 +820,8 @@ export class AndroidVoiceCallSession {
     this.assistantPlaybackActive = false;
     this.suppressRecognitionUntil = 0;
     this.bargeInRecognitionOpenUntil = 0;
+    this.lastSubmittedUserText = '';
+    this.lastSubmittedUserTextAt = 0;
     stopVoiceCallAudio().catch(() => undefined);
     this.closeVoiceCallSystemMessage().catch(() => undefined);
     this.stopping = false;
@@ -869,8 +900,8 @@ function buildDeepgramLiveUrl(baseUrl: string, model: string, language: string):
   url.searchParams.set('interim_results', 'true');
   url.searchParams.set('smart_format', 'true');
   url.searchParams.set('vad_events', 'true');
-  url.searchParams.set('endpointing', '180');
-  url.searchParams.set('utterance_end_ms', '1000');
+  url.searchParams.set('endpointing', '650');
+  url.searchParams.set('utterance_end_ms', '1200');
   const normalizedLanguage = language.trim();
   url.searchParams.set('language', normalizedLanguage || 'multi');
   return url.toString();
@@ -919,6 +950,13 @@ function uniqueJoin(parts: string[]): string {
     result.push(normalized);
   });
   return result.join(' ');
+}
+
+function normalizeTranscriptForCompare(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s，。！？、；：,.!?;:]+/g, '');
 }
 
 function extractSpeakableAssistantText(content: string): string {

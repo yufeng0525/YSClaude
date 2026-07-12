@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -47,8 +48,8 @@ class VoiceCallAudioModule(
     private const val BARGE_IN_RECOGNITION_OPEN_MS = 2_500L
     private const val MIC_PREROLL_MS = 520
     private const val MIC_START_MIN_SPEECH_MS = 60
-    private const val MIC_TRAILING_AUDIO_MS = 360
-    private const val MIC_END_SILENCE_MS = 460
+    private const val MIC_TRAILING_AUDIO_MS = 760
+    private const val MIC_END_SILENCE_MS = 820
     private const val MIC_INITIAL_NOISE_RMS = 260.0
     private const val MIC_MIN_START_RMS = 320.0
     private const val MIC_MIN_ACTIVE_RMS = 220.0
@@ -77,6 +78,8 @@ class VoiceCallAudioModule(
   private var gainControl: AutomaticGainControl? = null
   private var previousAudioMode: Int? = null
   private var previousSpeakerphone: Boolean? = null
+  private var previousCommunicationDevice: AudioDeviceInfo? = null
+  private var previousCommunicationDeviceCaptured = false
   private val bargeInPreroll = ArrayDeque<ByteArray>()
   private val micPreroll = ArrayDeque<ByteArray>()
   private val bargeInLock = Any()
@@ -268,10 +271,9 @@ class VoiceCallAudioModule(
   fun setSpeakerphoneOn(enabled: Boolean, promise: Promise) {
     try {
       val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-      if (previousAudioMode == null) previousAudioMode = audioManager.mode
-      if (previousSpeakerphone == null) previousSpeakerphone = audioManager.isSpeakerphoneOn
+      rememberAudioRouteState(audioManager)
       audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-      audioManager.isSpeakerphoneOn = enabled
+      setCommunicationSpeakerphone(audioManager, enabled)
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("VOICE_CALL_AUDIO_ROUTE", error)
@@ -742,8 +744,7 @@ class VoiceCallAudioModule(
 
   private fun configureCommunicationMode() {
     val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    if (previousAudioMode == null) previousAudioMode = audioManager.mode
-    if (previousSpeakerphone == null) previousSpeakerphone = audioManager.isSpeakerphoneOn
+    rememberAudioRouteState(audioManager)
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
   }
 
@@ -751,9 +752,66 @@ class VoiceCallAudioModule(
     if (!force && (micRunning.get() || speakerRunning.get())) return
     val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     previousAudioMode?.let { audioManager.mode = it }
-    previousSpeakerphone?.let { audioManager.isSpeakerphoneOn = it }
+    restoreCommunicationRoute(audioManager)
     previousAudioMode = null
     previousSpeakerphone = null
+    previousCommunicationDevice = null
+    previousCommunicationDeviceCaptured = false
+  }
+
+  private fun rememberAudioRouteState(audioManager: AudioManager) {
+    if (previousAudioMode == null) previousAudioMode = audioManager.mode
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (!previousCommunicationDeviceCaptured) {
+        previousCommunicationDevice = audioManager.communicationDevice
+        previousCommunicationDeviceCaptured = true
+      }
+      return
+    }
+    if (previousSpeakerphone == null) {
+      previousSpeakerphone = getLegacySpeakerphoneOn(audioManager)
+    }
+  }
+
+  private fun setCommunicationSpeakerphone(audioManager: AudioManager, enabled: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (!enabled) {
+        audioManager.clearCommunicationDevice()
+        return
+      }
+      val speaker = audioManager.availableCommunicationDevices.firstOrNull {
+        it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+      }
+      if (speaker != null) {
+        audioManager.setCommunicationDevice(speaker)
+      }
+      return
+    }
+    setLegacySpeakerphoneOn(audioManager, enabled)
+  }
+
+  private fun restoreCommunicationRoute(audioManager: AudioManager) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (!previousCommunicationDeviceCaptured) return
+      val previousDevice = previousCommunicationDevice
+      if (previousDevice == null) {
+        audioManager.clearCommunicationDevice()
+      } else {
+        audioManager.setCommunicationDevice(previousDevice)
+      }
+      return
+    }
+    previousSpeakerphone?.let { setLegacySpeakerphoneOn(audioManager, it) }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun getLegacySpeakerphoneOn(audioManager: AudioManager): Boolean {
+    return audioManager.isSpeakerphoneOn
+  }
+
+  @Suppress("DEPRECATION")
+  private fun setLegacySpeakerphoneOn(audioManager: AudioManager, enabled: Boolean) {
+    audioManager.isSpeakerphoneOn = enabled
   }
 
   private fun attachVoiceEffects(sessionId: Int) {
