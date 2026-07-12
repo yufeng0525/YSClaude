@@ -451,7 +451,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   function handleSaveLocationShare() {
     if (locationEnabled && !locationTencentKey.trim()) {
       Alert.alert('提示', '启用位置分享时请填写腾讯地图 Key');
-      return;
+      return false;
     }
     setLocationShareConfig({
       enabled: locationEnabled,
@@ -459,6 +459,31 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       tencentKey: locationTencentKey.trim(),
     });
     showToast(locationEnabled ? '位置分享配置已保存' : '位置分享已关闭');
+    return true;
+  }
+
+  function handleLocationShareEnabledChange(value: boolean) {
+    setLocationEnabled(value);
+    if (!value) {
+      setLocationShareConfig({
+        enabled: false,
+        provider: 'tencent',
+        tencentKey: locationTencentKey.trim(),
+      });
+      showToast('位置分享已关闭');
+      return;
+    }
+    if (!locationTencentKey.trim()) {
+      setSelectedBuiltInToolKey('locationShare');
+      showToast('请先填写腾讯地图 Key');
+      return;
+    }
+    setLocationShareConfig({
+      enabled: true,
+      provider: 'tencent',
+      tencentKey: locationTencentKey.trim(),
+    });
+    showToast('位置分享已开启');
   }
 
   function handleAddDailySource() {
@@ -1621,11 +1646,28 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     },
   ];
 
+  const dailyPaperSourcesCard = {
+    key: 'dailyPaperSources',
+    name: '日报来源',
+    intro: '配置每日日报生成时读取的 RSS 新闻来源。',
+    enabled: dailyUseDefaultSources || dailyCustomSources.some((source) => source.enabled),
+    onValueChange: handleDailyDefaultSourcesEnabledChange,
+    meta: (dailyUseDefaultSources ? 6 : 0) + dailyCustomSources.filter((source) => source.enabled).length + ' 个来源',
+  };
+  const locationShareCard = {
+    key: 'locationShare',
+    name: '位置分享',
+    intro: '加号菜单可发送当前位置卡片，并用腾讯地图解析地址和缩略图。',
+    enabled: locationEnabled,
+    onValueChange: handleLocationShareEnabledChange,
+    meta: locationTencentKey.trim() ? '腾讯地图 Key 已配置' : '需要腾讯地图 Key',
+  };
+  const otherFeatureCards = [dailyPaperSourcesCard, locationShareCard];
+
   const builtInToolCards = [
     { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
     { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: handleWebSearchEnabledChange, meta: '1 个工具' },
     { key: 'hotboard', name: '热榜查询', intro: '从已选择的平台列表中查询热门话题。', enabled: hbEnabled, onValueChange: handleHotboardEnabledChange, meta: hbPlatformTypes.length + ' 个平台' },
-    { key: 'dailyPaperSources', name: '日报来源', intro: '配置每日日报生成时读取的 RSS 新闻来源。', enabled: dailyUseDefaultSources || dailyCustomSources.some((source) => source.enabled), onValueChange: handleDailyDefaultSourcesEnabledChange, meta: (dailyUseDefaultSources ? 6 : 0) + dailyCustomSources.filter((source) => source.enabled).length + ' 个来源' },
     { key: 'runCommand', name: '远程命令', intro: '通过 SSH 连接专用 AI 服务器执行 shell 命令。与「对话文件」同时开启时，自动激活对话文件与服务器互传工具。', enabled: rcEnabled, onValueChange: handleRunCommandEnabledChange, meta: '最多 ' + (rcMaxCalls || '20') + ' 次' },
     { key: 'qqBot', name: 'QQ 机器人', intro: '把 QQ 官方机器人消息接入独立后端，由 YSClaude 生成回复。', enabled: qqEnabled, onValueChange: handleQqBotEnabledChange, meta: qqBackendStatus === '尚未检测' ? '官方 Bot' : qqBackendStatus },
     { key: 'webInteraction', name: '网页交互', intro: '允许 AI 打开、观察并操作应用内网页面板。', enabled: wiEnabled, onValueChange: handleWebInteractionEnabledChange, meta: '最多 ' + (wiMaxCalls || '8') + ' 次' },
@@ -1638,7 +1680,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     { key: 'aiVoiceCall', name: '主动语音通话', intro: '允许 AI 给你打实时语音电话；接听后 AI 会先开口。', enabled: aiVoiceCallEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallEnabled', value), meta: '设备原生' },
   ];
 
-  const selectedBuiltInTool = builtInToolCards.find((tool) => tool.key === selectedBuiltInToolKey) || null;
+  const selectedOtherFeature = otherFeatureCards.find((tool) => tool.key === selectedBuiltInToolKey) || null;
+  const selectedBuiltInTool = selectedOtherFeature
+    ? selectedOtherFeature
+    : builtInToolCards.find((tool) => tool.key === selectedBuiltInToolKey) || null;
   const selectedMcpServer = mcpServers.find((server) => server.id === selectedMcpServerId) || null;
   const selectedMcpToolServer = selectedMcpToolRef
     ? mcpServers.find((server) => server.id === selectedMcpToolRef.serverId) || null
@@ -1748,6 +1793,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         break;
       case 'dailyPaperSources':
         return handleSaveDailyPaperSources();
+      case 'locationShare':
+        return handleSaveLocationShare();
       case 'runCommand':
         return handleSaveRunCommand();
       case 'webInteraction':
@@ -1792,6 +1839,14 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
               setDailyUseDefaultSources(false);
               setDailyCustomSources((sources) => sources.map((source) => ({ ...source, enabled: false })));
               setDailyPaperConfig({ useDefaultSources: false, customSources: dailyCustomSources.map((source) => ({ ...source, enabled: false })) });
+              break;
+            case 'locationShare':
+              setLocationEnabled(false);
+              setLocationShareConfig({
+                enabled: false,
+                provider: 'tencent',
+                tencentKey: locationTencentKey.trim(),
+              });
               break;
             case 'runCommand':
               setRcEnabled(false);
@@ -1923,6 +1978,36 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
                 ))}
               </View>
             )}
+          </>
+        );
+      case 'locationShare':
+        return (
+          <>
+            <Text style={styles.toolModalDescription}>加号菜单可发送当前位置卡片；默认使用腾讯地图解析地址和生成缩略图。</Text>
+            <View style={styles.switchRow}>
+              <View style={styles.switchText}>
+                <Text style={styles.label}>启用位置分享</Text>
+                <Text style={styles.hint}>开启后，聊天输入区的加号菜单可以发送当前位置。</Text>
+              </View>
+              <Switch
+                value={locationEnabled}
+                onValueChange={setLocationEnabled}
+                trackColor={{ false: colors.inputBorder, true: colors.primary }}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>腾讯地图 Key</Text>
+              <TextInput
+                style={styles.input}
+                value={locationTencentKey}
+                onChangeText={setLocationTencentKey}
+                placeholder="填写腾讯位置服务 WebService Key"
+                placeholderTextColor={colors.textTertiary}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+              <Text style={styles.hint}>开源版本不内置 Key；请使用者在腾讯位置服务控制台创建自己的 Key，并启用 WebService API。</Text>
+            </View>
           </>
         );
       case 'runCommand':
@@ -2265,12 +2350,9 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
           styles={styles}
           colors={colors}
           expanded={otherFeaturesExpanded}
-          locationEnabled={locationEnabled}
-          locationTencentKey={locationTencentKey}
+          tools={otherFeatureCards}
           onToggleExpanded={() => setToolSettingsUiConfig({ otherFeaturesExpanded: !otherFeaturesExpanded })}
-          onChangeLocationEnabled={setLocationEnabled}
-          onChangeLocationTencentKey={setLocationTencentKey}
-          onSaveLocation={handleSaveLocationShare}
+          onSelectTool={setSelectedBuiltInToolKey}
         />
       </ScrollView>
       <BuiltInToolModal

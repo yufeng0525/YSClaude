@@ -43,12 +43,9 @@ type OtherFeaturesSectionProps = {
   styles: any;
   colors: any;
   expanded: boolean;
-  locationEnabled: boolean;
-  locationTencentKey: string;
+  tools: BuiltInToolCard[];
   onToggleExpanded: () => void;
-  onChangeLocationEnabled: (value: boolean) => void;
-  onChangeLocationTencentKey: (value: string) => void;
-  onSaveLocation: () => void;
+  onSelectTool: (key: string) => void;
 };
 
 export function BuiltInToolsSection({
@@ -193,12 +190,9 @@ export function OtherFeaturesSection({
   styles,
   colors,
   expanded,
-  locationEnabled,
-  locationTencentKey,
+  tools,
   onToggleExpanded,
-  onChangeLocationEnabled,
-  onChangeLocationTencentKey,
-  onSaveLocation,
+  onSelectTool,
 }: OtherFeaturesSectionProps) {
   return (
     <>
@@ -210,38 +204,32 @@ export function OtherFeaturesSection({
         <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
       </Pressable>
       {expanded && (
-        <>
-          <View style={styles.switchRow}>
-            <View style={styles.switchText}>
-              <Text style={styles.label}>启用位置分享</Text>
-              <Text style={styles.hint}>加号菜单可发送当前位置卡片；默认使用腾讯地图解析地址和缩略图。</Text>
-            </View>
-            <Switch
-              value={locationEnabled}
-              onValueChange={onChangeLocationEnabled}
-              trackColor={{ false: colors.inputBorder, true: colors.primary }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>腾讯地图 Key</Text>
-            <TextInput
-              style={styles.input}
-              value={locationTencentKey}
-              onChangeText={onChangeLocationTencentKey}
-              placeholder="填写腾讯位置服务 WebService Key"
-              placeholderTextColor={colors.textTertiary}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-            <Text style={styles.hint}>开源版本不内置 Key；请使用者在腾讯位置服务控制台创建自己的 Key，并启用 WebService API。</Text>
-          </View>
-          <View style={styles.actions}>
-            <Pressable style={styles.saveButton} onPress={onSaveLocation}>
-              <Text style={styles.saveButtonText}>保存位置分享</Text>
+        <View style={styles.toolCardGrid}>
+          {tools.map((tool) => (
+            <Pressable
+              key={tool.key}
+              style={[styles.toolCard, tool.enabled && styles.toolCardEnabled]}
+              onPress={() => onSelectTool(tool.key)}
+            >
+              <View style={styles.toolCardTop}>
+                <View style={styles.toolCardText}>
+                  <Text style={styles.toolCardName} numberOfLines={1}>{tool.name}</Text>
+                  <Text style={styles.toolCardMeta}>{tool.meta}</Text>
+                </View>
+                <Switch
+                  value={tool.enabled}
+                  onValueChange={tool.onValueChange}
+                  trackColor={{ false: colors.inputBorder, true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.toolCardIntro} numberOfLines={3}>{tool.intro}</Text>
+              <Text style={[styles.toolCardStatus, tool.enabled && styles.toolCardStatusEnabled]}>
+                {tool.enabled ? '已开启' : '已关闭'}
+              </Text>
             </Pressable>
-          </View>
-        </>
+          ))}
+        </View>
       )}
     </>
   );
