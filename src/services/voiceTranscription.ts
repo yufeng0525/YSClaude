@@ -169,7 +169,7 @@ async function transcribeDeepgram({
   const json = JSON.parse(response.body);
   const text = extractDeepgramTranscript(json);
   if (!text) {
-    throw new Error('Deepgram STT 未返回文字');
+    throw new Error('Deepgram STT 未识别到文字：请确认录音里有清晰人声，或在语音配置里设置正确语言（如 zh）');
   }
   return text;
 }
@@ -191,6 +191,8 @@ function buildDeepgramEndpoint(baseUrl: string, model?: string, language?: strin
   const normalizedLanguage = language?.trim();
   if (normalizedLanguage) {
     url.searchParams.set('language', normalizedLanguage);
+  } else {
+    url.searchParams.set('detect_language', 'true');
   }
   url.searchParams.set('smart_format', 'true');
   return url.toString();
