@@ -40,6 +40,11 @@ export interface VoiceCallTranscriptItem {
 
 type SnapshotListener = (snapshot: VoiceCallSnapshot) => void;
 type Subscription = { remove: () => void };
+type DeepgramWebSocketAuthAttempt = {
+  label: string;
+  protocols?: string | string[];
+  options?: { headers?: Record<string, string> };
+};
 
 const DEEPGRAM_SAMPLE_RATE = 16000;
 const MINIMAX_SAMPLE_RATE = 32000;
@@ -247,14 +252,39 @@ export class AndroidVoiceCallSession {
 
   private async connectDeepgram(): Promise<void> {
     const settings = useSettingsStore.getState();
-    const ws = new NativeWebSocket(
-      buildDeepgramLiveUrl(
-        settings.sttConfig.deepgramBaseUrl,
-        settings.sttConfig.deepgramModel,
-        settings.sttConfig.deepgramLanguage
-      ),
-      ['token', settings.sttConfig.deepgramApiKey.trim()]
+    const url = buildDeepgramLiveUrl(
+      settings.sttConfig.deepgramBaseUrl,
+      settings.sttConfig.deepgramModel,
+      settings.sttConfig.deepgramLanguage
     );
+    const apiKey = settings.sttConfig.deepgramApiKey.trim();
+    const attempts: DeepgramWebSocketAuthAttempt[] = [
+      {
+        label: 'Authorization header',
+        protocols: undefined,
+        options: { headers: { Authorization: buildDeepgramAuthorizationHeader(apiKey) } },
+      },
+      {
+        label: 'WebSocket protocol token',
+        protocols: ['token', apiKey],
+      },
+    ];
+    const errors: string[] = [];
+
+    for (const attempt of attempts) {
+      try {
+        await this.openDeepgramSocket(url, attempt);
+        return;
+      } catch (error: any) {
+        errors.push(`${attempt.label}: ${error?.message || 'connection failed'}`);
+      }
+    }
+
+    throw new Error(`Deepgram 实时连接失败：${errors.join('；')}`);
+  }
+
+  private async openDeepgramSocket(url: string, auth: DeepgramWebSocketAuthAttempt): Promise<void> {
+    const ws = new NativeWebSocket(url, auth.protocols, auth.options);
     this.deepgramWs = ws;
 
     await new Promise<void>((resolve, reject) => {
@@ -262,8 +292,17 @@ export class AndroidVoiceCallSession {
       const settle = (error?: Error) => {
         if (settled) return;
         settled = true;
-        if (error) reject(error);
-        else resolve();
+        if (error) {
+          if (this.deepgramWs === ws) {
+            this.deepgramWs = null;
+          }
+          if (ws.readyState <= WebSocket.OPEN) {
+            ws.close();
+          }
+          reject(error);
+        } else {
+          resolve();
+        }
       };
 
       ws.onopen = () => {
@@ -284,10 +323,14 @@ export class AndroidVoiceCallSession {
         }, 8000);
       };
 
-      ws.onerror = () => settle(new Error('Deepgram 实时连接失败：WebSocket 握手未通过'));
+      ws.onerror = () => settle(new Error('WebSocket 握手未通过'));
       ws.onclose = (event: any) => {
+        const closeDetail = formatWebSocketClose(event);
+        if (!settled) {
+          settle(new Error(closeDetail ? `WebSocket 握手未通过（${closeDetail}）` : 'WebSocket 握手未通过'));
+          return;
+        }
         if (!this.stopping && this.deepgramWs === ws) {
-          const closeDetail = formatWebSocketClose(event);
           this.fail(closeDetail ? `Deepgram 实时连接已断开：${closeDetail}` : 'Deepgram 实时连接已断开');
         }
       };
@@ -819,6 +862,11 @@ function buildDeepgramLiveUrl(baseUrl: string, model: string, language: string):
     url.searchParams.set('detect_language', 'true');
   }
   return url.toString();
+}
+
+function buildDeepgramAuthorizationHeader(apiKey: string): string {
+  const token = apiKey.trim();
+  return token.split('.').length === 3 ? `Bearer ${token}` : `Token ${token}`;
 }
 
 function buildMiniMaxWebSocketUrls(groupId: string): string[] {

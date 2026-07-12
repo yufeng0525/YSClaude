@@ -35,7 +35,6 @@ type McpServerModalProps = {
   renderEditor: () => ReactNode;
   onClose: () => void;
   onRemove: (id: string) => void;
-  onSave: () => void;
 };
 
 type McpToolModalProps = {
@@ -209,7 +208,7 @@ export function QqConversationModal({
   );
 }
 
-export function McpServerModal({ styles, selectedServer, renderEditor, onClose, onRemove, onSave }: McpServerModalProps) {
+export function McpServerModal({ styles, selectedServer, renderEditor, onClose, onRemove }: McpServerModalProps) {
   return (
     <Modal visible={!!selectedServer} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -228,9 +227,6 @@ export function McpServerModal({ styles, selectedServer, renderEditor, onClose, 
             <View style={styles.toolModalActions}>
               <Pressable style={styles.removeSmallButton} onPress={() => onRemove(selectedServer.id)}>
                 <Text style={styles.removeSmallButtonText}>删除</Text>
-              </Pressable>
-              <Pressable style={styles.modalConfirm} onPress={onSave}>
-                <Text style={styles.modalConfirmText}>保存</Text>
               </Pressable>
             </View>
           )}

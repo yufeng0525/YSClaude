@@ -35,7 +35,6 @@ type McpToolsSectionProps = {
   onAddServer: () => void;
   onSelectServer: (id: string) => void;
   onUpdateServer: (id: string, patch: any) => void;
-  onSave: () => void;
   getEnabledToolCount: (server: any) => number;
   getEnabledResourceCount: (server: any) => number;
 };
@@ -65,7 +64,7 @@ export function BuiltInToolsSection({
       <Pressable style={styles.toolGroupHeader} onPress={onToggleExpanded}>
         <View style={styles.switchText}>
           <Text style={styles.toolGroupTitle}>内置工具</Text>
-          <Text style={styles.hint}>点击卡片查看和编辑详情；开关会先更新本页状态，保存后才写入配置。</Text>
+          <Text style={styles.hint}>点击卡片查看和编辑详情；开关变更会自动保存。</Text>
         </View>
         <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
       </Pressable>
@@ -118,7 +117,6 @@ export function McpToolsSection({
   onAddServer,
   onSelectServer,
   onUpdateServer,
-  onSave,
   getEnabledToolCount,
   getEnabledResourceCount,
 }: McpToolsSectionProps) {
@@ -185,11 +183,6 @@ export function McpToolsSection({
               ))}
             </View>
           )}
-          <View style={styles.actions}>
-            <Pressable style={styles.saveButton} onPress={onSave}>
-              <Text style={styles.saveButtonText}>保存 MCP 能力</Text>
-            </Pressable>
-          </View>
         </>
       )}
     </>

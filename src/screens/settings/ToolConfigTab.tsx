@@ -270,6 +270,85 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     setLocationTencentKey(locationShareConfig?.tencentKey || '');
   }, [locationShareConfig]);
 
+  function handleMemoryVaultEnabledChange(value: boolean) {
+    setMvEnabled(value);
+    setMemoryVaultConfig({ enabled: value });
+    showToast(value ? '记忆库已开启' : '记忆库已关闭');
+  }
+
+  function handleWebSearchEnabledChange(value: boolean) {
+    setWsEnabled(value);
+    setWebSearchConfig({ enabled: value });
+    showToast(value ? '联网搜索已开启' : '联网搜索已关闭');
+  }
+
+  function handleHotboardEnabledChange(value: boolean) {
+    setHbEnabled(value);
+    setHotboardConfig({ enabled: value });
+    showToast(value ? '热榜查询已开启' : '热榜查询已关闭');
+  }
+
+  function handleDailyDefaultSourcesEnabledChange(value: boolean) {
+    setDailyUseDefaultSources(value);
+    setDailyPaperConfig({
+      useDefaultSources: value,
+      customSources: dailyCustomSources,
+    });
+    showToast('日报来源开关已保存');
+  }
+
+  function handleRunCommandEnabledChange(value: boolean) {
+    setRcEnabled(value);
+    setRunCommandConfig({ enabled: value });
+    showToast(value ? '远程命令已开启' : '远程命令已关闭');
+  }
+
+  function handleQqBotEnabledChange(value: boolean) {
+    setQqEnabled(value);
+    setQqBotConfig({ enabled: value });
+    showToast(value ? 'QQ 机器人已开启' : 'QQ 机器人已关闭');
+  }
+
+  function handleWebInteractionEnabledChange(value: boolean) {
+    setWiEnabled(value);
+    setWebInteractionConfig({ enabled: value });
+    showToast(value ? '网页交互已开启' : '网页交互已关闭');
+  }
+
+  function handleConversationArtifactEnabledChange(value: boolean) {
+    setConversationArtifactEnabled(value);
+    setConversationArtifactToolConfig({ enabled: value });
+    showToast(value ? '对话文件工具已开启' : '对话文件工具已关闭');
+  }
+
+  function handleHtmlArtifactEnabledChange(value: boolean) {
+    setHtmlArtifactEnabled(value);
+    setHtmlArtifactToolConfig({ enabled: value });
+    showToast(value ? 'HTML 预览交互已开启' : 'HTML 预览交互已关闭');
+  }
+
+  function handleNativeToolEnabledChange(
+    key: 'deviceInfoEnabled' | 'batteryStatusEnabled' | 'appUsageStatsEnabled' | 'calendarEnabled',
+    value: boolean
+  ) {
+    switch (key) {
+      case 'deviceInfoEnabled':
+        setDeviceInfoEnabled(value);
+        break;
+      case 'batteryStatusEnabled':
+        setBatteryStatusEnabled(value);
+        break;
+      case 'appUsageStatsEnabled':
+        setAppUsageStatsEnabled(value);
+        break;
+      case 'calendarEnabled':
+        setCalendarEnabled(value);
+        break;
+    }
+    setNativeToolConfig({ [key]: value });
+    showToast(value ? '设备原生工具已开启' : '设备原生工具已关闭');
+  }
+
   function handleSaveMemory() {
     const topK = parseInt(mvTopK, 10);
     const tokenBudget = parseInt(mvTokenBudget, 10);
@@ -1330,8 +1409,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       suffix += 1;
     }
 
-    setMcpServers((servers) => [
-      ...servers,
+    const nextServers = [
+      ...mcpServers,
       {
         id,
         name,
@@ -1344,40 +1423,88 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         prompts: [],
         updatedAt: Date.now(),
       },
-    ]);
+    ];
+    setMcpServers(nextServers);
+    persistMcpTools(nextServers);
     setMcpServerName('');
     setMcpServerUrl('');
     setMcpServerAuth('');
-    showToast('MCP 服务已添加，记得同步并保存');
+    showToast('MCP 服务已添加并保存');
+  }
+
+  function buildMcpToolConfigDraft(
+    nextServers = mcpServers,
+    nextResourceToolsEnabled = mcpResourceToolsEnabled,
+    nextMaxCalls = mcpMaxCalls
+  ) {
+    const maxToolCalls = parseInt(nextMaxCalls, 10);
+    const hasEnabledMcpTool = nextServers.some(
+      (server) => server.enabled && (server.tools || []).some((tool) => tool.enabled !== false)
+    );
+    const hasEnabledMcpResourceTool = nextResourceToolsEnabled && nextServers.some(
+      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false)
+    );
+    const hasPinnedMcpResource = nextServers.some(
+      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false && resource.pinned)
+    );
+    return {
+      enabled: hasEnabledMcpTool || hasEnabledMcpResourceTool || hasPinnedMcpResource,
+      maxToolCalls: isNaN(maxToolCalls) || maxToolCalls <= 0 ? 6 : maxToolCalls,
+      resourceToolsEnabled: nextResourceToolsEnabled,
+      servers: nextServers,
+    };
+  }
+
+  function persistMcpTools(
+    nextServers = mcpServers,
+    nextResourceToolsEnabled = mcpResourceToolsEnabled,
+    nextMaxCalls = mcpMaxCalls
+  ) {
+    setMcpToolConfig(buildMcpToolConfigDraft(nextServers, nextResourceToolsEnabled, nextMaxCalls));
+  }
+
+  function handleChangeMcpMaxCalls(value: string) {
+    setMcpMaxCalls(value);
+    persistMcpTools(mcpServers, mcpResourceToolsEnabled, value);
+  }
+
+  function handleMcpResourceToolsEnabledChange(value: boolean) {
+    setMcpResourceToolsEnabled(value);
+    persistMcpTools(mcpServers, value);
+    showToast(value ? 'MCP 资源读取工具已开启' : 'MCP 资源读取工具已关闭');
   }
 
   function handleUpdateMcpServer(
     serverId: string,
     patch: Partial<(typeof mcpServers)[number]>
   ) {
-    setMcpServers((servers) =>
-      servers.map((server) =>
-        server.id === serverId
-          ? { ...server, ...patch, updatedAt: Date.now() }
-          : server
-      )
+    const nextServers = mcpServers.map((server) =>
+      server.id === serverId
+        ? { ...server, ...patch, updatedAt: Date.now() }
+        : server
     );
+    setMcpServers(nextServers);
+    persistMcpTools(nextServers);
+    if (Object.prototype.hasOwnProperty.call(patch, 'enabled')) {
+      showToast(patch.enabled ? 'MCP 服务已开启' : 'MCP 服务已关闭');
+    }
   }
 
   function handleUpdateMcpServerToolEnabled(serverId: string, toolName: string, enabled: boolean) {
-    setMcpServers((servers) =>
-      servers.map((server) =>
-        server.id === serverId
-          ? {
-              ...server,
-              tools: (server.tools || []).map((tool) =>
-                tool.name === toolName ? { ...tool, enabled } : tool
-              ),
-              updatedAt: Date.now(),
-            }
-          : server
-      )
+    const nextServers = mcpServers.map((server) =>
+      server.id === serverId
+        ? {
+            ...server,
+            tools: (server.tools || []).map((tool) =>
+              tool.name === toolName ? { ...tool, enabled } : tool
+            ),
+            updatedAt: Date.now(),
+          }
+        : server
     );
+    setMcpServers(nextServers);
+    persistMcpTools(nextServers);
+    showToast(enabled ? 'MCP 工具已开启' : 'MCP 工具已关闭');
   }
 
   function handleUpdateMcpServerResource(
@@ -1385,19 +1512,24 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     uri: string,
     patch: Partial<NonNullable<(typeof mcpServers)[number]['resources']>[number]>
   ) {
-    setMcpServers((servers) =>
-      servers.map((server) =>
-        server.id === serverId
-          ? {
-              ...server,
-              resources: (server.resources || []).map((resource) =>
-                resource.uri === uri ? { ...resource, ...patch } : resource
-              ),
-              updatedAt: Date.now(),
-            }
-          : server
-      )
+    const nextServers = mcpServers.map((server) =>
+      server.id === serverId
+        ? {
+            ...server,
+            resources: (server.resources || []).map((resource) =>
+              resource.uri === uri ? { ...resource, ...patch } : resource
+            ),
+            updatedAt: Date.now(),
+          }
+        : server
     );
+    setMcpServers(nextServers);
+    persistMcpTools(nextServers);
+    if (Object.prototype.hasOwnProperty.call(patch, 'enabled')) {
+      showToast(patch.enabled ? 'MCP 资源已开启' : 'MCP 资源已关闭');
+    } else if (Object.prototype.hasOwnProperty.call(patch, 'pinned')) {
+      showToast(patch.pinned ? 'MCP 资源已固定附加' : 'MCP 资源已取消固定');
+    }
   }
 
   async function handleSyncMcpServer(serverId: string) {
@@ -1409,21 +1541,21 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         url: server.url,
         authorization: server.authorization,
       });
-      setMcpServers((servers) =>
-        servers.map((item) =>
-          item.id === serverId
-            ? {
-                ...item,
-                tools: capabilities.tools,
-                resources: capabilities.resources,
-                resourceTemplates: capabilities.resourceTemplates,
-                prompts: capabilities.prompts,
-                updatedAt: Date.now(),
-              }
-            : item
-        )
+      const nextServers = mcpServers.map((item) =>
+        item.id === serverId
+          ? {
+              ...item,
+              tools: capabilities.tools,
+              resources: capabilities.resources,
+              resourceTemplates: capabilities.resourceTemplates,
+              prompts: capabilities.prompts,
+              updatedAt: Date.now(),
+            }
+          : item
       );
-      showToast('MCP 能力已同步');
+      setMcpServers(nextServers);
+      persistMcpTools(nextServers);
+      showToast('MCP 能力已同步并保存');
     } catch (error: any) {
       Alert.alert('同步失败', error?.message || '无法读取 MCP 能力');
     } finally {
@@ -1432,35 +1564,13 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   }
 
   function handleRemoveMcpServer(serverId: string) {
-    setMcpServers((servers) => servers.filter((server) => server.id !== serverId));
+    const nextServers = mcpServers.filter((server) => server.id !== serverId);
+    setMcpServers(nextServers);
+    persistMcpTools(nextServers);
     if (selectedMcpServerId === serverId) {
       setSelectedMcpServerId(null);
     }
-    showToast('MCP 服务已删除，记得保存');
-  }
-
-  function handleSaveMcpTools() {
-    const maxToolCalls = parseInt(mcpMaxCalls, 10);
-    const hasEnabledMcpTool = mcpServers.some(
-      (server) => server.enabled && (server.tools || []).some((tool) => tool.enabled !== false)
-    );
-    const hasEnabledMcpResourceTool = mcpResourceToolsEnabled && mcpServers.some(
-      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false)
-    );
-    const hasPinnedMcpResource = mcpServers.some(
-      (server) => server.enabled && (server.resources || []).some((resource) => resource.enabled !== false && resource.pinned)
-    );
-    setMcpToolConfig({
-      enabled: hasEnabledMcpTool || hasEnabledMcpResourceTool || hasPinnedMcpResource,
-      maxToolCalls: isNaN(maxToolCalls) || maxToolCalls <= 0 ? 6 : maxToolCalls,
-      resourceToolsEnabled: mcpResourceToolsEnabled,
-      servers: mcpServers,
-    });
-    showToast(
-      hasEnabledMcpTool || hasEnabledMcpResourceTool || hasPinnedMcpResource
-        ? 'MCP 能力已保存'
-        : 'MCP 能力已保存，当前没有开启的 MCP 工具或资源'
-    );
+    showToast('MCP 服务已删除并保存');
   }
 
   function handleSaveNativeTools() {
@@ -1478,42 +1588,42 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       label: '用户设备信息读取',
       hint: '品牌、型号、系统版本、设备类型、内存等',
       value: deviceInfoEnabled,
-      onValueChange: setDeviceInfoEnabled,
+      onValueChange: (value: boolean) => handleNativeToolEnabledChange('deviceInfoEnabled', value),
     },
     {
       label: '电池状态读取',
       hint: '电量、充电状态、低电量模式等',
       value: batteryStatusEnabled,
-      onValueChange: setBatteryStatusEnabled,
+      onValueChange: (value: boolean) => handleNativeToolEnabledChange('batteryStatusEnabled', value),
     },
     {
       label: '应用使用时间统计读取',
       hint: 'Android 使用情况访问权限；首次调用会提示去系统设置授权',
       value: appUsageStatsEnabled,
-      onValueChange: setAppUsageStatsEnabled,
+      onValueChange: (value: boolean) => handleNativeToolEnabledChange('appUsageStatsEnabled', value),
     },
     {
       label: '日历日程管理',
       hint: '读取、创建、修改、删除系统日历日程，需要授权',
       value: calendarEnabled,
-      onValueChange: setCalendarEnabled,
+      onValueChange: (value: boolean) => handleNativeToolEnabledChange('calendarEnabled', value),
     },
   ];
 
   const builtInToolCards = [
-    { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: setMvEnabled, meta: '3 个工具' },
-    { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: setWsEnabled, meta: '1 个工具' },
-    { key: 'hotboard', name: '热榜查询', intro: '从已选择的平台列表中查询热门话题。', enabled: hbEnabled, onValueChange: setHbEnabled, meta: hbPlatformTypes.length + ' 个平台' },
-    { key: 'dailyPaperSources', name: '日报来源', intro: '配置每日日报生成时读取的 RSS 新闻来源。', enabled: dailyUseDefaultSources || dailyCustomSources.some((source) => source.enabled), onValueChange: setDailyUseDefaultSources, meta: (dailyUseDefaultSources ? 6 : 0) + dailyCustomSources.filter((source) => source.enabled).length + ' 个来源' },
-    { key: 'runCommand', name: '远程命令', intro: '通过 SSH 连接专用 AI 服务器执行 shell 命令。与「对话文件」同时开启时，自动激活对话文件与服务器互传工具。', enabled: rcEnabled, onValueChange: setRcEnabled, meta: '最多 ' + (rcMaxCalls || '20') + ' 次' },
-    { key: 'qqBot', name: 'QQ 机器人', intro: '把 QQ 官方机器人消息接入独立后端，由 YSClaude 生成回复。', enabled: qqEnabled, onValueChange: setQqEnabled, meta: qqBackendStatus === '尚未检测' ? '官方 Bot' : qqBackendStatus },
-    { key: 'webInteraction', name: '网页交互', intro: '允许 AI 打开、观察并操作应用内网页面板。', enabled: wiEnabled, onValueChange: setWiEnabled, meta: '最多 ' + (wiMaxCalls || '8') + ' 次' },
-    { key: 'conversationArtifact', name: '对话文件', intro: '允许 AI 读取、创建、修改、删除当前对话绑定的文本文件，并显式显示文件卡片。与「远程命令」同时开启时，自动激活对话文件与服务器互传工具。', enabled: conversationArtifactEnabled, onValueChange: setConversationArtifactEnabled, meta: '7 个工具' },
-    { key: 'htmlArtifact', name: 'HTML 预览交互', intro: '允许 AI 打开、观察、点击和编辑当前对话中的 HTML 文件预览。', enabled: htmlArtifactEnabled, onValueChange: setHtmlArtifactEnabled, meta: '11 个工具' },
-    { key: 'deviceInfo', name: '设备信息', intro: '读取设备品牌、型号、系统版本和运行状态。', enabled: deviceInfoEnabled, onValueChange: setDeviceInfoEnabled, meta: '设备原生' },
-    { key: 'batteryStatus', name: '电池状态', intro: '读取电量、充电状态和省电模式。', enabled: batteryStatusEnabled, onValueChange: setBatteryStatusEnabled, meta: '设备原生' },
-    { key: 'appUsageStats', name: '应用使用统计', intro: '在系统授权后读取 Android 应用使用时间统计。', enabled: appUsageStatsEnabled, onValueChange: setAppUsageStatsEnabled, meta: '设备原生' },
-    { key: 'calendar', name: '系统日历', intro: '读取、创建、修改和删除系统日历日程。', enabled: calendarEnabled, onValueChange: setCalendarEnabled, meta: '设备原生' },
+    { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
+    { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: handleWebSearchEnabledChange, meta: '1 个工具' },
+    { key: 'hotboard', name: '热榜查询', intro: '从已选择的平台列表中查询热门话题。', enabled: hbEnabled, onValueChange: handleHotboardEnabledChange, meta: hbPlatformTypes.length + ' 个平台' },
+    { key: 'dailyPaperSources', name: '日报来源', intro: '配置每日日报生成时读取的 RSS 新闻来源。', enabled: dailyUseDefaultSources || dailyCustomSources.some((source) => source.enabled), onValueChange: handleDailyDefaultSourcesEnabledChange, meta: (dailyUseDefaultSources ? 6 : 0) + dailyCustomSources.filter((source) => source.enabled).length + ' 个来源' },
+    { key: 'runCommand', name: '远程命令', intro: '通过 SSH 连接专用 AI 服务器执行 shell 命令。与「对话文件」同时开启时，自动激活对话文件与服务器互传工具。', enabled: rcEnabled, onValueChange: handleRunCommandEnabledChange, meta: '最多 ' + (rcMaxCalls || '20') + ' 次' },
+    { key: 'qqBot', name: 'QQ 机器人', intro: '把 QQ 官方机器人消息接入独立后端，由 YSClaude 生成回复。', enabled: qqEnabled, onValueChange: handleQqBotEnabledChange, meta: qqBackendStatus === '尚未检测' ? '官方 Bot' : qqBackendStatus },
+    { key: 'webInteraction', name: '网页交互', intro: '允许 AI 打开、观察并操作应用内网页面板。', enabled: wiEnabled, onValueChange: handleWebInteractionEnabledChange, meta: '最多 ' + (wiMaxCalls || '8') + ' 次' },
+    { key: 'conversationArtifact', name: '对话文件', intro: '允许 AI 读取、创建、修改、删除当前对话绑定的文本文件，并显式显示文件卡片。与「远程命令」同时开启时，自动激活对话文件与服务器互传工具。', enabled: conversationArtifactEnabled, onValueChange: handleConversationArtifactEnabledChange, meta: '7 个工具' },
+    { key: 'htmlArtifact', name: 'HTML 预览交互', intro: '允许 AI 打开、观察、点击和编辑当前对话中的 HTML 文件预览。', enabled: htmlArtifactEnabled, onValueChange: handleHtmlArtifactEnabledChange, meta: '11 个工具' },
+    { key: 'deviceInfo', name: '设备信息', intro: '读取设备品牌、型号、系统版本和运行状态。', enabled: deviceInfoEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('deviceInfoEnabled', value), meta: '设备原生' },
+    { key: 'batteryStatus', name: '电池状态', intro: '读取电量、充电状态和省电模式。', enabled: batteryStatusEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('batteryStatusEnabled', value), meta: '设备原生' },
+    { key: 'appUsageStats', name: '应用使用统计', intro: '在系统授权后读取 Android 应用使用时间统计。', enabled: appUsageStatsEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('appUsageStatsEnabled', value), meta: '设备原生' },
+    { key: 'calendar', name: '系统日历', intro: '读取、创建、修改和删除系统日历日程。', enabled: calendarEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('calendarEnabled', value), meta: '设备原生' },
   ];
 
   const selectedBuiltInTool = builtInToolCards.find((tool) => tool.key === selectedBuiltInToolKey) || null;
@@ -1724,7 +1834,6 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         onPress: () => {
           handleRemoveMcpServer(serverId);
           setSelectedMcpServerId(null);
-          showToast('MCP 服务已删除，请保存 MCP 工具');
         },
       },
     ]);
@@ -1736,7 +1845,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         return (
           <>
             <Text style={styles.toolModalDescription}>AI 可以搜索记忆库并查询日记内容。</Text>
-            <View style={styles.switchRow}><Text style={styles.label}>启用记忆库</Text><Switch value={mvEnabled} onValueChange={setMvEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
+            <View style={styles.switchRow}><Text style={styles.label}>启用记忆库</Text><Switch value={mvEnabled} onValueChange={handleMemoryVaultEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
             <View style={styles.field}><Text style={styles.label}>记忆库地址</Text><TextInput style={styles.input} value={mvBaseUrl} onChangeText={setMvBaseUrl} placeholder="https://your-memory-vault.com" placeholderTextColor={colors.textTertiary} autoCapitalize="none" /></View>
             <View style={styles.field}><Text style={styles.label}>管理员令牌</Text><TextInput style={styles.input} value={mvAdminToken} onChangeText={setMvAdminToken} placeholder="ADMIN_TOKEN" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View>
             <View style={styles.toolNumberRow}><View style={styles.toolNumberField}><Text style={styles.label}>返回条数</Text><TextInput style={styles.input} value={mvTopK} onChangeText={setMvTopK} keyboardType="number-pad" placeholder="5" placeholderTextColor={colors.textTertiary} /></View><View style={styles.toolNumberField}><Text style={styles.label}>令牌预算</Text><TextInput style={styles.input} value={mvTokenBudget} onChangeText={setMvTokenBudget} keyboardType="number-pad" placeholder="2000" placeholderTextColor={colors.textTertiary} /></View></View>
@@ -1745,14 +1854,14 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
           </>
         );
       case 'webSearch':
-        return (<><Text style={styles.toolModalDescription}>AI 可以通过 Tavily 搜索互联网获取实时信息。</Text><View style={styles.switchRow}><Text style={styles.label}>启用联网搜索</Text><Switch value={wsEnabled} onValueChange={setWsEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>Tavily 密钥</Text><TextInput style={styles.input} value={wsApiKey} onChangeText={setWsApiKey} placeholder="tvly-..." placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View><View style={styles.field}><Text style={styles.label}>搜索结果数量</Text><TextInput style={styles.input} value={wsMaxResults} onChangeText={setWsMaxResults} keyboardType="number-pad" placeholder="5" placeholderTextColor={colors.textTertiary} /></View></>);
+        return (<><Text style={styles.toolModalDescription}>AI 可以通过 Tavily 搜索互联网获取实时信息。</Text><View style={styles.switchRow}><Text style={styles.label}>启用联网搜索</Text><Switch value={wsEnabled} onValueChange={handleWebSearchEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>Tavily 密钥</Text><TextInput style={styles.input} value={wsApiKey} onChangeText={setWsApiKey} placeholder="tvly-..." placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View><View style={styles.field}><Text style={styles.label}>搜索结果数量</Text><TextInput style={styles.input} value={wsMaxResults} onChangeText={setWsMaxResults} keyboardType="number-pad" placeholder="5" placeholderTextColor={colors.textTertiary} /></View></>);
       case 'hotboard':
-        return (<><Text style={styles.toolModalDescription}>AI 可以从已选择的平台类型中查询热榜。</Text><View style={styles.switchRow}><Text style={styles.label}>启用热榜查询</Text><Switch value={hbEnabled} onValueChange={setHbEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>UAPI 密钥</Text><TextInput style={styles.input} value={hbApiKey} onChangeText={setHbApiKey} placeholder="Bearer 令牌" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View><View style={styles.platformActions}><Pressable style={styles.platformActionButton} onPress={selectDefaultHotboardPlatforms}><Text style={styles.platformActionText}>默认</Text></Pressable><Pressable style={styles.platformActionButton} onPress={selectAllHotboardPlatforms}><Text style={styles.platformActionText}>全选</Text></Pressable><Pressable style={styles.platformActionButton} onPress={clearHotboardPlatforms}><Text style={styles.platformActionText}>清空</Text></Pressable></View><View style={styles.platformGrid}>{HOTBOARD_PLATFORMS.map((platform) => { const selected = hbPlatformTypes.includes(platform.type); return (<Pressable key={platform.type} style={[styles.platformChip, selected && styles.platformChipSelected]} onPress={() => toggleHotboardPlatform(platform.type)}><Text style={[styles.platformChipLabel, selected && styles.platformChipLabelSelected]}>{platform.label}</Text><Text style={[styles.platformChipType, selected && styles.platformChipTypeSelected]}>{platform.type}</Text></Pressable>); })}</View></>);
+        return (<><Text style={styles.toolModalDescription}>AI 可以从已选择的平台类型中查询热榜。</Text><View style={styles.switchRow}><Text style={styles.label}>启用热榜查询</Text><Switch value={hbEnabled} onValueChange={handleHotboardEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>UAPI 密钥</Text><TextInput style={styles.input} value={hbApiKey} onChangeText={setHbApiKey} placeholder="Bearer 令牌" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View><View style={styles.platformActions}><Pressable style={styles.platformActionButton} onPress={selectDefaultHotboardPlatforms}><Text style={styles.platformActionText}>默认</Text></Pressable><Pressable style={styles.platformActionButton} onPress={selectAllHotboardPlatforms}><Text style={styles.platformActionText}>全选</Text></Pressable><Pressable style={styles.platformActionButton} onPress={clearHotboardPlatforms}><Text style={styles.platformActionText}>清空</Text></Pressable></View><View style={styles.platformGrid}>{HOTBOARD_PLATFORMS.map((platform) => { const selected = hbPlatformTypes.includes(platform.type); return (<Pressable key={platform.type} style={[styles.platformChip, selected && styles.platformChipSelected]} onPress={() => toggleHotboardPlatform(platform.type)}><Text style={[styles.platformChipLabel, selected && styles.platformChipLabelSelected]}>{platform.label}</Text><Text style={[styles.platformChipType, selected && styles.platformChipTypeSelected]}>{platform.type}</Text></Pressable>); })}</View></>);
       case 'dailyPaperSources':
         return (
           <>
             <Text style={styles.toolModalDescription}>每日日报会读取已启用的 RSS 源，再交给当前聊天 API 生成中文日报。</Text>
-            <View style={styles.switchRow}><Text style={styles.label}>使用内置新闻源</Text><Switch value={dailyUseDefaultSources} onValueChange={setDailyUseDefaultSources} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
+            <View style={styles.switchRow}><Text style={styles.label}>使用内置新闻源</Text><Switch value={dailyUseDefaultSources} onValueChange={handleDailyDefaultSourcesEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
             <View style={styles.toolAddPanel}>
               <Text style={styles.sectionTitle}>添加 RSS 来源</Text>
               <TextInput style={styles.input} value={dailySourceName} onChangeText={setDailySourceName} placeholder="来源名称，例如 Reuters" placeholderTextColor={colors.textTertiary} />
@@ -1804,7 +1913,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         return (
           <>
             <Text style={styles.toolModalDescription}>AI 会通过 SSH 直连这台专用服务器执行 shell 命令，并返回 stdout/stderr。服务器侧不做命令白名单，适合给 AI 独立隔离的工作机。与「对话文件」同时开启时，会自动激活两个互传工具：把对话文件上传到服务器、把服务器文本文件拉取为对话文件。</Text>
-            <View style={styles.switchRow}><Text style={styles.label}>启用远程命令</Text><Switch value={rcEnabled} onValueChange={setRcEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
+            <View style={styles.switchRow}><Text style={styles.label}>启用远程命令</Text><Switch value={rcEnabled} onValueChange={handleRunCommandEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
             <View style={styles.toolAddPanel}>
               <Text style={styles.sectionTitle}>SSH 配置档案</Text>
               <View style={styles.appearanceThemeSaveRow}>
@@ -2042,7 +2151,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
                     <Text style={styles.label}>启用 QQ 机器人</Text>
                     <Text style={styles.hint}>{qqBackendStatus}</Text>
                   </View>
-                  <Switch value={qqEnabled} onValueChange={setQqEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} />
+                  <Switch value={qqEnabled} onValueChange={handleQqBotEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} />
                 </View>
                 <View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>沙箱环境</Text><Text style={styles.hint}>用于 QQ 官方机器人测试环境。</Text></View><Switch value={qqSandbox} onValueChange={setQqSandbox} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
                 <View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>后端启动时自动连接</Text><Text style={styles.hint}>保存到后端后，服务重启会按此开关连接 QQ 网关。</Text></View><Switch value={qqAutoConnect} onValueChange={setQqAutoConnect} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
@@ -2086,11 +2195,11 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
           </>
         );
       case 'webInteraction':
-        return (<><Text style={styles.toolModalDescription}>AI 可以在网页面板中打开、观察、点击和等待。</Text><View style={styles.switchRow}><Text style={styles.label}>启用网页交互</Text><Switch value={wiEnabled} onValueChange={setWiEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={wiMaxCalls} onChangeText={setWiMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
+        return (<><Text style={styles.toolModalDescription}>AI 可以在网页面板中打开、观察、点击和等待。</Text><View style={styles.switchRow}><Text style={styles.label}>启用网页交互</Text><Switch value={wiEnabled} onValueChange={handleWebInteractionEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={wiMaxCalls} onChangeText={setWiMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
       case 'conversationArtifact':
-        return (<><Text style={styles.toolModalDescription}>AI 可以访问当前对话绑定的文本文件，创建、读取、替换、按文本修改、删除文件，或把文件显式显示成聊天卡片。文件不会跨对话暴露。与「远程命令」同时开启时，会自动激活两个互传工具：把对话文件上传到服务器、把服务器文本文件拉取为对话文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用对话文件工具</Text><Switch value={conversationArtifactEnabled} onValueChange={setConversationArtifactEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={conversationArtifactMaxCalls} onChangeText={setConversationArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
+        return (<><Text style={styles.toolModalDescription}>AI 可以访问当前对话绑定的文本文件，创建、读取、替换、按文本修改、删除文件，或把文件显式显示成聊天卡片。文件不会跨对话暴露。与「远程命令」同时开启时，会自动激活两个互传工具：把对话文件上传到服务器、把服务器文本文件拉取为对话文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用对话文件工具</Text><Switch value={conversationArtifactEnabled} onValueChange={handleConversationArtifactEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={conversationArtifactMaxCalls} onChangeText={setConversationArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
       case 'htmlArtifact':
-        return (<><Text style={styles.toolModalDescription}>AI 可以把当前对话中的 HTML 文件打开到预览窗口，观察页面、点击元素或坐标、等待、截图，也可以修改源码或 DOM 并保存回文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用 HTML 预览交互</Text><Switch value={htmlArtifactEnabled} onValueChange={setHtmlArtifactEnabled} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={htmlArtifactMaxCalls} onChangeText={setHtmlArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
+        return (<><Text style={styles.toolModalDescription}>AI 可以把当前对话中的 HTML 文件打开到预览窗口，观察页面、点击元素或坐标、等待、截图，也可以修改源码或 DOM 并保存回文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用 HTML 预览交互</Text><Switch value={htmlArtifactEnabled} onValueChange={handleHtmlArtifactEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={htmlArtifactMaxCalls} onChangeText={setHtmlArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
       default: {
         const nativeRow = builtInToolCards.find((tool) => tool.key === toolKey);
         if (!nativeRow) return null;
@@ -2126,14 +2235,13 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
           mcpServerAuth={mcpServerAuth}
           mcpServers={mcpServers}
           onToggleExpanded={() => setToolSettingsUiConfig({ customMcpExpanded: !customMcpExpanded })}
-          onChangeMaxCalls={setMcpMaxCalls}
+          onChangeMaxCalls={handleChangeMcpMaxCalls}
           onChangeServerName={setMcpServerName}
           onChangeServerUrl={setMcpServerUrl}
           onChangeServerAuth={setMcpServerAuth}
           onAddServer={handleAddMcpServer}
           onSelectServer={setSelectedMcpServerId}
           onUpdateServer={handleUpdateMcpServer}
-          onSave={handleSaveMcpTools}
           getEnabledToolCount={getEnabledMcpToolCount}
           getEnabledResourceCount={getEnabledMcpResourceCount}
         />
@@ -2184,7 +2292,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
             colors={colors}
             selectedMcpServer={selectedMcpServer}
             mcpResourceToolsEnabled={mcpResourceToolsEnabled}
-            setMcpResourceToolsEnabled={setMcpResourceToolsEnabled}
+            setMcpResourceToolsEnabled={handleMcpResourceToolsEnabledChange}
             mcpSyncingServerId={mcpSyncingServerId}
             getEnabledMcpToolCount={getEnabledMcpToolCount}
             getEnabledMcpResourceCount={getEnabledMcpResourceCount}
@@ -2200,10 +2308,6 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         )}
         onClose={() => setSelectedMcpServerId(null)}
         onRemove={handleRemoveMcpServerFromModal}
-        onSave={() => {
-          handleSaveMcpTools();
-          setSelectedMcpServerId(null);
-        }}
       />
       <McpToolModal
         styles={styles}

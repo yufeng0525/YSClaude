@@ -15,6 +15,8 @@ import {
   Platform,
   ActivityIndicator,
   useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -297,6 +299,7 @@ export function ChatInput({
   const voiceRecordingStartedAtRef = useRef(0);
   const voiceLongPressActiveRef = useRef(false);
   const suppressStickerPressAfterVoiceRef = useRef(false);
+  const optionsPagerRef = useRef<ScrollView>(null);
   const voiceRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const voiceRecorderState = useAudioRecorderState(voiceRecorder, 150);
   const insets = useSafeAreaInsets();
@@ -1008,7 +1011,21 @@ export function ChatInput({
     primaryOptionActions,
     secondaryOptionActions,
   ];
-  const visibleOptionActions = optionPages[Math.min(optionsMenuPage, optionPages.length - 1)] || optionPages[0];
+
+  const scrollToOptionsPage = (pageIndex: number) => {
+    const nextPage = Math.min(Math.max(pageIndex, 0), optionPages.length - 1);
+    setOptionsMenuPage(nextPage);
+    optionsPagerRef.current?.scrollTo({
+      x: nextPage * styles.optionPage.width,
+      animated: true,
+    });
+  };
+
+  const handleOptionsPageMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const pageWidth = styles.optionPage.width || 1;
+    const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+    setOptionsMenuPage(Math.min(Math.max(nextPage, 0), optionPages.length - 1));
+  };
 
   return (
     <View
@@ -1267,34 +1284,49 @@ export function ChatInput({
 
       {optionsMenuVisible && (
         <View style={[styles.inlinePanel, styles.optionsPanel]}>
-          <View style={styles.optionsGrid}>
-            {visibleOptionActions.map((action) => {
-              const Icon = action.Icon;
-              const disabledAction = 'disabled' in action && !!action.disabled;
-              return (
-                <Pressable
-                  key={action.key}
-                  style={[styles.optionItem, disabledAction && styles.optionItemDisabled]}
-                  onPress={action.onPress}
-                  disabled={disabledAction}
-                >
-                  <View style={styles.optionIconWrap}>
-                    <Icon
-                      size={24}
-                      color={disabledAction ? colors.textTertiary : colors.textSecondary}
-                      strokeWidth={2}
-                    />
-                  </View>
-                  <Text
-                    style={[styles.optionText, disabledAction && styles.optionTextDisabled]}
-                    numberOfLines={1}
-                  >
-                    {action.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <ScrollView
+            ref={optionsPagerRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            style={styles.optionsPagerScroll}
+            contentContainerStyle={styles.optionsPagerContent}
+            onMomentumScrollEnd={handleOptionsPageMomentumEnd}
+            scrollEventThrottle={16}
+          >
+            {optionPages.map((pageActions, pageIndex) => (
+              <View key={pageIndex} style={styles.optionPage}>
+                <View style={styles.optionsGrid}>
+                  {pageActions.map((action) => {
+                    const Icon = action.Icon;
+                    const disabledAction = 'disabled' in action && !!action.disabled;
+                    return (
+                      <Pressable
+                        key={action.key}
+                        style={[styles.optionItem, disabledAction && styles.optionItemDisabled]}
+                        onPress={action.onPress}
+                        disabled={disabledAction}
+                      >
+                        <View style={styles.optionIconWrap}>
+                          <Icon
+                            size={24}
+                            color={disabledAction ? colors.textTertiary : colors.textSecondary}
+                            strokeWidth={2}
+                          />
+                        </View>
+                        <Text
+                          style={[styles.optionText, disabledAction && styles.optionTextDisabled]}
+                          numberOfLines={1}
+                        >
+                          {action.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
           <View style={styles.optionsPager}>
             {optionPages.map((_, pageIndex) => (
               <Pressable
@@ -1303,7 +1335,7 @@ export function ChatInput({
                   styles.optionPageDot,
                   optionsMenuPage === pageIndex && styles.optionPageDotActive,
                 ]}
-                onPress={() => setOptionsMenuPage(pageIndex)}
+                onPress={() => scrollToOptionsPage(pageIndex)}
               />
             ))}
           </View>
@@ -2070,6 +2102,15 @@ const createStyles = (
     paddingHorizontal: 8,
     paddingTop: 14,
     paddingBottom: 8,
+  },
+  optionsPagerScroll: {
+    flex: 1,
+  },
+  optionsPagerContent: {
+    alignItems: 'stretch',
+  },
+  optionPage: {
+    width: Math.max(0, viewportWidth - 40),
   },
   optionsGrid: {
     flex: 1,
