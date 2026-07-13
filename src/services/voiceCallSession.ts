@@ -141,6 +141,7 @@ export class AndroidVoiceCallSession {
   private pendingTtsText = '';
   private minimaxAudioHexParts: string[] = [];
   private ttsPlaybackToken = 0;
+  private assistantTtsConnectDeferred = false;
   private lastSpeakableAssistantText = '';
   private activeAssistantId: string | null = null;
   private activeAssistantTranscriptId: string | null = null;
@@ -940,14 +941,19 @@ export class AndroidVoiceCallSession {
 
   private startAssistantTtsBridge(): void {
     this.cleanupChatBridge();
-    this.ttsPlaybackToken += 1;
-    this.closeAssistantTts();
+    if (this.deferredBargeInActive) {
+      this.assistantTtsConnectDeferred = true;
+    } else {
+      this.ttsPlaybackToken += 1;
+      this.closeAssistantTts();
+      this.connectAssistantTts(useSettingsStore.getState().ttsConfig);
+      this.ttsTextQueue = [];
+      this.minimaxAudioHexParts = [];
+    }
     this.activeAssistantId = null;
     this.activeAssistantTranscriptId = null;
     this.lastSpeakableAssistantText = '';
     this.pendingTtsText = '';
-    this.ttsTextQueue = [];
-    this.connectAssistantTts(useSettingsStore.getState().ttsConfig);
 
     this.chatSubscription = useChatStore.subscribe((state) => {
       const last = state.messages[state.messages.length - 1];
@@ -999,12 +1005,24 @@ export class AndroidVoiceCallSession {
   }
 
   private sendAssistantTtsText(text: string): void {
+    if (!text.trim()) return;
     const config = useSettingsStore.getState().ttsConfig;
+    this.ensureAssistantTtsReady(config);
     if (config.provider === 'cartesia') {
       this.sendCartesiaText(text, config);
       return;
     }
     this.sendMiniMaxText(text);
+  }
+
+  private ensureAssistantTtsReady(config: TTSConfig): void {
+    if (!this.assistantTtsConnectDeferred) return;
+    this.assistantTtsConnectDeferred = false;
+    this.ttsPlaybackToken += 1;
+    this.closeAssistantTts();
+    this.ttsTextQueue = [];
+    this.minimaxAudioHexParts = [];
+    this.connectAssistantTts(config);
   }
 
   private finishAssistantTts(): void {
@@ -1425,11 +1443,8 @@ export class AndroidVoiceCallSession {
       chat.stopStreaming();
     }
     this.cleanupChatBridge();
-    this.ttsPlaybackToken += 1;
-    this.closeAssistantTts();
-    this.pendingTtsText = '';
-    this.ttsTextQueue = [];
-    this.minimaxAudioHexParts = [];
+    this.flushPendingTtsText(true);
+    this.finishAssistantTts();
     if (!alreadyDeferred) {
       this.enterListeningState({ speakingText: '' });
     } else if (this.snapshot.status !== 'listening') {
@@ -1479,6 +1494,7 @@ export class AndroidVoiceCallSession {
 
   private interruptAssistant(): void {
     this.ttsPlaybackToken += 1;
+    this.assistantTtsConnectDeferred = false;
     clearVoiceCallSpeaker().catch(() => undefined);
     this.closeAssistantTts();
     this.clearDeferredBargeIn(true);
@@ -1551,6 +1567,7 @@ export class AndroidVoiceCallSession {
   }
 
   private closeAssistantTts(): void {
+    this.assistantTtsConnectDeferred = false;
     this.closeMiniMax();
     this.closeCartesia();
   }
@@ -2019,7 +2036,9 @@ function isBenignAliyunCommitError(event: any): boolean {
   ).toLowerCase();
   if (!message) return false;
   return (
-    message.includes('committing input audio buffer')
+    message.includes('no valid transcripts passed')
+    || message.includes('no valid transcript')
+    || message.includes('committing input audio buffer')
     || (
       message.includes('input_audio_buffer')
       && message.includes('commit')

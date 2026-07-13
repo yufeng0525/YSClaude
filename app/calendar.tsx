@@ -18,6 +18,7 @@ import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  ArrowRight,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -39,6 +40,7 @@ import {
   getConversationMessageDates,
   getDailyPaperDateKeys,
   getFirstMessageInDateRange,
+  getUnfinishedCalendarTodosBeforeDate,
   updateCalendarTodo,
 } from '../src/db/operations';
 import { useChatStore } from '../src/stores/chat';
@@ -242,6 +244,7 @@ export default function CalendarScreen() {
   const [dailyPaperDateKeys, setDailyPaperDateKeys] = useState<Set<string>>(new Set());
   const [todos, setTodos] = useState<CalendarTodo[]>([]);
   const [todayPreviewTodos, setTodayPreviewTodos] = useState<CalendarTodo[]>([]);
+  const [overdueTodos, setOverdueTodos] = useState<CalendarTodo[]>([]);
   const [loading, setLoading] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [periodActionVisible, setPeriodActionVisible] = useState(false);
@@ -299,22 +302,28 @@ export default function CalendarScreen() {
     setTodayPreviewTodos(await getCalendarTodosByDate(todayKey));
   }, [todayKey]);
 
+  const refreshOverdueTodos = useCallback(async () => {
+    setOverdueTodos(await getUnfinishedCalendarTodosBeforeDate(todayKey));
+  }, [todayKey]);
+
   const refreshPage = useCallback(async () => {
     setLoading(true);
     try {
-      const [dates, paperDates, selectedTodos] = await Promise.all([
+      const [dates, paperDates, selectedTodos, overdue] = await Promise.all([
         conversationId ? getConversationMessageDates(conversationId) : Promise.resolve([]),
         getDailyPaperDateKeys(),
         getCalendarTodosByDate(selectedDateKey),
+        getUnfinishedCalendarTodosBeforeDate(todayKey),
         loadPeriodRecords(),
       ]);
       setChatDateKeys(new Set(dates));
       setDailyPaperDateKeys(new Set(paperDates));
       setTodos(selectedTodos);
+      setOverdueTodos(overdue);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, loadPeriodRecords, selectedDateKey]);
+  }, [conversationId, loadPeriodRecords, selectedDateKey, todayKey]);
 
   useFocusEffect(
     useCallback(() => {
@@ -442,6 +451,32 @@ export default function CalendarScreen() {
     setCreateVisible(true);
   }, []);
 
+  const moveOverdueTodosToToday = useCallback(async () => {
+    if (busyRef.current || overdueTodos.length === 0) return;
+    const now = Date.now();
+    busyRef.current = true;
+    try {
+      await Promise.all(
+        overdueTodos.map((todo) =>
+          updateCalendarTodo(todo.id, {
+            dateKey: todayKey,
+            updatedAt: now,
+          })
+        )
+      );
+      setCalendarMonth(startOfMonth(new Date()));
+      setSelectedDateKey(todayKey);
+      await Promise.all([
+        refreshTodos(todayKey),
+        refreshTodayPreviewTodos(),
+        refreshOverdueTodos(),
+      ]);
+      syncTodayWidget().catch(() => undefined);
+    } finally {
+      busyRef.current = false;
+    }
+  }, [overdueTodos, refreshOverdueTodos, refreshTodayPreviewTodos, refreshTodos, todayKey]);
+
   const openEditTodo = useCallback((todo: CalendarTodo) => {
     const [hour = '18', minute = '00'] = (todo.scheduledTime || '18:00').split(':');
     setEditingTodo(todo);
@@ -490,6 +525,7 @@ export default function CalendarScreen() {
       setCreateVisible(false);
       setEditingTodo(null);
       await refreshTodos(selectedDateKey);
+      await refreshOverdueTodos();
       if (selectedDateKey === todayKey) {
         await refreshTodayPreviewTodos();
         syncTodayWidget().catch(() => undefined);
@@ -497,7 +533,7 @@ export default function CalendarScreen() {
     } finally {
       busyRef.current = false;
     }
-  }, [editingTodo, refreshTodayPreviewTodos, refreshTodos, selectedDateKey, selectedTodoTime, todoTitle, todayKey]);
+  }, [editingTodo, refreshOverdueTodos, refreshTodayPreviewTodos, refreshTodos, selectedDateKey, selectedTodoTime, todoTitle, todayKey]);
 
   const toggleTodoDone = useCallback(async (todo: CalendarTodo) => {
     const now = Date.now();
@@ -506,11 +542,12 @@ export default function CalendarScreen() {
       updatedAt: now,
     });
     await refreshTodos(selectedDateKey);
+    await refreshOverdueTodos();
     if (selectedDateKey === todayKey) {
       await refreshTodayPreviewTodos();
       syncTodayWidget().catch(() => undefined);
     }
-  }, [refreshTodayPreviewTodos, refreshTodos, selectedDateKey, todayKey]);
+  }, [refreshOverdueTodos, refreshTodayPreviewTodos, refreshTodos, selectedDateKey, todayKey]);
 
   const deleteEditingTodo = useCallback(() => {
     if (!editingTodo) return;
@@ -525,6 +562,7 @@ export default function CalendarScreen() {
               setCreateVisible(false);
               setEditingTodo(null);
               await refreshTodos(selectedDateKey);
+              await refreshOverdueTodos();
               if (selectedDateKey === todayKey) {
                 await refreshTodayPreviewTodos();
                 syncTodayWidget().catch(() => undefined);
@@ -534,7 +572,7 @@ export default function CalendarScreen() {
         },
       },
     ]);
-  }, [editingTodo, refreshTodayPreviewTodos, refreshTodos, selectedDateKey, todayKey]);
+  }, [editingTodo, refreshOverdueTodos, refreshTodayPreviewTodos, refreshTodos, selectedDateKey, todayKey]);
 
   const cells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
 
@@ -666,7 +704,15 @@ export default function CalendarScreen() {
 
         <View style={styles.todoHeader}>
           <Text style={styles.todoTitle}>待办</Text>
-          {loading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          <View style={styles.todoHeaderActions}>
+            {overdueTodos.length > 0 ? (
+              <Pressable style={styles.moveTodayButton} onPress={() => void moveOverdueTodosToToday()}>
+                <ArrowRight color={colors.primary} size={15} />
+                <Text style={styles.moveTodayText}>移到今天 {overdueTodos.length}</Text>
+              </Pressable>
+            ) : null}
+            {loading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          </View>
         </View>
 
         <View style={styles.todoList}>
@@ -1167,9 +1213,32 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
+  todoHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    flexShrink: 1,
+  },
   todoTitle: {
     color: colors.text,
     fontSize: 18,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  moveTodayButton: {
+    minHeight: 30,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: colors.primaryLight,
+  },
+  moveTodayText: {
+    color: colors.primary,
+    fontSize: 12,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },

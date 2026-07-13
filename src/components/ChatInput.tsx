@@ -75,10 +75,10 @@ import {
 
 
 let colors = lightColors;
-const STICKER_ITEM_HEIGHT = 98;
-const STICKER_PANEL_VERTICAL_PADDING = 26;
-const STICKER_PANEL_ROW_GAP = 8;
-const STICKER_PANEL_HEIGHT = STICKER_ITEM_HEIGHT * 2 + STICKER_PANEL_ROW_GAP + STICKER_PANEL_VERTICAL_PADDING;
+const KEYBOARD_LIKE_PANEL_MIN_HEIGHT = 286;
+const KEYBOARD_LIKE_PANEL_MAX_HEIGHT = 340;
+const KEYBOARD_LIKE_PANEL_HEIGHT_RATIO = 0.36;
+const OPTION_ACTIONS_PER_PAGE = 8;
 const MCP_PANEL_HEIGHT = Math.min(560, Dimensions.get('window').height * 0.68);
 const MAX_IMAGE_REFERENCE_COUNT = 16;
 const CUSTOM_CSS_MAX_LENGTH = 12000;
@@ -1008,9 +1008,15 @@ export function ChatInput({
     { key: 'web', label: 'AI网页巡游', Icon: Globe2, onPress: () => void handleEnableWebCruise() },
   ];
   const optionPages = [
-    primaryOptionActions,
-    secondaryOptionActions,
-  ];
+    ...primaryOptionActions,
+    ...secondaryOptionActions,
+  ].reduce<typeof primaryOptionActions[]>((pages, action, index) => {
+    if (index % OPTION_ACTIONS_PER_PAGE === 0) {
+      pages.push([]);
+    }
+    pages[pages.length - 1].push(action);
+    return pages;
+  }, []);
 
   const scrollToOptionsPage = (pageIndex: number) => {
     const nextPage = Math.min(Math.max(pageIndex, 0), optionPages.length - 1);
@@ -1762,6 +1768,10 @@ const createStyles = (
   viewportHeight = Dimensions.get('window').height
 ) => {
   const fileManagerWide = viewportWidth >= 680;
+  const keyboardLikePanelHeight = Math.min(
+    KEYBOARD_LIKE_PANEL_MAX_HEIGHT,
+    Math.max(KEYBOARD_LIKE_PANEL_MIN_HEIGHT, Math.round(viewportHeight * KEYBOARD_LIKE_PANEL_HEIGHT_RATIO))
+  );
 
   return StyleSheet.create({
   wrapper: {
@@ -2047,7 +2057,7 @@ const createStyles = (
     borderTopColor: colors.inputBorder,
   },
   stickerPanel: {
-    height: STICKER_PANEL_HEIGHT,
+    height: keyboardLikePanelHeight,
     paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 10,
@@ -2064,7 +2074,7 @@ const createStyles = (
   },
   stickerEmpty: {
     width: '100%',
-    minHeight: STICKER_PANEL_HEIGHT - 24,
+    minHeight: keyboardLikePanelHeight - 24,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -2098,10 +2108,10 @@ const createStyles = (
     color: colors.textSecondary,
   },
   optionsPanel: {
-    height: STICKER_PANEL_HEIGHT,
+    height: keyboardLikePanelHeight,
     paddingHorizontal: 8,
-    paddingTop: 14,
-    paddingBottom: 8,
+    paddingTop: 18,
+    paddingBottom: 10,
   },
   optionsPagerScroll: {
     flex: 1,
@@ -2116,10 +2126,11 @@ const createStyles = (
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: 16,
+    alignContent: 'center',
+    rowGap: 18,
   },
   optionsPager: {
-    height: 20,
+    height: 22,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
@@ -2139,9 +2150,9 @@ const createStyles = (
   },
   optionItem: {
     width: '25%',
-    minHeight: 82,
+    height: 96,
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     paddingHorizontal: 4,
   },
   optionItemDisabled: {

@@ -3051,6 +3051,23 @@ export async function getCalendarTodosByDate(dateKey: string): Promise<CalendarT
   return rows.map(mapCalendarTodoRow);
 }
 
+export async function getUnfinishedCalendarTodosBeforeDate(dateKey: string): Promise<CalendarTodo[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<CalendarTodoRow>(
+    `SELECT *
+       FROM calendar_todos
+      WHERE date_key < ?
+        AND completed_at IS NULL
+      ORDER BY
+        date_key ASC,
+        CASE WHEN scheduled_time IS NULL OR scheduled_time = '' THEN 1 ELSE 0 END ASC,
+        scheduled_time ASC,
+        created_at ASC`,
+    [dateKey]
+  );
+  return rows.map(mapCalendarTodoRow);
+}
+
 /* ==================== API usage logs ==================== */
 
 interface ApiUsageEventRow {
