@@ -42,10 +42,10 @@ class VoiceCallAudioModule(
   private val reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
   companion object {
-    private const val PLAYBACK_START_GUARD_MS = 350L
+    private const val PLAYBACK_START_GUARD_MS = 120L
     private const val BARGE_IN_PREROLL_MS = 320
-    private const val BARGE_IN_MIN_SPEECH_MS = 140
-    private const val BARGE_IN_COOLDOWN_MS = 1_500L
+    private const val BARGE_IN_MIN_SPEECH_MS = 40
+    private const val BARGE_IN_COOLDOWN_MS = 700L
     private const val BARGE_IN_RECOGNITION_OPEN_MS = 2_500L
     private const val MIC_PREROLL_MS = 720
     private const val MIC_START_MIN_SPEECH_MS = 40
@@ -94,6 +94,7 @@ class VoiceCallAudioModule(
   private var micSpeechMs = 0
   private var micSilenceMs = 0
   private var micNoiseRms = MIC_INITIAL_NOISE_RMS
+  private var speakerVolume = 1.0f
 
   @ReactMethod
   fun startMic(sampleRate: Double, chunkMs: Double, promise: Promise) {
@@ -257,6 +258,7 @@ class VoiceCallAudioModule(
 
       audioTrack = track
       decoder = codec
+      applySpeakerVolume(track)
       speakerRunning.set(true)
       track.play()
       decoderThread = thread(name = "VoiceCallMp3Decoder") {
@@ -280,6 +282,20 @@ class VoiceCallAudioModule(
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("VOICE_CALL_AUDIO_ROUTE", error)
+    }
+  }
+
+  @ReactMethod
+  fun setSpeakerVolume(volume: Double, promise: Promise) {
+    try {
+      speakerVolume = volume.toFloat().coerceIn(0.0f, 1.0f)
+      audioTrack?.let { applySpeakerVolume(it) }
+      synchronized(clipLock) {
+        currentClipPlayer?.setVolume(speakerVolume, speakerVolume)
+      }
+      promise.resolve(true)
+    } catch (error: Exception) {
+      promise.reject("VOICE_CALL_AUDIO_VOLUME", error)
     }
   }
 
@@ -510,6 +526,7 @@ class VoiceCallAudioModule(
           @Suppress("DEPRECATION")
           player.setAudioStreamType(AudioManager.STREAM_VOICE_CALL)
         }
+        player.setVolume(speakerVolume, speakerVolume)
         player.setDataSource(file.absolutePath)
         player.setOnCompletionListener {
           finishCurrentClip()
@@ -648,8 +665,8 @@ class VoiceCallAudioModule(
     }
 
     val peak = calculatePcmPeak(payload)
-    val threshold = maxOf(1_800.0, playbackEchoRms * 2.15)
-    val loudNearSpeech = rms >= threshold && peak >= 4_500
+    val threshold = maxOf(360.0, playbackEchoRms * 0.75)
+    val loudNearSpeech = rms >= threshold && peak >= 650
     if (loudNearSpeech) {
       bargeInSpeechMs += chunkMs
     } else {
@@ -688,7 +705,6 @@ class VoiceCallAudioModule(
         putArray("chunks", chunks)
       }
     )
-    clearClipQueue()
   }
 
   private fun processListeningMicChunk(payload: ByteArray, chunkMs: Int, sampleRate: Int) {
@@ -821,6 +837,15 @@ class VoiceCallAudioModule(
         putBoolean("active", active)
       }
     )
+  }
+
+  private fun applySpeakerVolume(track: AudioTrack) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      track.setVolume(speakerVolume)
+    } else {
+      @Suppress("DEPRECATION")
+      track.setStereoVolume(speakerVolume, speakerVolume)
+    }
   }
 
   private fun isBenignDecoderCancellation(error: Exception): Boolean {
