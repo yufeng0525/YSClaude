@@ -109,7 +109,8 @@ export default function VoiceCallScreen() {
   const setVoiceCallTuningConfig = useSettingsStore((state) => state.setVoiceCallTuningConfig);
   const assistantName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
   const assistantAvatarUri = appearanceConfig?.assistantAvatarImageUri;
-  const canHangup = snapshot.active || !!snapshot.error || snapshot.status === 'error';
+  const hasCallError = !!snapshot.error || snapshot.status === 'error';
+  const canHangup = snapshot.active || hasCallError;
 
   const transcriptItems = useMemo(() => {
     const items = [...snapshot.transcriptItems];
@@ -260,11 +261,17 @@ export default function VoiceCallScreen() {
           onPress={() => setMicrophoneEnabled(!snapshot.micEnabled)}
           Icon={snapshot.micEnabled ? Mic : MicOff}
         />
-        <Pressable style={styles.hangupButton} onPress={canHangup ? handleHangup : handleStart} disabled={starting}>
+        <Pressable style={styles.hangupButton} onPress={canHangup ? handleHangup : handleStart} disabled={starting && !hasCallError}>
           <View style={styles.hangupCircle}>
-            {starting ? <ActivityIndicator color="#FFFFFF" /> : <PhoneOff size={32} color="#FFFFFF" strokeWidth={2.4} />}
+            {starting && !hasCallError ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : hasCallError ? (
+              <X size={34} color="#FFFFFF" strokeWidth={2.4} />
+            ) : (
+              <PhoneOff size={32} color="#FFFFFF" strokeWidth={2.4} />
+            )}
           </View>
-          <Text style={styles.controlLabel}>{snapshot.active ? '挂断' : '开始'}</Text>
+          <Text style={styles.controlLabel}>{hasCallError ? '退出' : snapshot.active ? '挂断' : '开始'}</Text>
         </Pressable>
         <ControlButton
           label={snapshot.speakerphoneOn ? '扬声器已开' : '听筒模式'}

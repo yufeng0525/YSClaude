@@ -1685,6 +1685,14 @@ async function runToolLoop(
     (!!settings.runCommandConfig?.sshPassword || !!settings.runCommandConfig?.sshPrivateKey);
   const androidAccessibilityControlEnabled =
     messagesContainText(requestMessages, ANDROID_ACCESSIBILITY_CONTROL_MARKER);
+  let voiceCallActive = false;
+  try {
+    const { useVoiceCallStore } = await import('./voiceCall');
+    const snapshot = useVoiceCallStore.getState().snapshot;
+    voiceCallActive = !!snapshot.active && snapshot.status !== 'error';
+  } catch {
+    voiceCallActive = false;
+  }
 
   const tools = getToolDefinitions({
     memoryVault: memoryEnabled,
@@ -1701,6 +1709,7 @@ async function runToolLoop(
         androidAccessibilityControlEnabled,
     },
     mcpTools: settings.mcpToolConfig,
+    voiceCallActive,
   });
   if (tools.length === 0) {
     return { handled: false }; // 无工具 → 走原有流式路径

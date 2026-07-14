@@ -33,6 +33,7 @@ export interface ToolDefinitionConfig {
   runCommand?: RunCommandConfig;
   nativeTools?: NativeToolConfig;
   mcpTools?: McpToolConfig;
+  voiceCallActive?: boolean;
 }
 
 export interface ToolExecutionContext {

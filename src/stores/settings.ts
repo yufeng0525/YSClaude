@@ -268,6 +268,7 @@ export interface NativeToolConfig {
   appUsageStatsEnabled: boolean;
   calendarEnabled: boolean;
   aiVoiceCallEnabled?: boolean;
+  aiVoiceCallHangupEnabled?: boolean;
   accessibilityControlEnabled?: boolean;
 }
 
@@ -1039,6 +1040,7 @@ export const useSettingsStore = create<SettingsState>()(
         appUsageStatsEnabled: false,
         calendarEnabled: false,
         aiVoiceCallEnabled: false,
+        aiVoiceCallHangupEnabled: false,
         accessibilityControlEnabled: false,
       },
       calendarAiSyncConfig: {
@@ -1583,6 +1585,7 @@ export const useSettingsStore = create<SettingsState>()(
             appUsageStatsEnabled: state?.nativeToolConfig?.appUsageStatsEnabled ?? false,
             calendarEnabled: state?.nativeToolConfig?.calendarEnabled ?? false,
             aiVoiceCallEnabled: state?.nativeToolConfig?.aiVoiceCallEnabled ?? false,
+            aiVoiceCallHangupEnabled: state?.nativeToolConfig?.aiVoiceCallHangupEnabled ?? false,
             accessibilityControlEnabled: state?.nativeToolConfig?.accessibilityControlEnabled ?? false,
           },
           locationShareConfig: {
