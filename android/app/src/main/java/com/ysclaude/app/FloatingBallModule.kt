@@ -118,6 +118,16 @@ class FloatingBallModule(
   private var voiceCallFloatingView: LinearLayout? = null
   private var voiceCallFloatingDurationView: TextView? = null
   private var voiceCallFloatingParams: WindowManager.LayoutParams? = null
+  private var voiceCallFloatingStartedElapsedMs = 0L
+  private val voiceCallDurationRunnable = object : Runnable {
+    override fun run() {
+      val durationView = voiceCallFloatingDurationView ?: return
+      val elapsedSeconds = ((android.os.SystemClock.elapsedRealtime() - voiceCallFloatingStartedElapsedMs) / 1000L)
+        .coerceAtLeast(0L)
+      durationView.text = formatVoiceCallFloatingDuration(elapsedSeconds)
+      mainHandler.postDelayed(this, 1000L - (android.os.SystemClock.elapsedRealtime() % 1000L))
+    }
+  }
   private var inputView: LinearLayout? = null
   private var inputParams: WindowManager.LayoutParams? = null
   private var toolbarViews: List<View> = emptyList()
@@ -1213,8 +1223,10 @@ class FloatingBallModule(
   }
 
   private fun showVoiceCallFloatingInternal(durationText: String, previewUri: String, screenShare: Boolean) {
-    voiceCallFloatingDurationView?.text = durationText.ifBlank { "00:00" }
     if (voiceCallFloatingView != null) return
+
+    val initialElapsedSeconds = parseVoiceCallFloatingDuration(durationText)
+    voiceCallFloatingStartedElapsedMs = android.os.SystemClock.elapsedRealtime() - initialElapsedSeconds * 1000L
 
     val icon = TextView(reactContext).apply {
       text = "☎"
@@ -1311,10 +1323,13 @@ class FloatingBallModule(
     voiceCallFloatingDurationView = duration
     voiceCallFloatingParams = params
     windowManager.addView(root, params)
+    mainHandler.removeCallbacks(voiceCallDurationRunnable)
+    voiceCallDurationRunnable.run()
     FloatingBallForegroundService.start(reactContext)
   }
 
   private fun hideVoiceCallFloatingInternal() {
+    mainHandler.removeCallbacks(voiceCallDurationRunnable)
     voiceCallFloatingView?.let { view ->
       if (view.parent != null) {
         runCatching { windowManager.removeView(view) }
@@ -1324,6 +1339,26 @@ class FloatingBallModule(
     voiceCallFloatingDurationView = null
     voiceCallFloatingParams = null
     stopForegroundServiceIfNoOverlay()
+  }
+
+  private fun parseVoiceCallFloatingDuration(value: String): Long {
+    val parts = value.trim().split(':')
+    if (parts.size < 2) return 0L
+    val seconds = parts.last().toLongOrNull() ?: return 0L
+    val minutes = parts[parts.lastIndex - 1].toLongOrNull() ?: return 0L
+    val hours = if (parts.size >= 3) parts[parts.lastIndex - 2].toLongOrNull() ?: 0L else 0L
+    return (hours * 3600L + minutes * 60L + seconds).coerceAtLeast(0L)
+  }
+
+  private fun formatVoiceCallFloatingDuration(elapsedSeconds: Long): String {
+    val hours = elapsedSeconds / 3600L
+    val minutes = (elapsedSeconds % 3600L) / 60L
+    val seconds = elapsedSeconds % 60L
+    return if (hours > 0L) {
+      String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+    } else {
+      String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+    }
   }
 
   private fun handleDesktopLyricTouch(view: View, event: MotionEvent): Boolean {
