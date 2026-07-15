@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useSettingsPageColors } from '../../theme/colors';
-import { type STTProvider, type TTSConfig, type TTSProvider, useSettingsStore } from '../../stores/settings';
+import { type STTProvider, type TTSConfig, type TTSProvider, type VoiceCallEngine, useSettingsStore } from '../../stores/settings';
 import { getTTSConfigMissingMessage, isTTSConfigReady, playTTS } from '../../services/tts';
 import { createSettingsStyles } from './styles';
 
@@ -15,6 +16,7 @@ const TTS_PROVIDERS: Array<{ key: TTSProvider; label: string }> = [
   { key: 'fish', label: 'Fish Audio' },
   { key: 'deepgram', label: 'Deepgram' },
   { key: 'cartesia', label: 'Cartesia' },
+  { key: 'elevenlabs', label: 'ElevenLabs' },
 ];
 const MINIMAX_TTS_MODELS = [
   'speech-2.8-hd',
@@ -35,13 +37,28 @@ const STT_PROVIDERS: Array<{ key: STTProvider; label: string }> = [
   { key: 'fish', label: 'Fish Audio' },
   { key: 'deepgram', label: 'Deepgram' },
   { key: 'aliyun', label: 'Aliyun' },
+  { key: 'elevenlabs', label: 'ElevenLabs' },
 ];
 type VoiceModelTarget = 'tts-minimax' | 'tts-fish' | 'tts-deepgram' | 'tts-cartesia' | 'stt-openai' | 'stt-deepgram';
 
 export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabProps) {
   const colors = useSettingsPageColors();
   const styles = useMemo(() => createSettingsStyles(colors), [colors]);
-  const { apiConfigs, activeConfigIndex, ttsConfig, sttConfig, setTTSConfig, setSTTConfig } = useSettingsStore();
+  const {
+    apiConfigs, activeConfigIndex, ttsConfig, sttConfig,
+    voiceCallTTSProvider, voiceCallSTTProvider, voiceCallEngine, liveKitVoiceCallConfig,
+    voiceCallBackgroundImageUri,
+    setTTSConfig, setSTTConfig, setVoiceCallTTSProvider, setVoiceCallSTTProvider,
+    setVoiceCallEngine, setLiveKitVoiceCallConfig, setVoiceCallBackgroundImageUri,
+  } = useSettingsStore();
+  const [chatTtsProvider, setChatTtsProvider] = useState<TTSProvider>(ttsConfig.provider);
+  const [callTtsProvider, setCallTtsProvider] = useState<TTSProvider>(voiceCallTTSProvider);
+  const [chatSttProvider, setChatSttProvider] = useState<STTProvider>(sttConfig.provider);
+  const [callSttProvider, setCallSttProvider] = useState<STTProvider>(voiceCallSTTProvider);
+  const [callEngine, setCallEngine] = useState<VoiceCallEngine>(voiceCallEngine);
+  const [liveKitBrainUrl, setLiveKitBrainUrl] = useState(liveKitVoiceCallConfig.brainUrl);
+  const [liveKitAccessToken, setLiveKitAccessToken] = useState(liveKitVoiceCallConfig.accessToken);
+  const [callBackgroundUri, setCallBackgroundUri] = useState(voiceCallBackgroundImageUri);
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>(ttsConfig.provider);
   const [groupId, setGroupId] = useState(ttsConfig.groupId);
   const [apiKey, setApiKey] = useState(ttsConfig.apiKey);
@@ -67,6 +84,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
   const [ttsCartesiaLanguage, setTtsCartesiaLanguage] = useState(ttsConfig.cartesiaLanguage);
   const [ttsCartesiaSpeed, setTtsCartesiaSpeed] = useState(String(ttsConfig.cartesiaSpeed));
   const [ttsCartesiaVolume, setTtsCartesiaVolume] = useState(String(ttsConfig.cartesiaVolume));
+  const [elevenLabsTokenEndpoint, setElevenLabsTokenEndpoint] = useState(ttsConfig.elevenLabsTokenEndpoint);
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState(ttsConfig.elevenLabsVoiceId);
+  const [elevenLabsLanguage, setElevenLabsLanguage] = useState(ttsConfig.elevenLabsLanguage);
   const [sttProvider, setSttProvider] = useState<STTProvider>(sttConfig.provider);
   const [openAiBaseUrl, setOpenAiBaseUrl] = useState(sttConfig.openAiBaseUrl);
   const [openAiApiKey, setOpenAiApiKey] = useState(sttConfig.openAiApiKey);
@@ -92,7 +112,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
 
   function handleSave() {
     setTTSConfig({
-      provider: ttsProvider,
+      provider: chatTtsProvider,
       groupId: groupId.trim(),
       apiKey: apiKey.trim(),
       model: model.trim() || 'speech-02-hd',
@@ -117,9 +137,12 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       cartesiaLanguage: ttsCartesiaLanguage.trim() || 'zh',
       cartesiaSpeed: parseFloat(ttsCartesiaSpeed) || 1,
       cartesiaVolume: parseFloat(ttsCartesiaVolume) || 1,
+      elevenLabsTokenEndpoint: elevenLabsTokenEndpoint.trim(),
+      elevenLabsVoiceId: elevenLabsVoiceId.trim(),
+      elevenLabsLanguage: elevenLabsLanguage.trim() || 'zh',
     });
     setSTTConfig({
-      provider: sttProvider,
+      provider: chatSttProvider,
       openAiBaseUrl: openAiBaseUrl.trim(),
       openAiApiKey: openAiApiKey.trim(),
       openAiModel: openAiModel.trim() || 'whisper-1',
@@ -137,7 +160,27 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       aliyunLanguage: aliyunLanguage.trim() || 'zh',
       aliyunSemanticVad,
     });
+    setVoiceCallTTSProvider(callTtsProvider);
+    setVoiceCallSTTProvider(callSttProvider);
+    setVoiceCallEngine(callEngine);
+    setLiveKitVoiceCallConfig({
+      brainUrl: liveKitBrainUrl.trim().replace(/\/+$/, ''),
+      accessToken: liveKitAccessToken.trim(),
+    });
     showToast('语音配置已保存');
+  }
+
+  function handleSaveCallBackground() {
+    setVoiceCallBackgroundImageUri(callBackgroundUri);
+    showToast('视频通话背景已保存');
+  }
+
+  async function pickCallBackground() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.9,
+    });
+    if (!result.canceled) setCallBackgroundUri(result.assets[0].uri);
   }
 
   function getCurrentVoiceModel(target: VoiceModelTarget): string {
@@ -298,6 +341,9 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         cartesiaLanguage: ttsCartesiaLanguage.trim() || 'zh',
         cartesiaSpeed: parseFloat(ttsCartesiaSpeed) || 1,
         cartesiaVolume: parseFloat(ttsCartesiaVolume) || 1,
+        elevenLabsTokenEndpoint: elevenLabsTokenEndpoint.trim(),
+        elevenLabsVoiceId: elevenLabsVoiceId.trim(),
+        elevenLabsLanguage: elevenLabsLanguage.trim() || 'zh',
     };
     if (!isTTSConfigReady(testConfig)) {
       Alert.alert('提示', getTTSConfigMissingMessage(testConfig));
@@ -320,13 +366,156 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.sectionTitle}>TTS 语音合成</Text>
-      <Text style={styles.hint}>用于朗读 AI 回复、悬浮球气泡和电台语音。</Text>
+      <Text style={styles.sectionTitle}>使用场景</Text>
+      <Text style={styles.hint}>服务商参数统一维护；聊天和实时通话可分别选择使用的 STT/TTS 服务。</Text>
 
       <View style={styles.field}>
-        <Text style={styles.label}>服务商</Text>
+        <Text style={styles.label}>视频通话背景</Text>
+        <Text style={styles.hint}>用于视频通话主画面，摄像头内容默认显示在右上角小窗。</Text>
+        <Pressable
+          style={[styles.input, { height: 132, paddingHorizontal: 0, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}
+          onPress={() => void pickCallBackground()}
+        >
+          {callBackgroundUri ? (
+            <Image source={{ uri: callBackgroundUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          ) : (
+            <Text style={styles.hint}>点击选择自定义图片</Text>
+          )}
+        </Pressable>
+        {!!callBackgroundUri && (
+          <Pressable onPress={() => setCallBackgroundUri(undefined)}>
+            <Text style={[styles.hint, { color: colors.danger }]}>移除背景图片</Text>
+          </Pressable>
+        )}
+        <Pressable style={[styles.saveButton, { marginTop: 4 }]} onPress={handleSaveCallBackground}>
+          <Text style={styles.saveButtonText}>保存视频通话背景</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>聊天 TTS</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
-          {TTS_PROVIDERS.map((provider) => (
+          {TTS_PROVIDERS.filter(({ key }) => key !== 'elevenlabs').map((provider) => (
+            <Pressable key={provider.key} style={[styles.configChip, provider.key === chatTtsProvider && styles.configChipActive]} onPress={() => setChatTtsProvider(provider.key)}>
+              <Text style={[styles.configChipText, provider.key === chatTtsProvider && styles.configChipTextActive]}>{provider.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>聊天 STT</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
+          {STT_PROVIDERS.filter(({ key }) => key !== 'elevenlabs').map((provider) => (
+            <Pressable key={provider.key} style={[styles.configChip, provider.key === chatSttProvider && styles.configChipActive]} onPress={() => setChatSttProvider(provider.key)}>
+              <Text style={[styles.configChipText, provider.key === chatSttProvider && styles.configChipTextActive]}>{provider.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>通话引擎</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
+          {([
+            ['local', '本机级联'],
+            ['livekit', 'LiveKit Agents'],
+            ['elevenlabs', 'ElevenLabs'],
+          ] as Array<[VoiceCallEngine, string]>).map(([engine, label]) => (
+            <Pressable key={engine} style={[styles.configChip, engine === callEngine && styles.configChipActive]} onPress={() => setCallEngine(engine)}>
+              <Text style={[styles.configChipText, engine === callEngine && styles.configChipTextActive]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      {callEngine === 'livekit' && (
+        <View style={styles.field}>
+          <Text style={styles.sectionTitle}>LiveKit Agents</Text>
+          <Text style={styles.hint}>仅支持阿里 STT + 当前聊天 LLM + Cartesia TTS。模型密钥通过 HTTPS 发给你部署的 Brain 服务，不会写入 LiveKit 客户端日志。</Text>
+          <Text style={styles.label}>Brain Server URL</Text>
+          <TextInput
+            style={styles.input}
+            value={liveKitBrainUrl}
+            onChangeText={setLiveKitBrainUrl}
+            placeholder="https://brain.example.com"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.label}>Brain Access Token（可选）</Text>
+          <TextInput
+            style={styles.input}
+            value={liveKitAccessToken}
+            onChangeText={setLiveKitAccessToken}
+            placeholder="与 BRAIN_SHARED_SECRET 一致"
+            placeholderTextColor={colors.textTertiary}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+      )}
+      <View style={styles.field}>
+        <Text style={styles.label}>通话 TTS</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
+          {TTS_PROVIDERS.filter(({ key }) => key === 'minimax' || key === 'cartesia' || key === 'elevenlabs').map((provider) => (
+            <Pressable key={provider.key} style={[styles.configChip, provider.key === callTtsProvider && styles.configChipActive]} onPress={() => setCallTtsProvider(provider.key)}>
+              <Text style={[styles.configChipText, provider.key === callTtsProvider && styles.configChipTextActive]}>{provider.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>通话 STT</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
+          {STT_PROVIDERS.filter(({ key }) => key === 'deepgram' || key === 'aliyun' || key === 'elevenlabs').map((provider) => (
+            <Pressable key={provider.key} style={[styles.configChip, provider.key === callSttProvider && styles.configChipActive]} onPress={() => setCallSttProvider(provider.key)}>
+              <Text style={[styles.configChipText, provider.key === callSttProvider && styles.configChipTextActive]}>{provider.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      {(callTtsProvider === 'elevenlabs' || callSttProvider === 'elevenlabs') && (
+        <View style={styles.field}>
+          <Text style={styles.sectionTitle}>ElevenLabs Speech Engine</Text>
+          <Text style={styles.hint}>仅当通话 STT 和 TTS 都选择 ElevenLabs 时启用。Token Endpoint 必须由服务端返回 conversation token，请勿把 ElevenLabs API Key 放进 App。</Text>
+          <Text style={styles.label}>Token Endpoint</Text>
+          <TextInput
+            style={styles.input}
+            value={elevenLabsTokenEndpoint}
+            onChangeText={setElevenLabsTokenEndpoint}
+            placeholder="https://your-server.example.com/api/elevenlabs/token"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.label}>Voice ID（可选覆盖）</Text>
+          <TextInput
+            style={styles.input}
+            value={elevenLabsVoiceId}
+            onChangeText={setElevenLabsVoiceId}
+            placeholder="ElevenLabs voice id"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+          <Text style={styles.label}>Language</Text>
+          <TextInput
+            style={styles.input}
+            value={elevenLabsLanguage}
+            onChangeText={setElevenLabsLanguage}
+            placeholder="zh"
+            placeholderTextColor={colors.textTertiary}
+            autoCapitalize="none"
+          />
+        </View>
+      )}
+
+      <Text style={styles.sectionTitle}>TTS 语音合成</Text>
+      <Text style={styles.hint}>统一添加和编辑各 TTS 服务商的参数。</Text>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>编辑服务商配置</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
+          {TTS_PROVIDERS.filter(({ key }) => key !== 'elevenlabs').map((provider) => (
             <Pressable
               key={provider.key}
               style={[styles.configChip, provider.key === ttsProvider && styles.configChipActive]}
@@ -687,7 +876,7 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       <View style={styles.field}>
         <Text style={styles.label}>服务商</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
-          {STT_PROVIDERS.map((provider) => (
+          {STT_PROVIDERS.filter(({ key }) => key !== 'elevenlabs').map((provider) => (
             <Pressable
               key={provider.key}
               style={[styles.configChip, provider.key === sttProvider && styles.configChipActive]}

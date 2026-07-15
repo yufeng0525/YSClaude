@@ -1,7 +1,13 @@
 import { requestRecordingPermissionsAsync } from 'expo-audio';
 import { Platform } from 'react-native';
 import { useChatStore } from '../stores/chat';
-import { useSettingsStore, type STTConfig, type TTSConfig } from '../stores/settings';
+import {
+  getVoiceCallSTTConfig,
+  getVoiceCallTTSConfig,
+  useSettingsStore,
+  type STTConfig,
+  type TTSConfig,
+} from '../stores/settings';
 import {
   addVoiceCallAudioChunkListener,
   addVoiceCallAudioErrorListener,
@@ -84,18 +90,49 @@ const SPEECH_BRACKETED_CONTENT_PATTERNS = [
 ];
 const SPEECH_TRAILING_BRACKETED_CONTENT = /[\(（\[{<][^\)）\]}>]*$/;
 const NativeWebSocket = WebSocket as any;
-const VOICE_CALL_START_SYSTEM_MESSAGE = '开启语音通话，以下内容为通话记录';
-const VOICE_CALL_RUNTIME_INSTRUCTION =
-  '当前正在与用户进行实时语音通话。请把接下来的回复当作会被 TTS 朗读出来的口语回复：优先简洁、自然、可直接念出；避免 Markdown 表格、长列表、复杂括号说明和不适合朗读的格式；如果内容较长，请先给结论，再分段说明。';
+export type VoiceCallMediaMode = 'voice' | 'video' | 'screen';
+
+export function getVoiceCallStartSystemMessage(mode: VoiceCallMediaMode): string {
+  if (mode === 'video') return '开启视频通话，以下内容为通话记录';
+  if (mode === 'screen') return '开启共享屏幕通话，以下内容为通话记录';
+  return '开启语音通话，以下内容为通话记录';
+}
+
+export function getVoiceCallRuntimeInstruction(mode: VoiceCallMediaMode): string {
+  const spokenRequirement =
+    '请把接下来的回复当作会被 TTS 朗读出来的口语回复：优先简洁、自然、可直接念出；避免 Markdown 表格、长列表、复杂括号说明和不适合朗读的格式；如果内容较长，请先给结论，再分段说明。';
+  if (mode === 'video') {
+    return `当前正在与用户进行实时视频通话。用户消息可能附带当前摄像头画面，请结合画面和语音回答；无法看清时要明确询问，不要臆测画面内容。${spokenRequirement}`;
+  }
+  if (mode === 'screen') {
+    return `当前正在与用户进行实时共享屏幕通话。用户消息可能附带当前屏幕画面，请重点结合屏幕上的界面、文字和操作回答；无法看清时要明确询问，不要臆测屏幕内容。${spokenRequirement}`;
+  }
+  return `当前正在与用户进行实时语音通话。本模式没有视觉画面，不要声称看到了用户或屏幕。${spokenRequirement}`;
+}
 export const VOICE_CALL_ASSISTANT_INITIATED_INSTRUCTION =
   '用户已接听你主动发起的语音通话。你现在必须先开口，用自然口语直接开始这通电话；不要等待用户先说话，不要说明你调用了工具。';
-const VOICE_CALL_END_SYSTEM_MESSAGE = '语音通话结束';
+export function getVoiceCallEndSystemMessage(mode: VoiceCallMediaMode): string {
+  if (mode === 'video') return '视频通话结束';
+  if (mode === 'screen') return '共享屏幕通话结束';
+  return '语音通话结束';
+}
 
 export function isAndroidVoiceCallAvailable(): boolean {
   return Platform.OS === 'android' && isAndroidVoiceCallAudioAvailable();
 }
 
+function getVoiceCallSettings() {
+  const settings = useSettingsStore.getState();
+  return {
+    ...settings,
+    ttsConfig: getVoiceCallTTSConfig(),
+    sttConfig: getVoiceCallSTTConfig(),
+  };
+}
+
 export class AndroidVoiceCallSession {
+  constructor(private readonly mode: VoiceCallMediaMode = 'voice') {}
+  private visualFrameProvider: (() => Promise<string | null>) | null = null;
   private snapshot: VoiceCallSnapshot = {
     active: false,
     status: 'idle',
@@ -179,6 +216,10 @@ export class AndroidVoiceCallSession {
     return this.snapshot;
   }
 
+  setVisualFrameProvider(provider: (() => Promise<string | null>) | null): void {
+    this.visualFrameProvider = provider;
+  }
+
   async startAssistantInitiatedTurn(
     instruction = VOICE_CALL_ASSISTANT_INITIATED_INSTRUCTION
   ): Promise<void> {
@@ -196,7 +237,7 @@ export class AndroidVoiceCallSession {
       await useChatStore.getState().triggerResponse({
         skipStickerInstruction: true,
         additionalRuntimeSections: [
-          VOICE_CALL_RUNTIME_INSTRUCTION,
+          getVoiceCallRuntimeInstruction(this.mode),
           instruction,
         ],
       });
@@ -224,7 +265,7 @@ export class AndroidVoiceCallSession {
       throw new Error('请先允许麦克风权限');
     }
 
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     if (!settings._hydrated) {
       throw new Error('设置还没有加载完成');
     }
@@ -260,7 +301,9 @@ export class AndroidVoiceCallSession {
       speakingText: '',
       transcriptItems: [],
     });
-    const startSystemMessage = await useChatStore.getState().addSystemMessage(VOICE_CALL_START_SYSTEM_MESSAGE);
+    const startSystemMessage = await useChatStore.getState().addSystemMessage(
+      getVoiceCallStartSystemMessage(this.mode)
+    );
     this.voiceCallSystemMessageOpen = !!startSystemMessage;
     this.audioErrorSubscription = addVoiceCallAudioErrorListener((event) => {
       this.fail(event.message || '实时音频播放失败');
@@ -367,7 +410,7 @@ export class AndroidVoiceCallSession {
   }
 
   private async connectRealtimeStt(): Promise<void> {
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     if (settings.sttConfig.provider === 'aliyun') {
       await this.connectAliyun();
       return;
@@ -411,7 +454,7 @@ export class AndroidVoiceCallSession {
   }
 
   private async connectDeepgram(): Promise<void> {
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     const url = buildDeepgramLiveUrl(
       settings.sttConfig.deepgramBaseUrl,
       settings.sttConfig.deepgramModel,
@@ -505,7 +548,7 @@ export class AndroidVoiceCallSession {
   }
 
   private async connectAliyun(): Promise<void> {
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     const url = buildAliyunRealtimeUrl(settings.sttConfig.aliyunBaseUrl, settings.sttConfig.aliyunModel);
     const ws = new NativeWebSocket(url, undefined, {
       headers: {
@@ -683,7 +726,7 @@ export class AndroidVoiceCallSession {
     }
 
     if (type.includes('speech_stopped')) {
-      if (!useSettingsStore.getState().sttConfig.aliyunSemanticVad) {
+      if (!getVoiceCallSTTConfig().aliyunSemanticVad) {
         this.commitAliyunAudio();
       }
       if (this.finalTranscriptParts.length || this.lastInterimTranscript || this.snapshot.partialTranscript) {
@@ -734,7 +777,7 @@ export class AndroidVoiceCallSession {
         ''
       ),
     });
-    this.schedulePendingTranscriptFlush(useSettingsStore.getState().sttConfig.aliyunSemanticVad
+    this.schedulePendingTranscriptFlush(getVoiceCallSTTConfig().aliyunSemanticVad
       ? this.getPendingTranscriptFlushMs()
       : ALIYUN_MANUAL_COMMIT_SILENCE_MS);
   }
@@ -922,14 +965,18 @@ export class AndroidVoiceCallSession {
       speakingText: '',
     });
     this.appendTranscriptItem('user', text);
-    await chat.addUserMessage(text);
+    let visualFrameUri: string | null = null;
+    if (this.visualFrameProvider) {
+      visualFrameUri = await this.visualFrameProvider().catch(() => null);
+    }
+    await chat.addUserMessage(text, visualFrameUri || undefined);
     if (useChatStore.getState().error) {
       throw new Error(useChatStore.getState().error || '发送语音文字失败');
     }
     this.startAssistantTtsBridge();
     await useChatStore.getState().triggerResponse({
       skipStickerInstruction: true,
-      additionalRuntimeSections: [VOICE_CALL_RUNTIME_INSTRUCTION],
+      additionalRuntimeSections: [getVoiceCallRuntimeInstruction(this.mode)],
     });
     this.flushPendingTtsText(true);
     this.finishAssistantTts();
@@ -950,7 +997,7 @@ export class AndroidVoiceCallSession {
       this.ttsPlaybackToken += 1;
       this.deferredBargeInReplacementToken = null;
       this.closeAssistantTts();
-      this.connectAssistantTts(useSettingsStore.getState().ttsConfig);
+      this.connectAssistantTts(getVoiceCallTTSConfig());
       this.ttsTextQueue = [];
       this.minimaxAudioHexParts = [];
     }
@@ -1010,7 +1057,7 @@ export class AndroidVoiceCallSession {
 
   private sendAssistantTtsText(text: string): void {
     if (!text.trim()) return;
-    const config = useSettingsStore.getState().ttsConfig;
+    const config = getVoiceCallTTSConfig();
     this.ensureAssistantTtsReady(config);
     if (config.provider === 'cartesia') {
       this.sendCartesiaText(text, config);
@@ -1031,7 +1078,7 @@ export class AndroidVoiceCallSession {
   }
 
   private finishAssistantTts(): void {
-    const config = useSettingsStore.getState().ttsConfig;
+    const config = getVoiceCallTTSConfig();
     if (config.provider === 'cartesia') {
       this.finishCartesia(config);
       return;
@@ -1101,7 +1148,7 @@ export class AndroidVoiceCallSession {
   private drainCartesiaTextQueue(): void {
     const queued = [...this.ttsTextQueue];
     this.ttsTextQueue = [];
-    queued.forEach((text) => this.sendCartesiaText(text, useSettingsStore.getState().ttsConfig));
+    queued.forEach((text) => this.sendCartesiaText(text, getVoiceCallTTSConfig()));
   }
 
   private handleCartesiaMessage(raw: string, ws: WebSocket): void {
@@ -1327,7 +1374,7 @@ export class AndroidVoiceCallSession {
     if (!normalized) return;
     this.update({ speakingText: normalized });
     if (!this.minimaxWs || this.minimaxWs.readyState > WebSocket.OPEN) {
-      this.connectMiniMax(useSettingsStore.getState().ttsConfig);
+      this.connectMiniMax(getVoiceCallTTSConfig());
     }
     if (!this.ttsStarted || this.minimaxWs?.readyState !== WebSocket.OPEN) {
       this.ttsTextQueue.push(normalized);
@@ -1381,7 +1428,7 @@ export class AndroidVoiceCallSession {
     if (this.deepgramFluxMode) return;
     if (!this.snapshot.active || this.stopping || this.snapshot.status !== 'listening') return;
     if (this.aliyunWs?.readyState === WebSocket.OPEN) {
-      if (!useSettingsStore.getState().sttConfig.aliyunSemanticVad) {
+      if (!getVoiceCallSTTConfig().aliyunSemanticVad) {
         this.commitAliyunAudio();
       }
       this.schedulePendingTranscriptFlush(this.deferredBargeInActive
@@ -1396,7 +1443,7 @@ export class AndroidVoiceCallSession {
   }
 
   private getPendingTranscriptFlushMs(): number {
-    if (useSettingsStore.getState().sttConfig.provider === 'aliyun') {
+    if (getVoiceCallSTTConfig().provider === 'aliyun') {
       return this.getTuningConfig().aliyunPendingFlushMs;
     }
     return this.isDeepgramChineseMode()
@@ -1405,7 +1452,7 @@ export class AndroidVoiceCallSession {
   }
 
   private getUserTurnSubmissionGraceMs(): number {
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     if (settings.sttConfig.provider === 'aliyun') {
       return settings.voiceCallTuningConfig.aliyunUserTurnGraceMs;
     }
@@ -1416,14 +1463,14 @@ export class AndroidVoiceCallSession {
   }
 
   private isDeepgramChineseMode(): boolean {
-    const settings = useSettingsStore.getState();
+    const settings = getVoiceCallSettings();
     if (settings.sttConfig.provider !== 'deepgram') return false;
     if (isDeepgramFluxModel(settings.sttConfig.deepgramModel)) return false;
     return isChineseLanguage(settings.sttConfig.deepgramLanguage);
   }
 
   private isAliyunMode(): boolean {
-    return useSettingsStore.getState().sttConfig.provider === 'aliyun';
+    return getVoiceCallSTTConfig().provider === 'aliyun';
   }
 
   private getTuningConfig() {
@@ -1820,7 +1867,9 @@ export class AndroidVoiceCallSession {
   private async closeVoiceCallSystemMessage(): Promise<void> {
     if (!this.voiceCallSystemMessageOpen) return;
     this.voiceCallSystemMessageOpen = false;
-    await useChatStore.getState().addSystemMessage(VOICE_CALL_END_SYSTEM_MESSAGE).catch(() => null);
+    await useChatStore.getState().addSystemMessage(
+      getVoiceCallEndSystemMessage(this.mode)
+    ).catch(() => null);
   }
 }
 

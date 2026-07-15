@@ -9,6 +9,7 @@ export interface AccountingTransaction {
   type: TransactionType;
   source: string;
   amount: number;
+  currency: string;
   categoryId: string;
   paymentMethodId: string;
   occurredAt: number;
@@ -19,6 +20,7 @@ export interface PaymentMethod {
   id: string;
   name: string;
   balance: number;
+  currency: string;
   iconUri?: string;
   color: string;
 }
@@ -48,10 +50,10 @@ interface AccountingState {
 const COLORS = ['#ED9B73', '#79B8A9', '#8D9BD6', '#D78AA8', '#D2AF62', '#8BB66B'];
 
 const DEFAULT_METHODS: PaymentMethod[] = [
-  { id: 'cash', name: '现金', balance: 0, color: COLORS[4] },
-  { id: 'alipay', name: '支付宝', balance: 0, color: '#4A9EF1' },
-  { id: 'wechat', name: '微信', balance: 0, color: '#58B56E' },
-  { id: 'bank', name: '银行卡', balance: 0, color: COLORS[2] },
+  { id: 'cash', name: '现金', balance: 0, currency: 'CNY', color: COLORS[4] },
+  { id: 'alipay', name: '支付宝', balance: 0, currency: 'CNY', color: '#4A9EF1' },
+  { id: 'wechat', name: '微信', balance: 0, currency: 'CNY', color: '#58B56E' },
+  { id: 'bank', name: '银行卡', balance: 0, currency: 'CNY', color: COLORS[2] },
 ];
 
 const DEFAULT_CATEGORIES: AccountingCategory[] = [
@@ -126,7 +128,19 @@ export const useAccountingStore = create<AccountingState>()(
     }),
     {
       name: 'ysclaude-accounting',
+      version: 2,
       storage: createJSONStorage(() => sqliteStorage),
+      migrate: (persisted: any) => {
+        const fallback = persisted?.currency || 'CNY';
+        return {
+          ...persisted,
+          paymentMethods: (persisted?.paymentMethods || DEFAULT_METHODS).map((item: PaymentMethod) => ({ ...item, currency: item.currency || fallback })),
+          transactions: (persisted?.transactions || []).map((item: AccountingTransaction) => ({
+            ...item,
+            currency: item.currency || persisted?.paymentMethods?.find((method: PaymentMethod) => method.id === item.paymentMethodId)?.currency || fallback,
+          })),
+        };
+      },
       partialize: (state) => ({
         transactions: state.transactions,
         paymentMethods: state.paymentMethods,

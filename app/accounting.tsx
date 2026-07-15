@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -37,6 +39,18 @@ const PALETTE = ['#ED9B73', '#79B8A9', '#8D9BD6', '#D78AA8', '#D2AF62', '#8BB66B
 function money(value: number, currency: string): string {
   const symbol = CURRENCIES.find((item) => item.code === currency)?.symbol || currency;
   return `${symbol}${Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function totalsByCurrency<T extends { amount: number; currency: string }>(items: T[]): Record<string, number> {
+  return items.reduce<Record<string, number>>((totals, item) => {
+    totals[item.currency] = (totals[item.currency] || 0) + item.amount;
+    return totals;
+  }, {});
+}
+
+function moneyList(totals: Record<string, number>): string {
+  const entries = Object.entries(totals).filter(([, value]) => value !== 0);
+  return entries.length ? entries.map(([currency, value]) => money(value, currency)).join(' / ') : '—';
 }
 
 function dateKey(timestamp: number): string {
@@ -85,7 +99,6 @@ function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }
   const transactions = useAccountingStore((state) => state.transactions);
   const methods = useAccountingStore((state) => state.paymentMethods);
   const categories = useAccountingStore((state) => state.categories);
-  const currency = useAccountingStore((state) => state.currency);
   const removeTransaction = useAccountingStore((state) => state.removeTransaction);
   const [day, setDay] = useState('all');
   const [categoryId, setCategoryId] = useState('all');
@@ -115,10 +128,10 @@ function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }
       {Object.keys(groups).length === 0 ? (
         <View style={styles.empty}><WalletCards size={40} color={colors.textTertiary} /><Text style={[styles.emptyTitle, { color: colors.text }]}>还没有流水</Text><Text style={[styles.emptyText, { color: colors.textSecondary }]}>点击右上角或下方按钮记一笔</Text><Pressable style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={onAdd}><Text style={styles.primaryButtonText}>记一笔</Text></Pressable></View>
       ) : Object.entries(groups).map(([key, items]) => {
-        const expense = items.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-        const income = items.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
+        const expense = totalsByCurrency(items.filter((item) => item.type === 'expense'));
+        const income = totalsByCurrency(items.filter((item) => item.type === 'income'));
         return <View key={key}>
-          <View style={styles.dayHeader}><Text style={[styles.dayTitle, { color: colors.text }]}>{key}</Text><Text style={[styles.daySummary, { color: colors.textSecondary }]}>支 {money(expense, currency)} · 收 {money(income, currency)}</Text></View>
+          <View style={styles.dayHeader}><Text style={[styles.dayTitle, { color: colors.text }]}>{key}</Text><Text style={[styles.daySummary, { color: colors.textSecondary }]}>支 {moneyList(expense)} · 收 {moneyList(income)}</Text></View>
           <View style={[styles.card, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
             {items.map((item, index) => {
               const category = categories.find((entry) => entry.id === item.categoryId);
@@ -126,7 +139,7 @@ function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }
               return <Pressable key={item.id} onLongPress={() => Alert.alert('删除流水', `确定删除「${item.source}」吗？`, [{ text: '取消' }, { text: '删除', style: 'destructive', onPress: () => removeTransaction(item.id) }])} style={[styles.transaction, index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
                 <View style={[styles.transactionIcon, { backgroundColor: `${category?.color || '#999'}22` }]}>{item.type === 'expense' ? <ArrowUpRight size={19} color={category?.color || colors.textSecondary} /> : <ArrowDownLeft size={19} color={colors.success} />}</View>
                 <View style={styles.flex}><Text style={[styles.transactionSource, { color: colors.text }]}>{item.source}</Text><Text style={[styles.transactionMeta, { color: colors.textSecondary }]}>{category?.name || '未分类'} · {method?.name || '未知方式'} · {formatTime(item.occurredAt)}</Text></View>
-                <Text style={[styles.transactionAmount, { color: item.type === 'expense' ? colors.text : colors.success }]}>{item.type === 'expense' ? '-' : '+'}{money(item.amount, currency)}</Text>
+                <Text style={[styles.transactionAmount, { color: item.type === 'expense' ? colors.text : colors.success }]}>{item.type === 'expense' ? '-' : '+'}{money(item.amount, item.currency)}</Text>
               </Pressable>;
             })}
           </View>
@@ -150,21 +163,23 @@ function StatisticsTab({ colors }: { colors: ThemeColors }) {
   const transactions = useAccountingStore((state) => state.transactions);
   const categories = useAccountingStore((state) => state.categories);
   const methods = useAccountingStore((state) => state.paymentMethods);
-  const currency = useAccountingStore((state) => state.currency);
+  const defaultCurrency = useAccountingStore((state) => state.currency);
+  const [currency, setCurrency] = useState(defaultCurrency);
   const [selectedMonth, setSelectedMonth] = useState(monthKey(Date.now()));
   const months = useMemo(() => Array.from({ length: 6 }, (_, index) => {
     const date = new Date(); date.setDate(1); date.setMonth(date.getMonth() - index); return monthKey(date.getTime());
   }), []);
-  const monthly = transactions.filter((item) => monthKey(item.occurredAt) === selectedMonth);
+  const monthly = transactions.filter((item) => monthKey(item.occurredAt) === selectedMonth && item.currency === currency);
   const expense = monthly.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
   const income = monthly.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
   const categoryData = categories.map((category) => ({ label: category.name, color: category.color, value: monthly.filter((item) => item.type === 'expense' && item.categoryId === category.id).reduce((sum, item) => sum + item.amount, 0) })).filter((item) => item.value > 0);
   const methodData = methods.map((method) => ({ label: method.name, color: method.color, value: monthly.filter((item) => item.type === 'expense' && item.paymentMethodId === method.id).reduce((sum, item) => sum + item.amount, 0) })).filter((item) => item.value > 0);
-  const comparison = months.slice().reverse().map((month) => ({ month, expense: transactions.filter((item) => item.type === 'expense' && monthKey(item.occurredAt) === month).reduce((sum, item) => sum + item.amount, 0), income: transactions.filter((item) => item.type === 'income' && monthKey(item.occurredAt) === month).reduce((sum, item) => sum + item.amount, 0) }));
+  const comparison = months.slice().reverse().map((month) => ({ month, expense: transactions.filter((item) => item.currency === currency && item.type === 'expense' && monthKey(item.occurredAt) === month).reduce((sum, item) => sum + item.amount, 0), income: transactions.filter((item) => item.currency === currency && item.type === 'income' && monthKey(item.occurredAt) === month).reduce((sum, item) => sum + item.amount, 0) }));
   const max = Math.max(1, ...comparison.flatMap((item) => [item.expense, item.income]));
 
   return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>{months.map((month) => <FilterChip key={month} label={`${Number(month.slice(5))}月`} active={selectedMonth === month} onPress={() => setSelectedMonth(month)} colors={colors} />)}</ScrollView>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>{CURRENCIES.map((item) => <FilterChip key={item.code} label={`${item.symbol} ${item.code}`} active={currency === item.code} onPress={() => setCurrency(item.code)} colors={colors} />)}</ScrollView>
     <View style={styles.summaryRow}><SummaryCard label="总支出" value={money(expense, currency)} color="#D46753" colors={colors} /><SummaryCard label="总收入" value={money(income, currency)} color={colors.success} colors={colors} /><SummaryCard label="金额变化" value={`${income - expense >= 0 ? '+' : '-'}${money(income - expense, currency)}`} color={income >= expense ? colors.success : '#D46753'} colors={colors} /></View>
     <ChartCard title="月度支出分类" colors={colors}><DonutChart data={categoryData} currency={currency} colors={colors} /></ChartCard>
     <ChartCard title="付款方式支出" colors={colors}><DonutChart data={methodData} currency={currency} colors={colors} /></ChartCard>
@@ -186,21 +201,21 @@ function DonutChart({ data, currency, colors }: { data: { label: string; value: 
 function BalanceSettingsTab({ colors }: { colors: ThemeColors }) {
   const methods = useAccountingStore((state) => state.paymentMethods);
   const categories = useAccountingStore((state) => state.categories);
-  const currency = useAccountingStore((state) => state.currency);
-  const setCurrency = useAccountingStore((state) => state.setCurrency);
   const removeMethod = useAccountingStore((state) => state.removePaymentMethod);
   const removeCategory = useAccountingStore((state) => state.removeCategory);
   const transactions = useAccountingStore((state) => state.transactions);
   const [methodEditor, setMethodEditor] = useState<PaymentMethod | 'new' | null>(null);
   const [categoryEditor, setCategoryEditor] = useState<AccountingCategory | 'new' | null>(null);
-  const total = methods.reduce((sum, item) => sum + item.balance, 0);
+  const totals = methods.reduce<Record<string, number>>((result, item) => {
+    result[item.currency] = (result[item.currency] || 0) + item.balance;
+    return result;
+  }, {});
   const confirmMethodDelete = (method: PaymentMethod) => transactions.some((item) => item.paymentMethodId === method.id) ? Alert.alert('无法删除', '该付款方式已有流水记录，请先删除相关流水。') : Alert.alert('删除付款方式', `确定删除「${method.name}」吗？`, [{ text: '取消' }, { text: '删除', style: 'destructive', onPress: () => removeMethod(method.id) }]);
   const confirmCategoryDelete = (category: AccountingCategory) => transactions.some((item) => item.categoryId === category.id) ? Alert.alert('无法删除', '该分类已有流水记录，请先删除相关流水。') : Alert.alert('删除分类', `确定删除「${category.name}」吗？`, [{ text: '取消' }, { text: '删除', style: 'destructive', onPress: () => removeCategory(category.id) }]);
   return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-    <View style={[styles.balanceCard, { backgroundColor: colors.primary }]}><Text style={styles.balanceLabel}>总余额</Text><Text style={styles.balanceValue}>{money(total, currency)}</Text><Text style={styles.balanceHint}>{methods.length} 个付款方式</Text></View>
-    <SettingsSection title="付款方式" onAdd={() => setMethodEditor('new')} colors={colors}>{methods.map((method) => <Pressable key={method.id} onPress={() => setMethodEditor(method)} style={[styles.settingsRow, { borderBottomColor: colors.border }]}><MethodIcon method={method} /><View style={styles.flex}><Text style={[styles.settingsName, { color: colors.text }]}>{method.name}</Text><Text style={[styles.settingsHint, { color: colors.textSecondary }]}>点击编辑余额与图标</Text></View><Text style={[styles.methodBalance, { color: colors.text }]}>{money(method.balance, currency)}</Text><Pressable hitSlop={10} onPress={() => confirmMethodDelete(method)}><Trash2 size={17} color={colors.textTertiary} /></Pressable></Pressable>)}</SettingsSection>
+    <View style={[styles.balanceCard, { backgroundColor: colors.primary }]}><Text style={styles.balanceLabel}>总余额（按币种）</Text>{Object.entries(totals).map(([code, value]) => <Text key={code} style={styles.balanceValue}>{money(value, code)}</Text>)}<Text style={styles.balanceHint}>{methods.length} 个付款方式</Text></View>
+    <SettingsSection title="付款方式" onAdd={() => setMethodEditor('new')} colors={colors}>{methods.map((method) => <Pressable key={method.id} onPress={() => setMethodEditor(method)} style={[styles.settingsRow, { borderBottomColor: colors.border }]}><MethodIcon method={method} /><View style={styles.flex}><Text style={[styles.settingsName, { color: colors.text }]}>{method.name}</Text><Text style={[styles.settingsHint, { color: colors.textSecondary }]}>{method.currency} · 点击编辑余额与图标</Text></View><Text style={[styles.methodBalance, { color: colors.text }]}>{money(method.balance, method.currency)}</Text><Pressable hitSlop={10} onPress={() => confirmMethodDelete(method)}><Trash2 size={17} color={colors.textTertiary} /></Pressable></Pressable>)}</SettingsSection>
     <SettingsSection title="分类管理" onAdd={() => setCategoryEditor('new')} colors={colors}><View style={styles.categoryGrid}>{categories.map((category) => <Pressable key={category.id} onPress={() => setCategoryEditor(category)} onLongPress={() => confirmCategoryDelete(category)} style={[styles.categoryPill, { backgroundColor: `${category.color}22`, borderColor: category.color }]}><View style={[styles.legendDot, { backgroundColor: category.color }]} /><Text style={{ color: colors.text }}>{category.name}</Text></Pressable>)}</View><Text style={[styles.longPressHint, { color: colors.textTertiary }]}>长按分类可删除</Text></SettingsSection>
-    <SettingsSection title="币种" colors={colors}>{CURRENCIES.map((item) => <Pressable key={item.code} onPress={() => setCurrency(item.code)} style={[styles.currencyRow, { borderBottomColor: colors.border }]}><Text style={[styles.currencySymbol, { color: colors.text }]}>{item.symbol}</Text><Text style={[styles.flex, { color: colors.text }]}>{item.label}（{item.code}）</Text>{currency === item.code && <View style={[styles.selectedDot, { backgroundColor: colors.primary }]} />}</Pressable>)}</SettingsSection>
     <MethodModal item={methodEditor} colors={colors} onClose={() => setMethodEditor(null)} />
     <CategoryModal item={categoryEditor} colors={colors} onClose={() => setCategoryEditor(null)} />
   </ScrollView>;
@@ -213,18 +228,21 @@ function TransactionModal({ visible, colors, onClose }: { visible: boolean; colo
   const addTransaction = useAccountingStore((state) => state.addTransaction);
   const categories = useAccountingStore((state) => state.categories);
   const methods = useAccountingStore((state) => state.paymentMethods);
-  const [type, setType] = useState<TransactionType>('expense'); const [source, setSource] = useState(''); const [amount, setAmount] = useState(''); const [categoryId, setCategoryId] = useState(''); const [methodId, setMethodId] = useState('');
+  const defaultCurrency = useAccountingStore((state) => state.currency);
+  const [type, setType] = useState<TransactionType>('expense'); const [source, setSource] = useState(''); const [amount, setAmount] = useState(''); const [categoryId, setCategoryId] = useState(''); const [methodId, setMethodId] = useState(''); const [currency, setCurrency] = useState(defaultCurrency);
   const availableCategories = categories.filter((item) => item.type === type || item.type === 'both');
-  const save = () => { const number = Number(amount); const finalCategory = availableCategories.some((item) => item.id === categoryId) ? categoryId : availableCategories[0]?.id; const finalMethod = methods.some((item) => item.id === methodId) ? methodId : methods[0]?.id; if (!source.trim() || !number || number <= 0 || !finalCategory || !finalMethod) return Alert.alert('信息不完整', '请填写来源和有效金额，并选择分类与付款方式。'); addTransaction({ type, source: source.trim(), amount: number, categoryId: finalCategory, paymentMethodId: finalMethod, occurredAt: Date.now() }); setSource(''); setAmount(''); onClose(); };
-  return <EditorModal visible={visible} title="记一笔" colors={colors} onClose={onClose} onSave={save}><View style={[styles.segment, { backgroundColor: colors.surface }]}>{(['expense', 'income'] as const).map((item) => <Pressable key={item} onPress={() => { setType(item); setCategoryId(''); }} style={[styles.segmentItem, type === item && { backgroundColor: colors.inputBackground }]}><Text style={{ color: type === item ? (item === 'expense' ? '#D46753' : colors.success) : colors.textSecondary, fontWeight: '600' }}>{item === 'expense' ? '支出' : '收入'}</Text></Pressable>)}</View><Field label={type === 'expense' ? '消费物品 / 来源' : '收入来源'} value={source} onChangeText={setSource} colors={colors} /><Field label="金额" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" colors={colors} /><PickerChips title="分类" items={availableCategories} value={categoryId || availableCategories[0]?.id} onChange={setCategoryId} colors={colors} /><PickerChips title="付款方式" items={methods} value={methodId || methods[0]?.id} onChange={setMethodId} colors={colors} /></EditorModal>;
+  const availableMethods = methods.filter((item) => item.currency === currency);
+  const save = () => { const number = Number(amount); const finalCategory = availableCategories.some((item) => item.id === categoryId) ? categoryId : availableCategories[0]?.id; const finalMethod = availableMethods.some((item) => item.id === methodId) ? methodId : availableMethods[0]?.id; if (!source.trim() || !number || number <= 0 || !finalCategory || !finalMethod) return Alert.alert('信息不完整', '请填写来源和有效金额，并选择币种、分类与付款方式。'); addTransaction({ type, source: source.trim(), amount: number, currency, categoryId: finalCategory, paymentMethodId: finalMethod, occurredAt: Date.now() }); setSource(''); setAmount(''); setMethodId(''); onClose(); };
+  return <EditorModal visible={visible} title="记一笔" colors={colors} onClose={onClose} onSave={save}><View style={[styles.segment, { backgroundColor: colors.surface }]}>{(['expense', 'income'] as const).map((item) => <Pressable key={item} onPress={() => { setType(item); setCategoryId(''); }} style={[styles.segmentItem, type === item && { backgroundColor: colors.inputBackground }]}><Text style={{ color: type === item ? (item === 'expense' ? '#D46753' : colors.success) : colors.textSecondary, fontWeight: '600' }}>{item === 'expense' ? '支出' : '收入'}</Text></Pressable>)}</View><Field label={type === 'expense' ? '消费物品 / 来源' : '收入来源'} value={source} onChangeText={setSource} colors={colors} /><Field label="金额" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" colors={colors} /><PickerChips title="币种" items={CURRENCIES.map((item) => ({ id: item.code, name: `${item.symbol} ${item.code}` }))} value={currency} onChange={(code) => { setCurrency(code); setMethodId(''); }} colors={colors} /><PickerChips title="分类" items={availableCategories} value={categoryId || availableCategories[0]?.id} onChange={setCategoryId} colors={colors} /><PickerChips title="付款方式" items={availableMethods} value={methodId || availableMethods[0]?.id} onChange={setMethodId} colors={colors} />{availableMethods.length === 0 && <Text style={{ color: colors.textSecondary }}>请先添加该币种的付款方式</Text>}</EditorModal>;
 }
 
 function MethodModal({ item, colors, onClose }: { item: PaymentMethod | 'new' | null; colors: ThemeColors; onClose: () => void }) {
-  const saveMethod = useAccountingStore((state) => state.savePaymentMethod); const existing = item && item !== 'new' ? item : null; const [name, setName] = useState(''); const [balance, setBalance] = useState(''); const [iconUri, setIconUri] = useState<string | undefined>();
+  const saveMethod = useAccountingStore((state) => state.savePaymentMethod); const transactions = useAccountingStore((state) => state.transactions); const defaultCurrency = useAccountingStore((state) => state.currency); const existing = item && item !== 'new' ? item : null; const [name, setName] = useState(''); const [balance, setBalance] = useState(''); const [iconUri, setIconUri] = useState<string | undefined>(); const [currency, setCurrency] = useState('');
   const visible = item !== null; const openPicker = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8 }); if (!result.canceled) setIconUri(result.assets[0].uri); };
   const displayName = name || existing?.name || ''; const displayBalance = balance || (existing ? String(existing.balance) : ''); const displayIcon = iconUri ?? existing?.iconUri;
-  const save = () => { if (!displayName.trim() || Number.isNaN(Number(displayBalance))) return Alert.alert('信息不完整', '请输入名称和有效余额。'); saveMethod({ id: existing?.id, name: displayName.trim(), balance: Number(displayBalance || 0), iconUri: displayIcon, color: existing?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)] }); setName(''); setBalance(''); setIconUri(undefined); onClose(); };
-  return <EditorModal visible={visible} title={existing ? '编辑付款方式' : '新增付款方式'} colors={colors} onClose={onClose} onSave={save}><Field label="名称" value={displayName} onChangeText={setName} colors={colors} /><Field label="当前余额" value={displayBalance} onChangeText={setBalance} keyboardType="decimal-pad" colors={colors} /><Pressable style={[styles.imagePicker, { borderColor: colors.border }]} onPress={openPicker}>{displayIcon ? <Image source={{ uri: displayIcon }} style={styles.pickerPreview} /> : <Camera size={24} color={colors.textSecondary} />}<Text style={{ color: colors.textSecondary }}>{displayIcon ? '更换自定义图标' : '选择自定义图标'}</Text></Pressable></EditorModal>;
+  const displayCurrency = currency || existing?.currency || defaultCurrency;
+  const save = () => { if (!displayName.trim() || Number.isNaN(Number(displayBalance))) return Alert.alert('信息不完整', '请输入名称和有效余额。'); if (existing && existing.currency !== displayCurrency && transactions.some((entry) => entry.paymentMethodId === existing.id)) return Alert.alert('无法更换币种', '该付款方式已有流水，为避免历史金额混用，请新增另一个付款方式。'); saveMethod({ id: existing?.id, name: displayName.trim(), balance: Number(displayBalance || 0), currency: displayCurrency, iconUri: displayIcon, color: existing?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)] }); setName(''); setBalance(''); setCurrency(''); setIconUri(undefined); onClose(); };
+  return <EditorModal visible={visible} title={existing ? '编辑付款方式' : '新增付款方式'} colors={colors} onClose={onClose} onSave={save}><Field label="名称" value={displayName} onChangeText={setName} colors={colors} /><Field label="当前余额" value={displayBalance} onChangeText={setBalance} keyboardType="decimal-pad" colors={colors} /><PickerChips title="币种" items={CURRENCIES.map((entry) => ({ id: entry.code, name: `${entry.symbol} ${entry.code}` }))} value={displayCurrency} onChange={setCurrency} colors={colors} /><Pressable style={[styles.imagePicker, { borderColor: colors.border }]} onPress={openPicker}>{displayIcon ? <Image source={{ uri: displayIcon }} style={styles.pickerPreview} /> : <Camera size={24} color={colors.textSecondary} />}<Text style={{ color: colors.textSecondary }}>{displayIcon ? '更换自定义图标' : '选择自定义图标'}</Text></Pressable></EditorModal>;
 }
 
 function CategoryModal({ item, colors, onClose }: { item: AccountingCategory | 'new' | null; colors: ThemeColors; onClose: () => void }) {
@@ -233,7 +251,7 @@ function CategoryModal({ item, colors, onClose }: { item: AccountingCategory | '
   return <EditorModal visible={visible} title={existing ? '编辑分类' : '新增分类'} colors={colors} onClose={onClose} onSave={save}><Field label="分类名称" value={displayName} onChangeText={setName} colors={colors} /><Text style={[styles.fieldTitle, { color: colors.textSecondary }]}>适用类型</Text><View style={styles.filterRow}>{([{ id: 'expense', name: '支出' }, { id: 'income', name: '收入' }, { id: 'both', name: '通用' }] as const).map((entry) => <FilterChip key={entry.id} label={entry.name} active={displayType === entry.id} onPress={() => { setName(displayName); setType(entry.id); }} colors={colors} />)}</View><Text style={[styles.fieldTitle, { color: colors.textSecondary }]}>颜色</Text><View style={styles.colorRow}>{PALETTE.map((entry) => <Pressable key={entry} onPress={() => { setName(displayName); setColor(entry); }} style={[styles.colorChoice, { backgroundColor: entry }, displayColor === entry && { borderColor: colors.text, borderWidth: 3 }]} />)}</View></EditorModal>;
 }
 
-function EditorModal({ visible, title, children, colors, onClose, onSave }: { visible: boolean; title: string; children: React.ReactNode; colors: ThemeColors; onClose: () => void; onSave: () => void }) { return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}><View style={styles.modalBackdrop}><View style={[styles.modalCard, { backgroundColor: colors.background }]}><View style={styles.modalHeader}><Pressable onPress={onClose}><X size={22} color={colors.text} /></Pressable><Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text><Pressable onPress={onSave}><Text style={[styles.saveText, { color: colors.primary }]}>保存</Text></Pressable></View><ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">{children}</ScrollView></View></View></Modal>; }
+function EditorModal({ visible, title, children, colors, onClose, onSave }: { visible: boolean; title: string; children: React.ReactNode; colors: ThemeColors; onClose: () => void; onSave: () => void }) { return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><View style={[styles.modalCard, { backgroundColor: colors.background }]}><View style={styles.modalHeader}><Pressable onPress={onClose}><X size={22} color={colors.text} /></Pressable><Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text><Pressable onPress={onSave}><Text style={[styles.saveText, { color: colors.primary }]}>保存</Text></Pressable></View><ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">{children}</ScrollView></View></KeyboardAvoidingView></Modal>; }
 function Field({ label, value, onChangeText, colors, keyboardType }: { label: string; value: string; onChangeText: (value: string) => void; colors: ThemeColors; keyboardType?: 'decimal-pad' }) { return <View><Text style={[styles.fieldTitle, { color: colors.textSecondary }]}>{label}</Text><TextInput value={value} onChangeText={onChangeText} keyboardType={keyboardType} placeholder={label} placeholderTextColor={colors.textTertiary} style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} /></View>; }
 function PickerChips({ title, items, value, onChange, colors }: { title: string; items: { id: string; name: string }[]; value?: string; onChange: (id: string) => void; colors: ThemeColors }) { return <View><Text style={[styles.fieldTitle, { color: colors.textSecondary }]}>{title}</Text><View style={styles.wrapRow}>{items.map((item) => <FilterChip key={item.id} label={item.name} active={value === item.id} onPress={() => onChange(item.id)} colors={colors} />)}</View></View>; }
 

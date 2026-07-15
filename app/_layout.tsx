@@ -20,6 +20,7 @@ import {
   addVoiceCallFloatingActionListener,
   hideFloatingBall,
   showVoiceCallFloatingBall,
+  showScreenCallFloatingBall,
   showFloatingBall,
 } from '../src/services/floatingBall';
 import { handleFloatingBallToolAction } from '../src/services/floatingToolActions';
@@ -66,6 +67,7 @@ export default function RootLayout() {
   );
   const voiceCallSnapshot = useVoiceCallStore((state) => state.snapshot);
   const voiceCallMinimized = useVoiceCallStore((state) => state.minimized);
+  const voiceCallMode = useVoiceCallStore((state) => state.mode);
 
   useEffect(() => {
     SplashScreen.hideAsync();
@@ -105,12 +107,14 @@ export default function RootLayout() {
   useEffect(() => {
     if (!voiceCallSnapshot.active || !voiceCallMinimized) return;
     const syncDuration = () => {
-      showVoiceCallFloatingBall(formatVoiceCallDuration(voiceCallSnapshot.startedAt)).catch(() => undefined);
+      const duration = formatVoiceCallDuration(voiceCallSnapshot.startedAt);
+      const show = voiceCallMode === 'screen' ? showScreenCallFloatingBall : showVoiceCallFloatingBall;
+      show(duration).catch(() => undefined);
     };
     syncDuration();
     const timer = setInterval(syncDuration, 1000);
     return () => clearInterval(timer);
-  }, [voiceCallMinimized, voiceCallSnapshot.active, voiceCallSnapshot.startedAt]);
+  }, [voiceCallMinimized, voiceCallMode, voiceCallSnapshot.active, voiceCallSnapshot.startedAt]);
 
   useEffect(() => {
     startDesktopLyricSync();
@@ -240,6 +244,11 @@ function IncomingVoiceCallModal() {
   const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
   const assistantName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
   const assistantAvatarUri = appearanceConfig?.assistantAvatarImageUri;
+  const incomingCallType = incomingCall?.mode === 'video'
+    ? '视频通话'
+    : incomingCall?.mode === 'screen'
+      ? '共享屏幕通话'
+      : '语音通话';
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -262,7 +271,7 @@ function IncomingVoiceCallModal() {
       await acceptIncomingCall();
       router.push('/voice-call');
     } catch (error: any) {
-      Alert.alert('语音通话启动失败', error?.message || '请检查 Deepgram 和 MiniMax 配置');
+      Alert.alert('通话启动失败', error?.message || '请检查 STT 和 TTS 配置');
     } finally {
       setBusy(false);
     }
@@ -286,7 +295,7 @@ function IncomingVoiceCallModal() {
     >
       <View style={styles.incomingCallBackdrop}>
         <View style={styles.incomingCallPanel}>
-          <Text style={styles.incomingCallStatus}>来电</Text>
+          <Text style={styles.incomingCallStatus}>{incomingCallType}来电</Text>
           <View style={styles.incomingCallAvatar}>
             {assistantAvatarUri ? (
               <Image source={{ uri: assistantAvatarUri }} style={styles.incomingCallAvatarImage} resizeMode="cover" />
@@ -296,7 +305,7 @@ function IncomingVoiceCallModal() {
           </View>
           <Text style={styles.incomingCallName} numberOfLines={1}>{assistantName}</Text>
           <Text style={styles.incomingCallHint} numberOfLines={2}>
-            {incomingCall?.reason || '想和你进行语音通话'}
+            {incomingCall?.reason || `想和你进行${incomingCallType}`}
           </Text>
           <View style={styles.incomingCallActions}>
             <Pressable

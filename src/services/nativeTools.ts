@@ -365,6 +365,11 @@ export async function readAccessibilityScreenContext(options: { includeFullTree?
   return toJson(payload);
 }
 
+export async function captureAccessibilityScreenFrame(): Promise<string | null> {
+  const context = await ensureAccessibilityScreenContext().captureScreenContext();
+  return context.imageUri || null;
+}
+
 export async function isAccessibilityControlEnabled(): Promise<boolean> {
   const module = ensureAccessibilityScreenContext();
   return await module.isAccessibilityServiceEnabled();

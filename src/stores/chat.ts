@@ -590,7 +590,7 @@ async function transcribeMessageVoice(
 
   try {
     const transcript = await transcribeVoice({
-      provider,
+      provider: provider === 'elevenlabs' ? 'openai' : provider,
       baseUrl,
       apiKey,
       uri: voice.uri,
@@ -662,6 +662,11 @@ interface ChatState {
   addSharedLinkToLatestConversation: (url: string) => Promise<string>;
   addDailyPaperToLatestConversation: (paper: DailyPaper) => Promise<string>;
   addSystemMessage: (content: string) => Promise<Message | null>;
+  addCallTranscriptMessages: (items: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    createdAt?: number;
+  }>) => Promise<Message[]>;
   enableWebCruise: () => Promise<void>;
   syncPromptCacheRemoteInbox: (options?: {
     preferredConversationId?: string | null;
@@ -2787,6 +2792,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await insertMessage(conversationId, systemMessage);
     await updateConversation(conversationId, { updatedAt: Date.now() });
     return systemMessage;
+  },
+
+  // 批量写入通话字幕，保留说话角色和顺序，但不触发新的模型回复。
+  addCallTranscriptMessages: async (items) => {
+    const normalized = items
+      .map((item) => ({ ...item, content: item.content.trim() }))
+      .filter((item) => item.content.length > 0);
+    if (normalized.length === 0) return [];
+
+    const { conversationId } = get();
+    if (!conversationId) return [];
+    const baseTime = Date.now();
+    const messages: Message[] = normalized.map((item, index) => ({
+      id: randomUUID(),
+      role: item.role,
+      content: item.content,
+      createdAt: item.createdAt ?? baseTime + index,
+    }));
+
+    set((state) => ({
+      messages: [...state.messages, ...messages],
+      error: null,
+      openToBottomRequestId: state.openToBottomRequestId + 1,
+    }));
+    for (const message of messages) {
+      await insertMessage(conversationId, message);
+    }
+    await updateConversation(conversationId, { updatedAt: Date.now() });
+    return messages;
   },
 
   // 插入一条可见系统消息，等待用户下一次点击发送时触发巡游。

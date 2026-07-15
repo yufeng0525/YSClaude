@@ -66,6 +66,8 @@ interface FloatingBallModule {
   ) => Promise<boolean>;
   hideDesktopLyric: () => Promise<boolean>;
   showVoiceCall?: (durationText: string) => Promise<boolean>;
+  showScreenCall?: (durationText: string) => Promise<boolean>;
+  showVideoCall?: (durationText: string, previewUri: string) => Promise<boolean>;
   hideVoiceCall?: () => Promise<boolean>;
   openApp: () => Promise<boolean>;
   captureScreen: () => Promise<string | null>;
@@ -263,6 +265,24 @@ export async function showVoiceCallFloatingBall(durationText = ''): Promise<void
     return;
   }
   await floatingBall.showVoiceCall(durationText);
+}
+
+export async function showScreenCallFloatingBall(durationText = ''): Promise<void> {
+  const floatingBall = ensureFloatingBall();
+  if (!floatingBall.showScreenCall) {
+    await showVoiceCallFloatingBall(durationText);
+    return;
+  }
+  await floatingBall.showScreenCall(durationText);
+}
+
+export async function showVideoCallFloatingWindow(durationText: string, previewUri: string): Promise<void> {
+  const floatingBall = ensureFloatingBall();
+  if (floatingBall.showVideoCall && previewUri) {
+    await floatingBall.showVideoCall(durationText, previewUri);
+    return;
+  }
+  await showVoiceCallFloatingBall(durationText);
 }
 
 export async function hideVoiceCallFloatingBall(): Promise<void> {

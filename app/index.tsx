@@ -71,6 +71,7 @@ import {
 } from '../src/services/promptCacheKeepalive';
 import { isAndroidVoiceCallAvailable, type VoiceCallSnapshot } from '../src/services/voiceCallSession';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
+import type { VoiceCallMode } from '../src/stores/voiceCall';
 
 
 let colors = lightColors;
@@ -431,6 +432,7 @@ export default function ChatScreen() {
   const [clawdStatusVisible, setClawdStatusVisible] = useState(false);
   const [remoteSnapshotStatus, setRemoteSnapshotStatus] = useState(() => getPromptCacheRemoteSnapshotStatus());
   const [refreshingRemoteServerStatus, setRefreshingRemoteServerStatus] = useState(false);
+  const [callTypeSheetVisible, setCallTypeSheetVisible] = useState(false);
   const voiceCallSnapshot = useVoiceCallStore((state) => state.snapshot);
   const startVoiceCall = useVoiceCallStore((state) => state.startCall);
 
@@ -757,14 +759,19 @@ export default function ChatScreen() {
       return;
     }
 
+    setCallTypeSheetVisible(true);
+  }, [router, voiceCallSnapshot.active]);
+
+  const startSelectedCall = useCallback(async (mode: VoiceCallMode) => {
+    setCallTypeSheetVisible(false);
     try {
-      await startVoiceCall();
-      showToast('语音通话已开始');
+      await startVoiceCall({ mode });
+      showToast(mode === 'video' ? '视频通话已开始' : mode === 'screen' ? '共享屏幕通话已开始' : '语音通话已开始');
       router.push('/voice-call');
     } catch (error: any) {
-      Alert.alert('语音通话启动失败', error?.message || '请检查 Deepgram 和 MiniMax 配置');
+      Alert.alert('通话启动失败', error?.message || '请检查 STT 和 TTS 配置');
     }
-  }, [router, showToast, startVoiceCall, voiceCallSnapshot.active]);
+  }, [router, showToast, startVoiceCall]);
 
   const closeClawdStatus = useCallback(() => {
     if (clawdStatusTimerRef.current !== null) {
@@ -1714,6 +1721,26 @@ export default function ChatScreen() {
         />
       </Animated.View>
 
+      <Modal visible={callTypeSheetVisible} transparent animationType="slide" onRequestClose={() => setCallTypeSheetVisible(false)}>
+        <Pressable style={styles.callSheetBackdrop} onPress={() => setCallTypeSheetVisible(false)}>
+          <View style={styles.callSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.callSheetHandle} />
+            <Text style={styles.callSheetTitle}>选择通话方式</Text>
+            {([
+              ['voice', '语音通话', '仅使用麦克风'],
+              ['video', '视频通话', '前置摄像头与语音'],
+              ['screen', '共享屏幕', '共享屏幕画面与语音'],
+            ] as const).map(([mode, title, subtitle]) => (
+              <Pressable key={mode} style={styles.callSheetOption} onPress={() => void startSelectedCall(mode)}>
+                <View style={styles.callSheetOptionIcon}><Text style={styles.callSheetOptionEmoji}>{mode === 'voice' ? '☎' : mode === 'video' ? '▣' : '▱'}</Text></View>
+                <View style={{ flex: 1 }}><Text style={styles.callSheetOptionTitle}>{title}</Text><Text style={styles.callSheetOptionSubtitle}>{subtitle}</Text></View>
+              </Pressable>
+            ))}
+            <Pressable style={styles.callSheetCancel} onPress={() => setCallTypeSheetVisible(false)}><Text style={styles.callSheetCancelText}>取消</Text></Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       {showModelSelector && (
         <ModelSelector onClose={() => setShowModelSelector(false)} />
       )}
@@ -2596,6 +2623,35 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  callSheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  callSheet: {
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: colors.background,
+  },
+  callSheetHandle: {
+    width: 38,
+    height: 5,
+    borderRadius: 3,
+    alignSelf: 'center',
+    backgroundColor: colors.border,
+    marginBottom: 14,
+  },
+  callSheetTitle: { color: colors.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },
+  callSheetOption: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 13 },
+  callSheetOptionIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryLight },
+  callSheetOptionEmoji: { color: colors.primary, fontSize: 22, fontWeight: '700' },
+  callSheetOptionTitle: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  callSheetOptionSubtitle: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
+  callSheetCancel: { height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, marginTop: 8 },
+  callSheetCancelText: { color: colors.text, fontSize: 16, fontWeight: '600' },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',

@@ -28,7 +28,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.READ_CALENDAR",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.WRITE_CALENDAR"
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.CAMERA"
       ],
       "package": "com.ysclaude.app"
     },
@@ -38,6 +39,8 @@
     },
     "plugins": [
       "expo-router",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
       "expo-splash-screen",
       "expo-sqlite",
       [
@@ -76,6 +79,13 @@
         }
       ],
       "expo-asset",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许 YSClaude 使用摄像头进行视频通话，并在每次说完后截取一帧发送给 AI。",
+          "recordAudioAndroid": false
+        }
+      ],
       [
         "expo-sharing",
         {

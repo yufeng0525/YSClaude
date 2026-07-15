@@ -260,6 +260,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const { addUserMessage } = useChatStore();
 
   // 设备原生工具本地 state
+  const [accountingEnabled, setAccountingEnabled] = useState(!!nativeToolConfig?.accountingEnabled);
   const [deviceInfoEnabled, setDeviceInfoEnabled] = useState(!!nativeToolConfig?.deviceInfoEnabled);
   const [batteryStatusEnabled, setBatteryStatusEnabled] = useState(!!nativeToolConfig?.batteryStatusEnabled);
   const [appUsageStatsEnabled, setAppUsageStatsEnabled] = useState(!!nativeToolConfig?.appUsageStatsEnabled);
@@ -331,6 +332,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   function handleNativeToolEnabledChange(
     key:
+      | 'accountingEnabled'
       | 'deviceInfoEnabled'
       | 'batteryStatusEnabled'
       | 'appUsageStatsEnabled'
@@ -340,6 +342,9 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     value: boolean
   ) {
     switch (key) {
+      case 'accountingEnabled':
+        setAccountingEnabled(value);
+        break;
       case 'deviceInfoEnabled':
         setDeviceInfoEnabled(value);
         break;
@@ -360,7 +365,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         break;
     }
     setNativeToolConfig({ [key]: value });
-    showToast(value ? '设备原生工具已开启' : '设备原生工具已关闭');
+    showToast(value ? '内置工具已开启' : '内置工具已关闭');
   }
 
   function handleSaveMemory() {
@@ -1614,6 +1619,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   function handleSaveNativeTools() {
     setNativeToolConfig({
+      accountingEnabled,
       deviceInfoEnabled,
       batteryStatusEnabled,
       appUsageStatsEnabled,
@@ -1625,6 +1631,12 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   }
 
   const nativeToolRows = [
+    {
+      label: '记账管理',
+      hint: '读取今日流水，以及新增、删除收入或支出记录',
+      value: accountingEnabled,
+      onValueChange: (value: boolean) => handleNativeToolEnabledChange('accountingEnabled', value),
+    },
     {
       label: '用户设备信息读取',
       hint: '品牌、型号、系统版本、设备类型、内存等',
@@ -1650,14 +1662,14 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       onValueChange: (value: boolean) => handleNativeToolEnabledChange('calendarEnabled', value),
     },
     {
-      label: 'AI 主动语音通话',
-      hint: '允许 AI 弹出来电界面，用户接听后进入实时语音通话',
+      label: 'AI 主动通话',
+      hint: '允许 AI 发起语音、视频或共享屏幕通话',
       value: aiVoiceCallEnabled,
       onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallEnabled', value),
     },
     {
-      label: 'AI 挂断语音通话',
-      hint: '仅在语音通话过程中提供给 AI，用于主动结束当前通话',
+      label: 'AI 主动挂断',
+      hint: '仅在通话过程中提供给 AI，用于主动结束当前通话',
       value: aiVoiceCallHangupEnabled,
       onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallHangupEnabled', value),
     },
@@ -1682,6 +1694,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const otherFeatureCards = [dailyPaperSourcesCard, locationShareCard];
 
   const builtInToolCards = [
+    { key: 'accounting', name: '记账管理', intro: '允许 AI 查看用户今日消费与收入，并新增或删除流水记录。', enabled: accountingEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('accountingEnabled', value), meta: '3 个工具' },
     { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
     { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: handleWebSearchEnabledChange, meta: '1 个工具' },
     { key: 'hotboard', name: '热榜查询', intro: '从已选择的平台列表中查询热门话题。', enabled: hbEnabled, onValueChange: handleHotboardEnabledChange, meta: hbPlatformTypes.length + ' 个平台' },
@@ -1694,8 +1707,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     { key: 'batteryStatus', name: '电池状态', intro: '读取电量、充电状态和省电模式。', enabled: batteryStatusEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('batteryStatusEnabled', value), meta: '设备原生' },
     { key: 'appUsageStats', name: '应用使用统计', intro: '在系统授权后读取 Android 应用使用时间统计。', enabled: appUsageStatsEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('appUsageStatsEnabled', value), meta: '设备原生' },
     { key: 'calendar', name: '系统日历', intro: '读取、创建、修改和删除系统日历日程。', enabled: calendarEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('calendarEnabled', value), meta: '设备原生' },
-    { key: 'aiVoiceCall', name: '主动语音通话', intro: '允许 AI 给你打实时语音电话；接听后 AI 会先开口。', enabled: aiVoiceCallEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallEnabled', value), meta: '设备原生' },
-    { key: 'aiVoiceCallHangup', name: '挂断语音通话', intro: '允许 AI 在实时语音通话过程中主动结束当前通话；未通话时不会提供这个工具。', enabled: aiVoiceCallHangupEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallHangupEnabled', value), meta: '通话中可用' },
+    { key: 'aiVoiceCall', name: '主动通话', intro: '允许 AI 发起语音、视频或共享屏幕通话；接听后 AI 会先开口。', enabled: aiVoiceCallEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallEnabled', value), meta: '设备原生' },
+    { key: 'aiVoiceCallHangup', name: '主动挂断', intro: '允许 AI 在通话过程中主动结束当前通话；未通话时不会提供这个工具。', enabled: aiVoiceCallHangupEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('aiVoiceCallHangupEnabled', value), meta: '通话中可用' },
   ];
 
   const selectedOtherFeature = otherFeatureCards.find((tool) => tool.key === selectedBuiltInToolKey) || null;
@@ -1841,6 +1854,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         style: 'destructive',
         onPress: () => {
           switch (toolKey) {
+            case 'accounting':
+              setAccountingEnabled(false);
+              setNativeToolConfig({ accountingEnabled: false });
+              break;
             case 'memoryVault':
               setMvEnabled(false);
               setMemoryVaultConfig({ enabled: false });
@@ -1934,6 +1951,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   function renderBuiltInToolEditor(toolKey: string) {
     switch (toolKey) {
+      case 'accounting':
+        return (<><Text style={styles.toolModalDescription}>AI 可以读取今天的收入与支出、可用分类和付款方式，并新增或删除流水。新增和删除会同步更新付款方式余额。</Text><View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>启用记账管理</Text><Text style={styles.hint}>关闭后 AI 无法读取或修改任何记账数据。</Text></View><Switch value={accountingEnabled} onValueChange={(value) => handleNativeToolEnabledChange('accountingEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View></>);
       case 'memoryVault':
         return (
           <>

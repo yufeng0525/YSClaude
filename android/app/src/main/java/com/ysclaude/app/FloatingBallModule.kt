@@ -502,10 +502,42 @@ class FloatingBallModule(
           promise.reject("OVERLAY_PERMISSION_REQUIRED", "Voice call overlay permission is not granted")
           return@post
         }
-        showVoiceCallFloatingInternal(durationText)
+        showVoiceCallFloatingInternal(durationText, "", false)
         promise.resolve(true)
       } catch (error: Exception) {
         promise.reject("SHOW_VOICE_CALL_FLOATING_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun showScreenCall(durationText: String, promise: Promise) {
+    mainHandler.post {
+      try {
+        if (!canDrawOverlays()) {
+          promise.reject("OVERLAY_PERMISSION_REQUIRED", "Screen call overlay permission is not granted")
+          return@post
+        }
+        showVoiceCallFloatingInternal(durationText, "", true)
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("SHOW_SCREEN_CALL_FLOATING_FAILED", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun showVideoCall(durationText: String, previewUri: String, promise: Promise) {
+    mainHandler.post {
+      try {
+        if (!canDrawOverlays()) {
+          promise.reject("OVERLAY_PERMISSION_REQUIRED", "Video call overlay permission is not granted")
+          return@post
+        }
+        showVoiceCallFloatingInternal(durationText, previewUri, false)
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("SHOW_VIDEO_CALL_FLOATING_FAILED", error)
       }
     }
   }
@@ -1180,7 +1212,7 @@ class FloatingBallModule(
     stopForegroundServiceIfNoOverlay()
   }
 
-  private fun showVoiceCallFloatingInternal(durationText: String) {
+  private fun showVoiceCallFloatingInternal(durationText: String, previewUri: String, screenShare: Boolean) {
     voiceCallFloatingDurationView?.text = durationText.ifBlank { "00:00" }
     if (voiceCallFloatingView != null) return
 
@@ -1205,14 +1237,21 @@ class FloatingBallModule(
       setPadding(dp(8), dp(9), dp(8), dp(8))
       background = roundedDrawable(Color.WHITE, dp(18))
       elevation = dp(8).toFloat()
-      addView(VoiceCallPhoneIconView(reactContext), LinearLayout.LayoutParams(dp(34), dp(34)))
+      if (previewUri.isNotBlank()) {
+        val preview = ImageView(reactContext).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        Glide.with(reactContext).load(Uri.parse(previewUri)).into(preview)
+        addView(preview, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(112)))
+      } else {
+        val iconView = if (screenShare) VoiceCallScreenShareIconView(reactContext) else VoiceCallPhoneIconView(reactContext)
+        addView(iconView, LinearLayout.LayoutParams(dp(34), dp(34)))
+      }
       addView(duration, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(22)).apply {
         topMargin = dp(4)
       })
     }
 
-    val width = dp(86)
-    val height = dp(96)
+    val width = if (previewUri.isNotBlank()) dp(100) else dp(86)
+    val height = if (previewUri.isNotBlank()) dp(154) else dp(96)
     var downRawX = 0f
     var downRawY = 0f
     var downParamX = 0
@@ -1683,6 +1722,32 @@ private class VoiceCallPhoneIconView(context: Context) : View(context) {
     canvas.translate((width - iconSize) / 2f, (height - iconSize) / 2f)
     canvas.scale(iconSize / 24f, iconSize / 24f)
     canvas.drawPath(phonePath, paint)
+    canvas.restore()
+  }
+}
+
+private class VoiceCallScreenShareIconView(context: Context) : View(context) {
+  private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.rgb(7, 193, 96)
+    style = Paint.Style.STROKE
+    strokeWidth = 1.8f
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    val iconSize = minOf(width, height).toFloat()
+    if (iconSize <= 0f) return
+    canvas.save()
+    canvas.translate((width - iconSize) / 2f, (height - iconSize) / 2f)
+    canvas.scale(iconSize / 24f, iconSize / 24f)
+    canvas.drawRoundRect(3f, 4f, 21f, 17f, 2f, 2f, paint)
+    canvas.drawLine(8f, 21f, 16f, 21f, paint)
+    canvas.drawLine(12f, 17f, 12f, 21f, paint)
+    canvas.drawLine(8f, 11f, 16f, 11f, paint)
+    canvas.drawLine(13f, 8f, 16f, 11f, paint)
+    canvas.drawLine(13f, 14f, 16f, 11f, paint)
     canvas.restore()
   }
 }

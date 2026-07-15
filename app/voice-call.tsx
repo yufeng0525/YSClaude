@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { VideoView } from '@livekit/react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -20,6 +22,7 @@ import {
   PhoneOff,
   PictureInPicture2,
   RotateCcw,
+  SwitchCamera,
   SlidersHorizontal,
   X,
   Volume2,
@@ -94,7 +97,11 @@ export default function VoiceCallScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const wasCallActiveRef = useRef(false);
+  const cameraRef = useRef<CameraView>(null);
   const [durationText, setDurationText] = useState('00:00');
+  const [cameraExpanded, setCameraExpanded] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [tuningOpen, setTuningOpen] = useState(false);
   const snapshot = useVoiceCallStore((state) => state.snapshot);
   const starting = useVoiceCallStore((state) => state.starting);
@@ -104,11 +111,21 @@ export default function VoiceCallScreen() {
   const setSpeakerphoneOn = useVoiceCallStore((state) => state.setSpeakerphoneOn);
   const minimizeToFloatingBall = useVoiceCallStore((state) => state.minimizeToFloatingBall);
   const restoreFromFloatingBall = useVoiceCallStore((state) => state.restoreFromFloatingBall);
+  const mode = useVoiceCallStore((state) => state.mode);
+  const cameraFacing = useVoiceCallStore((state) => state.cameraFacing);
+  const setCameraFacing = useVoiceCallStore((state) => state.setCameraFacing);
+  const localVideoTrack = useVoiceCallStore((state) => state.localVideoTrack);
+  const setVisualFrameProvider = useVoiceCallStore((state) => state.setVisualFrameProvider);
   const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
   const voiceCallTuningConfig = useSettingsStore((state) => state.voiceCallTuningConfig);
+  const isLiveKit = useSettingsStore((state) => state.voiceCallEngine === 'livekit');
   const setVoiceCallTuningConfig = useSettingsStore((state) => state.setVoiceCallTuningConfig);
   const assistantName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
   const assistantAvatarUri = appearanceConfig?.assistantAvatarImageUri;
+  const callBackgroundUri = useSettingsStore((state) => state.voiceCallBackgroundImageUri);
+  // Screen sharing captures the device in the background, but keeps the same
+  // on-screen layout as a voice call. Only camera video uses the visual layout.
+  const isVisualCall = mode === 'video';
   const hasCallError = !!snapshot.error || snapshot.status === 'error';
   const canHangup = snapshot.active || hasCallError;
 
@@ -135,6 +152,34 @@ export default function VoiceCallScreen() {
   }, [restoreFromFloatingBall]);
 
   useEffect(() => {
+    if (wasCallActiveRef.current && !snapshot.active) {
+      router.replace('/');
+    }
+    wasCallActiveRef.current = snapshot.active;
+  }, [router, snapshot.active]);
+
+  useEffect(() => {
+    if (!isLiveKit && mode === 'video' && !cameraPermission?.granted) {
+      requestCameraPermission().catch(() => undefined);
+    }
+  }, [cameraPermission?.granted, isLiveKit, mode, requestCameraPermission]);
+
+  useEffect(() => {
+    // Screen sharing owns its frame provider at session level so minimizing to the
+    // floating ball does not clear it when this screen unmounts.
+    if (isLiveKit || mode === 'screen') return;
+    if (!snapshot.active || mode === 'voice') {
+      setVisualFrameProvider(null);
+      return;
+    }
+    setVisualFrameProvider(async () => {
+      const picture = await cameraRef.current?.takePictureAsync({ quality: 0.72, skipProcessing: false });
+      return picture?.uri || null;
+    });
+    return () => setVisualFrameProvider(null);
+  }, [isLiveKit, mode, setVisualFrameProvider, snapshot.active]);
+
+  useEffect(() => {
     setDurationText(formatDuration(snapshot.startedAt));
     const timer = setInterval(() => {
       setDurationText(formatDuration(snapshot.startedAt));
@@ -151,7 +196,9 @@ export default function VoiceCallScreen() {
 
   const handleMinimize = async () => {
     try {
-      await minimizeToFloatingBall(durationText);
+      // The minimized video window is an AI portrait, not a live camera preview.
+      // Always use the configured call background and never take a photo here.
+      await minimizeToFloatingBall(durationText, mode === 'video' ? callBackgroundUri : undefined);
       if (router.canGoBack()) {
         router.back();
       } else {
@@ -168,6 +215,14 @@ export default function VoiceCallScreen() {
       router.back();
     } else {
       router.replace('/');
+    }
+  };
+
+  const handleSwitchCamera = async () => {
+    try {
+      await setCameraFacing(cameraFacing === 'front' ? 'back' : 'front');
+    } catch (error: any) {
+      Alert.alert('切换摄像头失败', error?.message || '无法切换前后置摄像头');
     }
   };
 
@@ -189,14 +244,72 @@ export default function VoiceCallScreen() {
         style={StyleSheet.absoluteFill}
       />
 
+      {isVisualCall && callBackgroundUri && !cameraExpanded && (
+        <Image source={{ uri: callBackgroundUri }} style={styles.visualBackground} resizeMode="cover" />
+      )}
+      {!isLiveKit && mode === 'video' && cameraPermission?.granted && cameraExpanded && (
+        <CameraView
+          ref={cameraRef}
+          style={styles.visualBackground}
+          facing={cameraFacing}
+          mirror={cameraFacing === 'front'}
+          flash="off"
+          enableTorch={false}
+        />
+      )}
+      {isLiveKit && mode === 'video' && localVideoTrack && cameraExpanded && (
+        <VideoView
+          style={styles.visualBackground}
+          videoTrack={localVideoTrack}
+          objectFit="cover"
+          mirror={cameraFacing === 'front'}
+        />
+      )}
       <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
         <Pressable style={styles.pipButton} onPress={handleMinimize} disabled={!snapshot.active}>
           <PictureInPicture2 size={27} color="rgba(255,255,255,0.78)" strokeWidth={1.7} />
         </Pressable>
-        <Pressable style={styles.tuningButton} onPress={() => setTuningOpen(true)}>
-          <SlidersHorizontal size={24} color="rgba(255,255,255,0.82)" strokeWidth={1.9} />
+        <Pressable style={styles.tuningButton} onPress={() => mode === 'video' ? void handleSwitchCamera() : setTuningOpen(true)}>
+          {mode === 'video' ? (
+            <SwitchCamera size={25} color="rgba(255,255,255,0.9)" strokeWidth={1.9} />
+          ) : (
+            <SlidersHorizontal size={24} color="rgba(255,255,255,0.82)" strokeWidth={1.9} />
+          )}
         </Pressable>
       </View>
+
+      {!isLiveKit && mode === 'video' && cameraPermission?.granted && !cameraExpanded && (
+        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(true)}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing={cameraFacing}
+            mirror={cameraFacing === 'front'}
+            flash="off"
+            enableTorch={false}
+          />
+        </Pressable>
+      )}
+      {isLiveKit && mode === 'video' && localVideoTrack && !cameraExpanded && (
+        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(true)}>
+          <VideoView
+            style={StyleSheet.absoluteFill}
+            videoTrack={localVideoTrack}
+            objectFit="cover"
+            mirror={cameraFacing === 'front'}
+          />
+        </Pressable>
+      )}
+      {!isLiveKit && mode === 'video' && cameraExpanded && callBackgroundUri && (
+        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(false)}>
+          <Image source={{ uri: callBackgroundUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        </Pressable>
+      )}
+      {isLiveKit && mode === 'video' && cameraExpanded && callBackgroundUri && (
+        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(false)}>
+          <Image source={{ uri: callBackgroundUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        </Pressable>
+      )}
 
       <VoiceTuningModal
         visible={tuningOpen}
@@ -206,7 +319,7 @@ export default function VoiceCallScreen() {
         onReset={() => setVoiceCallTuningConfig(createDefaultVoiceCallTuningConfig())}
       />
 
-      <View style={styles.profileSection}>
+      {!isVisualCall && <View style={styles.profileSection}>
         <View style={styles.avatar}>
           {assistantAvatarUri ? (
             <Image source={{ uri: assistantAvatarUri }} style={styles.avatarImage} resizeMode="cover" />
@@ -216,8 +329,9 @@ export default function VoiceCallScreen() {
         </View>
         <Text style={styles.nickname} numberOfLines={1}>{assistantName}</Text>
         <Text style={styles.duration}>{durationText}</Text>
-      </View>
+      </View>}
 
+      <View style={[styles.transcriptShade, isVisualCall && styles.transcriptShadeVisual]}>
       <ScrollView
         ref={scrollRef}
         style={styles.transcript}
@@ -235,7 +349,14 @@ export default function VoiceCallScreen() {
             const isAssistant = item.speaker === 'assistant';
             const active = item.id === 'partial' || item.id === 'speaking';
             return (
-              <View key={item.id} style={styles.transcriptItem}>
+              <View
+                key={item.id}
+                style={[
+                  styles.transcriptItem,
+                  isVisualCall && styles.transcriptBubble,
+                  isVisualCall && (isAssistant ? styles.aiTranscriptBubble : styles.userTranscriptBubble),
+                ]}
+              >
                 <Text style={[styles.speaker, isAssistant && styles.aiSpeaker]}>
                   {isAssistant ? assistantName : '我'}
                 </Text>
@@ -248,6 +369,7 @@ export default function VoiceCallScreen() {
           })
         )}
       </ScrollView>
+      </View>
 
       <Text style={[styles.statusText, snapshot.error && styles.errorText]} numberOfLines={2}>
         {formatStatus(snapshot.status, snapshot.error)}
@@ -421,6 +543,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1a1a1a',
   },
+  visualBackground: {
+    position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+  },
+  cameraWindow: {
+    position: 'absolute',
+    right: 16,
+    width: 112,
+    height: 160,
+    borderRadius: 12,
+    overflow: 'hidden',
+    zIndex: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: '#111',
+  },
   topBar: {
     paddingHorizontal: 16,
     minHeight: 56,
@@ -480,6 +617,15 @@ const styles = StyleSheet.create({
     minHeight: 0,
     marginTop: 10,
   },
+  transcriptShade: {
+    flex: 1,
+    minHeight: 0,
+  },
+  transcriptShadeVisual: {
+    flex: 0,
+    height: '34%',
+    marginTop: 'auto',
+  },
   transcriptContent: {
     paddingHorizontal: 20,
     paddingVertical: 24,
@@ -497,6 +643,24 @@ const styles = StyleSheet.create({
   },
   transcriptItem: {
     gap: 4,
+  },
+  transcriptBubble: {
+    maxWidth: '84%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  aiTranscriptBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(20,24,30,0.72)',
+    borderBottomLeftRadius: 5,
+  },
+  userTranscriptBubble: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(42,91,132,0.76)',
+    borderBottomRightRadius: 5,
   },
   speaker: {
     color: '#888888',

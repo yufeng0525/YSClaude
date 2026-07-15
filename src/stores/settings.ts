@@ -74,7 +74,7 @@ export type { PromptCacheCompatibility, PromptCacheTtl, ThinkingCompatibility, T
 // HiddenRange 已迁移到 src/types，这里 re-export 保持旧的 import 路径兼容。
 export type { HiddenRange } from '../types';
 
-export type TTSProvider = 'minimax' | 'fish' | 'deepgram' | 'cartesia';
+export type TTSProvider = 'minimax' | 'fish' | 'deepgram' | 'cartesia' | 'elevenlabs';
 
 export interface TTSConfig {
   provider: TTSProvider;
@@ -102,9 +102,19 @@ export interface TTSConfig {
   cartesiaLanguage: string;
   cartesiaSpeed: number;
   cartesiaVolume: number;
+  elevenLabsTokenEndpoint: string;
+  elevenLabsVoiceId: string;
+  elevenLabsLanguage: string;
 }
 
-export type STTProvider = 'openai' | 'fish' | 'deepgram' | 'aliyun';
+export type STTProvider = 'openai' | 'fish' | 'deepgram' | 'aliyun' | 'elevenlabs';
+
+export type VoiceCallEngine = 'local' | 'livekit' | 'elevenlabs';
+
+export interface LiveKitVoiceCallConfig {
+  brainUrl: string;
+  accessToken: string;
+}
 
 export interface STTConfig {
   provider: STTProvider;
@@ -263,6 +273,7 @@ export interface QQBotConfig {
 }
 
 export interface NativeToolConfig {
+  accountingEnabled?: boolean;
   deviceInfoEnabled: boolean;
   batteryStatusEnabled: boolean;
   appUsageStatsEnabled: boolean;
@@ -565,7 +576,7 @@ function normalizeImageGenerationConfig(config?: Partial<ImageGenerationConfig>)
 
 function normalizeSTTConfig(config?: Partial<STTConfig>): STTConfig {
   const provider =
-    config?.provider === 'fish' || config?.provider === 'deepgram' || config?.provider === 'aliyun'
+    config?.provider === 'fish' || config?.provider === 'deepgram' || config?.provider === 'aliyun' || config?.provider === 'elevenlabs'
       ? config.provider
       : 'openai';
   return {
@@ -647,7 +658,7 @@ function normalizeVoiceCallTuningConfig(config?: Partial<VoiceCallTuningConfig>)
 
 function normalizeTTSConfig(config?: Partial<TTSConfig>): TTSConfig {
   const provider =
-    config?.provider === 'fish' || config?.provider === 'deepgram' || config?.provider === 'cartesia'
+    config?.provider === 'fish' || config?.provider === 'deepgram' || config?.provider === 'cartesia' || config?.provider === 'elevenlabs'
       ? config.provider
       : 'minimax';
   return {
@@ -679,6 +690,9 @@ function normalizeTTSConfig(config?: Partial<TTSConfig>): TTSConfig {
     cartesiaLanguage: config?.cartesiaLanguage || 'zh',
     cartesiaSpeed: config?.cartesiaSpeed ?? 1,
     cartesiaVolume: config?.cartesiaVolume ?? 1,
+    elevenLabsTokenEndpoint: config?.elevenLabsTokenEndpoint || '',
+    elevenLabsVoiceId: config?.elevenLabsVoiceId || '',
+    elevenLabsLanguage: config?.elevenLabsLanguage || 'zh',
   };
 }
 
@@ -843,7 +857,12 @@ interface SettingsState {
   stripThinking: boolean;
   ttsConfig: TTSConfig;
   sttConfig: STTConfig;
+  voiceCallTTSProvider: TTSProvider;
+  voiceCallSTTProvider: STTProvider;
+  voiceCallEngine: VoiceCallEngine;
+  liveKitVoiceCallConfig: LiveKitVoiceCallConfig;
   voiceCallTuningConfig: VoiceCallTuningConfig;
+  voiceCallBackgroundImageUri?: string;
   memoryVaultConfig: MemoryVaultConfig;
   webSearchConfig: WebSearchConfig;
   webInteractionConfig: WebInteractionConfig;
@@ -880,7 +899,12 @@ interface SettingsState {
   setStripThinking: (value: boolean) => void;
   setTTSConfig: (config: Partial<TTSConfig>) => void;
   setSTTConfig: (config: Partial<STTConfig>) => void;
+  setVoiceCallTTSProvider: (provider: TTSProvider) => void;
+  setVoiceCallSTTProvider: (provider: STTProvider) => void;
+  setVoiceCallEngine: (engine: VoiceCallEngine) => void;
+  setLiveKitVoiceCallConfig: (config: Partial<LiveKitVoiceCallConfig>) => void;
   setVoiceCallTuningConfig: (config: Partial<VoiceCallTuningConfig>) => void;
+  setVoiceCallBackgroundImageUri: (uri?: string) => void;
   setMemoryVaultConfig: (config: Partial<MemoryVaultConfig>) => void;
   setWebSearchConfig: (config: Partial<WebSearchConfig>) => void;
   setWebInteractionConfig: (config: Partial<WebInteractionConfig>) => void;
@@ -940,7 +964,12 @@ export const useSettingsStore = create<SettingsState>()(
       stripThinking: false,
       ttsConfig: normalizeTTSConfig(),
       sttConfig: normalizeSTTConfig(),
+      voiceCallTTSProvider: 'minimax',
+      voiceCallSTTProvider: 'deepgram',
+      voiceCallEngine: 'local',
+      liveKitVoiceCallConfig: { brainUrl: '', accessToken: '' },
       voiceCallTuningConfig: createDefaultVoiceCallTuningConfig(),
+      voiceCallBackgroundImageUri: undefined,
       memoryVaultConfig: {
         enabled: false,
         baseUrl: '',
@@ -1035,6 +1064,7 @@ export const useSettingsStore = create<SettingsState>()(
         wechatBaseUrl: '',
       },
       nativeToolConfig: {
+        accountingEnabled: false,
         deviceInfoEnabled: false,
         batteryStatusEnabled: false,
         appUsageStatsEnabled: false,
@@ -1167,6 +1197,11 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ ttsConfig: normalizeTTSConfig({ ...state.ttsConfig, ...config }) })),
       setSTTConfig: (config) =>
         set((state) => ({ sttConfig: normalizeSTTConfig({ ...state.sttConfig, ...config }) })),
+      setVoiceCallTTSProvider: (provider) => set({ voiceCallTTSProvider: provider }),
+      setVoiceCallSTTProvider: (provider) => set({ voiceCallSTTProvider: provider }),
+      setVoiceCallEngine: (engine) => set({ voiceCallEngine: engine }),
+      setLiveKitVoiceCallConfig: (config) =>
+        set((state) => ({ liveKitVoiceCallConfig: { ...state.liveKitVoiceCallConfig, ...config } })),
       setVoiceCallTuningConfig: (config) =>
         set((state) => ({
           voiceCallTuningConfig: normalizeVoiceCallTuningConfig({
@@ -1174,6 +1209,7 @@ export const useSettingsStore = create<SettingsState>()(
             ...config,
           }),
         })),
+      setVoiceCallBackgroundImageUri: (uri) => set({ voiceCallBackgroundImageUri: uri }),
       setMemoryVaultConfig: (config) =>
         set((state) => ({ memoryVaultConfig: { ...state.memoryVaultConfig, ...config } })),
       setWebSearchConfig: (config) =>
@@ -1523,6 +1559,18 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'ysclaude-settings',
       storage: createJSONStorage(() => sqliteStorage),
+      merge: (persistedState, currentState) => {
+        const saved = (persistedState || {}) as Partial<SettingsState>;
+        return {
+          ...currentState,
+          ...saved,
+          // On the first upgrade, preserve the old shared provider choice for calls.
+          voiceCallTTSProvider: saved.voiceCallTTSProvider || saved.ttsConfig?.provider || currentState.voiceCallTTSProvider,
+          voiceCallSTTProvider: saved.voiceCallSTTProvider || saved.sttConfig?.provider || currentState.voiceCallSTTProvider,
+          voiceCallEngine: saved.voiceCallEngine || currentState.voiceCallEngine,
+          liveKitVoiceCallConfig: { ...currentState.liveKitVoiceCallConfig, ...saved.liveKitVoiceCallConfig },
+        };
+      },
       partialize: (state) => ({
         apiConfigs: state.apiConfigs,
         activeConfigIndex: state.activeConfigIndex,
@@ -1534,7 +1582,12 @@ export const useSettingsStore = create<SettingsState>()(
         stripThinking: state.stripThinking,
         ttsConfig: state.ttsConfig,
         sttConfig: state.sttConfig,
+        voiceCallTTSProvider: state.voiceCallTTSProvider,
+        voiceCallSTTProvider: state.voiceCallSTTProvider,
+        voiceCallEngine: state.voiceCallEngine,
+        liveKitVoiceCallConfig: state.liveKitVoiceCallConfig,
         voiceCallTuningConfig: state.voiceCallTuningConfig,
+        voiceCallBackgroundImageUri: state.voiceCallBackgroundImageUri,
         memoryVaultConfig: state.memoryVaultConfig,
         webSearchConfig: state.webSearchConfig,
         webInteractionConfig: state.webInteractionConfig,
@@ -1578,8 +1631,16 @@ export const useSettingsStore = create<SettingsState>()(
           promptCacheConfig: normalizePromptCacheConfig(state?.promptCacheConfig),
           ttsConfig: normalizeTTSConfig(state?.ttsConfig),
           sttConfig: normalizeSTTConfig(state?.sttConfig),
+          voiceCallTTSProvider: state?.voiceCallTTSProvider || state?.ttsConfig?.provider || 'minimax',
+          voiceCallSTTProvider: state?.voiceCallSTTProvider || state?.sttConfig?.provider || 'deepgram',
+          voiceCallEngine: state?.voiceCallEngine || 'local',
+          liveKitVoiceCallConfig: {
+            brainUrl: state?.liveKitVoiceCallConfig?.brainUrl || '',
+            accessToken: state?.liveKitVoiceCallConfig?.accessToken || '',
+          },
           voiceCallTuningConfig: normalizeVoiceCallTuningConfig(state?.voiceCallTuningConfig),
           nativeToolConfig: {
+            accountingEnabled: state?.nativeToolConfig?.accountingEnabled ?? false,
             deviceInfoEnabled: state?.nativeToolConfig?.deviceInfoEnabled ?? false,
             batteryStatusEnabled: state?.nativeToolConfig?.batteryStatusEnabled ?? false,
             appUsageStatsEnabled: state?.nativeToolConfig?.appUsageStatsEnabled ?? false,
@@ -1601,3 +1662,14 @@ export const useSettingsStore = create<SettingsState>()(
     }
   )
 );
+
+/** Shared provider credentials with the provider selected specifically for realtime calls. */
+export function getVoiceCallTTSConfig(): TTSConfig {
+  const state = useSettingsStore.getState();
+  return { ...state.ttsConfig, provider: state.voiceCallTTSProvider };
+}
+
+export function getVoiceCallSTTConfig(): STTConfig {
+  const state = useSettingsStore.getState();
+  return { ...state.sttConfig, provider: state.voiceCallSTTProvider };
+}

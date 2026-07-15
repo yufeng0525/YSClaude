@@ -33,6 +33,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.ArrayDeque
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
@@ -42,6 +43,12 @@ import kotlin.math.sqrt
 class VoiceCallAudioModule(
   private val reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
+  private data class PcmQueueItem(
+    val generation: Long,
+    val bytes: ByteArray? = null,
+    val finish: Boolean = false
+  )
+
   companion object {
     private const val PLAYBACK_START_GUARD_MS = 120L
     private const val BARGE_IN_PREROLL_MS = 320
@@ -65,9 +72,12 @@ class VoiceCallAudioModule(
   private val micSuppressedUntilMs = AtomicLong(0)
   private val bargeInTriggered = AtomicBoolean(false)
   private val mp3Queue = LinkedBlockingQueue<ByteArray>()
+  private val pcmQueue = LinkedBlockingQueue<PcmQueueItem>()
+  private val pcmGeneration = AtomicLong(0)
 
   private var micThread: Thread? = null
   private var decoderThread: Thread? = null
+  private var pcmWriterThread: Thread? = null
   private var audioRecord: AudioRecord? = null
   private var audioTrack: AudioTrack? = null
   private var decoder: MediaCodec? = null
@@ -285,6 +295,9 @@ class VoiceCallAudioModule(
       decoderThread = thread(name = "VoiceCallMp3Decoder") {
         decodeMp3Loop(codec, track)
       }
+      pcmWriterThread = thread(name = "VoiceCallPcmWriter") {
+        writePcmLoop(track)
+      }
       promise.resolve(true)
     } catch (error: Exception) {
       cleanupSpeaker()
@@ -368,13 +381,7 @@ class VoiceCallAudioModule(
     try {
       val bytes = Base64.decode(base64, Base64.DEFAULT)
       if (bytes.isNotEmpty()) {
-        if (!pcmPlaybackActive || playbackGateStartedAtMs == 0L) {
-          beginPlaybackGate()
-          pcmPlaybackActive = true
-        }
-        emitPlaybackState(true)
-        audioTrack?.write(bytes, 0, bytes.size)
-        suppressMicForPlayback()
+        pcmQueue.offer(PcmQueueItem(pcmGeneration.get(), bytes = bytes))
       }
       promise.resolve(true)
     } catch (error: Exception) {
@@ -385,10 +392,7 @@ class VoiceCallAudioModule(
   @ReactMethod
   fun finishPcmPlayback(promise: Promise) {
     try {
-      pcmPlaybackActive = false
-      suppressMicAfterPlayback()
-      endPlaybackGate()
-      emitPlaybackState(false)
+      pcmQueue.offer(PcmQueueItem(pcmGeneration.get(), finish = true))
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("VOICE_CALL_AUDIO_FINISH_PCM", error)
@@ -425,16 +429,62 @@ class VoiceCallAudioModule(
 
   @ReactMethod
   fun clearSpeaker(promise: Promise) {
+    pcmGeneration.incrementAndGet()
+    pcmQueue.clear()
     mp3Queue.clear()
     pcmPlaybackActive = false
-    clearClipQueue()
     try {
       audioTrack?.pause()
       audioTrack?.flush()
       audioTrack?.play()
     } catch (_: Exception) {
     }
-    promise.resolve(true)
+    // Resolve only after the MediaPlayer queue is cleared on the main thread.
+    // The replacement generation starts writing after this promise resolves, so
+    // this callback cannot reset the playback gate for newly queued PCM.
+    clearClipQueue { promise.resolve(true) }
+  }
+
+  private fun writePcmLoop(track: AudioTrack) {
+    while (speakerRunning.get()) {
+      val item = try {
+        pcmQueue.poll(250, TimeUnit.MILLISECONDS) ?: continue
+      } catch (_: InterruptedException) {
+        break
+      }
+      if (item.generation != pcmGeneration.get()) continue
+      if (item.finish) {
+        finishPcmGeneration(item.generation)
+        continue
+      }
+      val bytes = item.bytes ?: continue
+      if (!pcmPlaybackActive || playbackGateStartedAtMs == 0L) {
+        beginPlaybackGate()
+        pcmPlaybackActive = true
+      }
+      emitPlaybackState(true)
+      try {
+        track.write(bytes, 0, bytes.size)
+      } catch (_: Exception) {
+        if (speakerRunning.get() && item.generation == pcmGeneration.get()) {
+          sendEvent(
+            "VoiceCallAudioError",
+            Arguments.createMap().apply { putString("message", "PCM playback failed") }
+          )
+        }
+      }
+      if (item.generation == pcmGeneration.get()) {
+        suppressMicForPlayback()
+      }
+    }
+  }
+
+  private fun finishPcmGeneration(generation: Long) {
+    if (generation != pcmGeneration.get()) return
+    pcmPlaybackActive = false
+    suppressMicAfterPlayback()
+    endPlaybackGate()
+    emitPlaybackState(false)
   }
 
   @ReactMethod
@@ -625,7 +675,7 @@ class VoiceCallAudioModule(
     }
   }
 
-  private fun clearClipQueue() {
+  private fun clearClipQueue(onCleared: (() -> Unit)? = null) {
     mainHandler.post {
       finishCurrentClip()
       synchronized(clipLock) {
@@ -635,6 +685,7 @@ class VoiceCallAudioModule(
       }
       endPlaybackGate()
       emitPlaybackState(false)
+      onCleared?.invoke()
     }
   }
 
@@ -1073,8 +1124,18 @@ class VoiceCallAudioModule(
 
   private fun cleanupSpeaker() {
     speakerRunning.set(false)
+    pcmGeneration.incrementAndGet()
+    pcmQueue.clear()
     mp3Queue.clear()
     clearClipQueue()
+    pcmWriterThread?.interrupt()
+    try {
+      audioTrack?.pause()
+      audioTrack?.flush()
+    } catch (_: Exception) {
+    }
+    pcmWriterThread?.join(300)
+    pcmWriterThread = null
     decoderThread?.join(300)
     decoderThread = null
     try {
@@ -1083,11 +1144,6 @@ class VoiceCallAudioModule(
     }
     decoder?.release()
     decoder = null
-    try {
-      audioTrack?.pause()
-      audioTrack?.flush()
-    } catch (_: Exception) {
-    }
     audioTrack?.release()
     audioTrack = null
   }
