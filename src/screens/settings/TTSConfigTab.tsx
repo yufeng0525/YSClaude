@@ -416,7 +416,6 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
         <Text style={styles.label}>通话引擎</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configList}>
           {([
-            ['local', '本机级联'],
             ['livekit', 'LiveKit Agents'],
             ['elevenlabs', 'ElevenLabs'],
           ] as Array<[VoiceCallEngine, string]>).map(([engine, label]) => (

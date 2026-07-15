@@ -1,6 +1,6 @@
 import { AudioSession, registerGlobals } from '@livekit/react-native';
 import { requestRecordingPermissionsAsync } from 'expo-audio';
-import { Camera } from 'expo-camera';
+import { PermissionsAndroid, Platform } from 'react-native';
 import {
   Room,
   RoomEvent,
@@ -68,10 +68,6 @@ export class LiveKitVoiceCallSession {
     return { remove: () => this.listeners.delete(listener) };
   }
 
-  setVisualFrameProvider(): void {
-    // LiveKit 模式直接发布连续视频轨道，不使用本地定时截图 provider。
-  }
-
   setLocalVideoTrackListener(listener: ((track: LocalVideoTrack | null) => void) | null): void {
     this.localVideoTrackListener = listener;
     const track = this.room?.localParticipant
@@ -84,8 +80,10 @@ export class LiveKitVoiceCallSession {
     const permission = await requestRecordingPermissionsAsync();
     if (!permission.granted) throw new Error('请先允许麦克风权限');
     if (this.mode === 'video') {
-      const cameraPermission = await Camera.requestCameraPermissionsAsync();
-      if (!cameraPermission.granted) throw new Error('请先允许摄像头权限');
+      const cameraPermission = Platform.OS !== 'android'
+        || await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA)
+          === PermissionsAndroid.RESULTS.GRANTED;
+      if (!cameraPermission) throw new Error('请先允许摄像头权限');
     }
 
     const settings = useSettingsStore.getState();

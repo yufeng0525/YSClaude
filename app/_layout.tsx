@@ -31,7 +31,7 @@ import { useChatStore } from '../src/stores/chat';
 import { cleanupExpiredVoiceFiles } from '../src/services/voiceFiles';
 import { syncTodayWidget } from '../src/services/todayWidget';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
-import { startIncomingCallRingtone, stopIncomingCallRingtone } from '../src/services/androidVoiceCallAudio';
+import { startIncomingCallRingtone, stopIncomingCallRingtone } from '../src/services/incomingCallRingtone';
 
 
 SplashScreen.preventAutoHideAsync();

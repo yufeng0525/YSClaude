@@ -109,7 +109,7 @@ export interface TTSConfig {
 
 export type STTProvider = 'openai' | 'fish' | 'deepgram' | 'aliyun' | 'elevenlabs';
 
-export type VoiceCallEngine = 'local' | 'livekit' | 'elevenlabs';
+export type VoiceCallEngine = 'livekit' | 'elevenlabs';
 
 export interface LiveKitVoiceCallConfig {
   brainUrl: string;
@@ -134,29 +134,6 @@ export interface STTConfig {
   aliyunModel: string;
   aliyunLanguage: string;
   aliyunSemanticVad: boolean;
-}
-
-export interface VoiceCallTuningConfig {
-  aliyunUserTurnGraceMs: number;
-  aliyunPendingFlushMs: number;
-  aliyunInterimOnlyFlushGraceMs: number;
-  playbackRecognitionSuppressMs: number;
-  deferredBargeInVolume: number;
-  deferredBargeInMaxMs: number;
-  userTurnRecentAudioHoldMs: number;
-  bargeInMinSpeechMs: number;
-  bargeInRmsFloor: number;
-  bargeInEchoMultiplier: number;
-  bargeInPeakThreshold: number;
-  bargeInClearPeakThreshold: number;
-  bargeInClearRmsThreshold: number;
-  playbackMicSuppressMs: number;
-  afterPlaybackSuppressMs: number;
-  micStartMinSpeechMs: number;
-  micEndSilenceMs: number;
-  micTrailingAudioMs: number;
-  micMinStartRms: number;
-  micMinActiveRms: number;
 }
 
 export interface MemoryVaultConfig {
@@ -605,57 +582,6 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, numeric));
 }
 
-export function createDefaultVoiceCallTuningConfig(): VoiceCallTuningConfig {
-  return {
-    aliyunUserTurnGraceMs: 700,
-    aliyunPendingFlushMs: 800,
-    aliyunInterimOnlyFlushGraceMs: 2600,
-    playbackRecognitionSuppressMs: 900,
-    deferredBargeInVolume: 0.32,
-    deferredBargeInMaxMs: 20000,
-    userTurnRecentAudioHoldMs: 520,
-    bargeInMinSpeechMs: 20,
-    bargeInRmsFloor: 180,
-    bargeInEchoMultiplier: 0.38,
-    bargeInPeakThreshold: 380,
-    bargeInClearPeakThreshold: 1600,
-    bargeInClearRmsThreshold: 160,
-    playbackMicSuppressMs: 1000,
-    afterPlaybackSuppressMs: 900,
-    micStartMinSpeechMs: 40,
-    micEndSilenceMs: 1320,
-    micTrailingAudioMs: 1260,
-    micMinStartRms: 280,
-    micMinActiveRms: 200,
-  };
-}
-
-function normalizeVoiceCallTuningConfig(config?: Partial<VoiceCallTuningConfig>): VoiceCallTuningConfig {
-  const defaults = createDefaultVoiceCallTuningConfig();
-  return {
-    aliyunUserTurnGraceMs: Math.round(clampNumber(config?.aliyunUserTurnGraceMs, defaults.aliyunUserTurnGraceMs, 100, 4000)),
-    aliyunPendingFlushMs: Math.round(clampNumber(config?.aliyunPendingFlushMs, defaults.aliyunPendingFlushMs, 100, 4000)),
-    aliyunInterimOnlyFlushGraceMs: Math.round(clampNumber(config?.aliyunInterimOnlyFlushGraceMs, defaults.aliyunInterimOnlyFlushGraceMs, 300, 8000)),
-    playbackRecognitionSuppressMs: Math.round(clampNumber(config?.playbackRecognitionSuppressMs, defaults.playbackRecognitionSuppressMs, 0, 3000)),
-    deferredBargeInVolume: clampNumber(config?.deferredBargeInVolume, defaults.deferredBargeInVolume, 0, 1),
-    deferredBargeInMaxMs: Math.round(clampNumber(config?.deferredBargeInMaxMs, defaults.deferredBargeInMaxMs, 2000, 60000)),
-    userTurnRecentAudioHoldMs: Math.round(clampNumber(config?.userTurnRecentAudioHoldMs, defaults.userTurnRecentAudioHoldMs, 0, 2000)),
-    bargeInMinSpeechMs: Math.round(clampNumber(config?.bargeInMinSpeechMs, defaults.bargeInMinSpeechMs, 10, 500)),
-    bargeInRmsFloor: Math.round(clampNumber(config?.bargeInRmsFloor, defaults.bargeInRmsFloor, 50, 3000)),
-    bargeInEchoMultiplier: clampNumber(config?.bargeInEchoMultiplier, defaults.bargeInEchoMultiplier, 0.05, 3),
-    bargeInPeakThreshold: Math.round(clampNumber(config?.bargeInPeakThreshold, defaults.bargeInPeakThreshold, 100, 8000)),
-    bargeInClearPeakThreshold: Math.round(clampNumber(config?.bargeInClearPeakThreshold, defaults.bargeInClearPeakThreshold, 200, 12000)),
-    bargeInClearRmsThreshold: Math.round(clampNumber(config?.bargeInClearRmsThreshold, defaults.bargeInClearRmsThreshold, 50, 3000)),
-    playbackMicSuppressMs: Math.round(clampNumber(config?.playbackMicSuppressMs, defaults.playbackMicSuppressMs, 0, 3000)),
-    afterPlaybackSuppressMs: Math.round(clampNumber(config?.afterPlaybackSuppressMs, defaults.afterPlaybackSuppressMs, 0, 3000)),
-    micStartMinSpeechMs: Math.round(clampNumber(config?.micStartMinSpeechMs, defaults.micStartMinSpeechMs, 10, 500)),
-    micEndSilenceMs: Math.round(clampNumber(config?.micEndSilenceMs, defaults.micEndSilenceMs, 200, 4000)),
-    micTrailingAudioMs: Math.round(clampNumber(config?.micTrailingAudioMs, defaults.micTrailingAudioMs, 100, 4000)),
-    micMinStartRms: Math.round(clampNumber(config?.micMinStartRms, defaults.micMinStartRms, 50, 3000)),
-    micMinActiveRms: Math.round(clampNumber(config?.micMinActiveRms, defaults.micMinActiveRms, 50, 3000)),
-  };
-}
-
 function normalizeTTSConfig(config?: Partial<TTSConfig>): TTSConfig {
   const provider =
     config?.provider === 'fish' || config?.provider === 'deepgram' || config?.provider === 'cartesia' || config?.provider === 'elevenlabs'
@@ -861,7 +787,6 @@ interface SettingsState {
   voiceCallSTTProvider: STTProvider;
   voiceCallEngine: VoiceCallEngine;
   liveKitVoiceCallConfig: LiveKitVoiceCallConfig;
-  voiceCallTuningConfig: VoiceCallTuningConfig;
   voiceCallBackgroundImageUri?: string;
   memoryVaultConfig: MemoryVaultConfig;
   webSearchConfig: WebSearchConfig;
@@ -903,7 +828,6 @@ interface SettingsState {
   setVoiceCallSTTProvider: (provider: STTProvider) => void;
   setVoiceCallEngine: (engine: VoiceCallEngine) => void;
   setLiveKitVoiceCallConfig: (config: Partial<LiveKitVoiceCallConfig>) => void;
-  setVoiceCallTuningConfig: (config: Partial<VoiceCallTuningConfig>) => void;
   setVoiceCallBackgroundImageUri: (uri?: string) => void;
   setMemoryVaultConfig: (config: Partial<MemoryVaultConfig>) => void;
   setWebSearchConfig: (config: Partial<WebSearchConfig>) => void;
@@ -966,9 +890,8 @@ export const useSettingsStore = create<SettingsState>()(
       sttConfig: normalizeSTTConfig(),
       voiceCallTTSProvider: 'minimax',
       voiceCallSTTProvider: 'deepgram',
-      voiceCallEngine: 'local',
+      voiceCallEngine: 'livekit',
       liveKitVoiceCallConfig: { brainUrl: '', accessToken: '' },
-      voiceCallTuningConfig: createDefaultVoiceCallTuningConfig(),
       voiceCallBackgroundImageUri: undefined,
       memoryVaultConfig: {
         enabled: false,
@@ -1202,13 +1125,6 @@ export const useSettingsStore = create<SettingsState>()(
       setVoiceCallEngine: (engine) => set({ voiceCallEngine: engine }),
       setLiveKitVoiceCallConfig: (config) =>
         set((state) => ({ liveKitVoiceCallConfig: { ...state.liveKitVoiceCallConfig, ...config } })),
-      setVoiceCallTuningConfig: (config) =>
-        set((state) => ({
-          voiceCallTuningConfig: normalizeVoiceCallTuningConfig({
-            ...state.voiceCallTuningConfig,
-            ...config,
-          }),
-        })),
       setVoiceCallBackgroundImageUri: (uri) => set({ voiceCallBackgroundImageUri: uri }),
       setMemoryVaultConfig: (config) =>
         set((state) => ({ memoryVaultConfig: { ...state.memoryVaultConfig, ...config } })),
@@ -1586,7 +1502,6 @@ export const useSettingsStore = create<SettingsState>()(
         voiceCallSTTProvider: state.voiceCallSTTProvider,
         voiceCallEngine: state.voiceCallEngine,
         liveKitVoiceCallConfig: state.liveKitVoiceCallConfig,
-        voiceCallTuningConfig: state.voiceCallTuningConfig,
         voiceCallBackgroundImageUri: state.voiceCallBackgroundImageUri,
         memoryVaultConfig: state.memoryVaultConfig,
         webSearchConfig: state.webSearchConfig,
@@ -1633,12 +1548,11 @@ export const useSettingsStore = create<SettingsState>()(
           sttConfig: normalizeSTTConfig(state?.sttConfig),
           voiceCallTTSProvider: state?.voiceCallTTSProvider || state?.ttsConfig?.provider || 'minimax',
           voiceCallSTTProvider: state?.voiceCallSTTProvider || state?.sttConfig?.provider || 'deepgram',
-          voiceCallEngine: state?.voiceCallEngine || 'local',
+          voiceCallEngine: state?.voiceCallEngine === 'elevenlabs' ? 'elevenlabs' : 'livekit',
           liveKitVoiceCallConfig: {
             brainUrl: state?.liveKitVoiceCallConfig?.brainUrl || '',
             accessToken: state?.liveKitVoiceCallConfig?.accessToken || '',
           },
-          voiceCallTuningConfig: normalizeVoiceCallTuningConfig(state?.voiceCallTuningConfig),
           nativeToolConfig: {
             accountingEnabled: state?.nativeToolConfig?.accountingEnabled ?? false,
             deviceInfoEnabled: state?.nativeToolConfig?.deviceInfoEnabled ?? false,

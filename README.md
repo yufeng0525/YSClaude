@@ -353,7 +353,6 @@ AI 回复中出现 `[Pic:...]` token 时，`useChatStore` 会：
 
 实时语音通话支持两套实现：
 
-- `本机级联`：Android 原生模块采集 PCM，App 分别连接 STT、LLM 和 TTS，适合作为回退链路。
 - `LiveKit Agents`：App 通过 WebRTC 加入 LiveKit 房间，服务端 Agent 完成阿里实时 STT、现有 OpenAI-compatible LLM 和 Cartesia 流式 TTS 编排。实际使用中，该方案的网络适应、回声处理、打断和播放衔接更顺畅。
 
 LiveKit 模式的数据流为：

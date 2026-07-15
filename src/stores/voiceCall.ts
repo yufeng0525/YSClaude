@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { LocalVideoTrack } from 'livekit-client';
 import {
-  AndroidVoiceCallSession,
   VOICE_CALL_ASSISTANT_INITIATED_INSTRUCTION,
   isAndroidVoiceCallAvailable,
   type VoiceCallSnapshot,
@@ -15,7 +14,6 @@ import {
   showVideoCallFloatingWindow,
   showVoiceCallFloatingBall,
 } from '../services/floatingBall';
-import { captureAccessibilityScreenFrame, isAccessibilityControlEnabled } from '../services/nativeTools';
 import { useChatStore } from './chat';
 import { useSettingsStore } from './settings';
 
@@ -66,10 +64,9 @@ interface VoiceCallStore {
   setCameraFacing: (facing: 'front' | 'back') => Promise<void>;
   minimizeToFloatingBall: (durationText: string, previewUri?: string) => Promise<void>;
   restoreFromFloatingBall: () => Promise<void>;
-  setVisualFrameProvider: (provider: (() => Promise<string | null>) | null) => void;
 }
 
-type VoiceCallSession = AndroidVoiceCallSession | ElevenLabsVoiceCallSession | LiveKitVoiceCallSession;
+type VoiceCallSession = ElevenLabsVoiceCallSession | LiveKitVoiceCallSession;
 
 let session: VoiceCallSession | null = null;
 let sessionSubscription: Subscription | null = null;
@@ -92,10 +89,6 @@ export const useVoiceCallStore = create<VoiceCallStore>((set, get) => ({
 
     const mode = options.mode || 'voice';
     const settings = useSettingsStore.getState();
-    if (mode === 'screen' && settings.voiceCallEngine !== 'livekit'
-      && !(await isAccessibilityControlEnabled().catch(() => false))) {
-      throw new Error('共享屏幕通话需要先开启 YSClaude 无障碍服务');
-    }
     set({ starting: true, minimized: false, mode });
     if (settings.voiceCallEngine === 'livekit') {
       if (settings.voiceCallSTTProvider !== 'aliyun' || settings.voiceCallTTSProvider !== 'cartesia') {
@@ -111,19 +104,17 @@ export const useVoiceCallStore = create<VoiceCallStore>((set, get) => ({
       set({ starting: false });
       throw new Error('使用 ElevenLabs 通话时，STT 和 TTS 必须同时选择 ElevenLabs');
     }
+    if (settings.voiceCallEngine === 'elevenlabs' && mode !== 'voice') {
+      set({ starting: false });
+      throw new Error('ElevenLabs 当前仅支持语音通话；视频和共享屏幕请使用 LiveKit Agents');
+    }
     const nextSession: VoiceCallSession = settings.voiceCallEngine === 'livekit'
       ? new LiveKitVoiceCallSession(mode, get().cameraFacing)
-      : elevenLabsSelected || settings.voiceCallEngine === 'elevenlabs'
-        ? new ElevenLabsVoiceCallSession()
-        : new AndroidVoiceCallSession(mode);
+      : new ElevenLabsVoiceCallSession();
     if (nextSession instanceof LiveKitVoiceCallSession) {
       nextSession.setLocalVideoTrackListener((localVideoTrack) => set({ localVideoTrack }));
     } else {
       set({ localVideoTrack: null });
-    }
-    if (mode === 'screen') {
-      // Screen sharing must keep capturing after the call UI is minimized and unmounted.
-      nextSession.setVisualFrameProvider(captureAccessibilityScreenFrame);
     }
     session = nextSession;
     sessionSubscription?.remove();
@@ -240,9 +231,6 @@ export const useVoiceCallStore = create<VoiceCallStore>((set, get) => ({
     set({ minimized: false });
   },
 
-  setVisualFrameProvider: (provider) => {
-    session?.setVisualFrameProvider(provider);
-  },
 }));
 
 async function addSystemMessageWhenChatIdle(content: string): Promise<void> {

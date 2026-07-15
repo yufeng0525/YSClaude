@@ -3,17 +3,14 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VideoView } from '@livekit/react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -21,51 +18,13 @@ import {
   MicOff,
   PhoneOff,
   PictureInPicture2,
-  RotateCcw,
   SwitchCamera,
-  SlidersHorizontal,
   X,
   Volume2,
   VolumeX,
 } from 'lucide-react-native';
-import {
-  createDefaultVoiceCallTuningConfig,
-  useSettingsStore,
-  type VoiceCallTuningConfig,
-} from '../src/stores/settings';
+import { useSettingsStore } from '../src/stores/settings';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
-
-type TuningField = {
-  key: keyof VoiceCallTuningConfig;
-  label: string;
-  unit: string;
-  step: number;
-  decimals?: number;
-  group: string;
-};
-
-const TUNING_FIELDS: TuningField[] = [
-  { key: 'aliyunUserTurnGraceMs', label: '用户句子提交延迟', unit: 'ms', step: 100, group: '阿里 STT' },
-  { key: 'aliyunPendingFlushMs', label: '转写刷新等待', unit: 'ms', step: 100, group: '阿里 STT' },
-  { key: 'aliyunInterimOnlyFlushGraceMs', label: '仅临时结果等待 final', unit: 'ms', step: 200, group: '阿里 STT' },
-  { key: 'userTurnRecentAudioHoldMs', label: '连续说话保留窗口', unit: 'ms', step: 50, group: '用户回合' },
-  { key: 'playbackRecognitionSuppressMs', label: '播放识别抑制', unit: 'ms', step: 100, group: '播放/打断' },
-  { key: 'deferredBargeInVolume', label: '打断时 TTS 音量', unit: '', step: 0.05, decimals: 2, group: '播放/打断' },
-  { key: 'deferredBargeInMaxMs', label: '打断最大保留时间', unit: 'ms', step: 1000, group: '播放/打断' },
-  { key: 'bargeInMinSpeechMs', label: '打断最短语音', unit: 'ms', step: 10, group: '原生打断' },
-  { key: 'bargeInRmsFloor', label: '打断 RMS 下限', unit: '', step: 20, group: '原生打断' },
-  { key: 'bargeInEchoMultiplier', label: '回声阈值倍率', unit: 'x', step: 0.05, decimals: 2, group: '原生打断' },
-  { key: 'bargeInPeakThreshold', label: '打断峰值阈值', unit: '', step: 50, group: '原生打断' },
-  { key: 'bargeInClearPeakThreshold', label: '强语音峰值阈值', unit: '', step: 100, group: '原生打断' },
-  { key: 'bargeInClearRmsThreshold', label: '强语音 RMS 阈值', unit: '', step: 20, group: '原生打断' },
-  { key: 'playbackMicSuppressMs', label: '播放中麦克风抑制', unit: 'ms', step: 100, group: '原生打断' },
-  { key: 'afterPlaybackSuppressMs', label: '播放后麦克风抑制', unit: 'ms', step: 100, group: '原生打断' },
-  { key: 'micStartMinSpeechMs', label: '麦克风起声时长', unit: 'ms', step: 10, group: '麦克风 VAD' },
-  { key: 'micEndSilenceMs', label: '麦克风结束静音', unit: 'ms', step: 100, group: '麦克风 VAD' },
-  { key: 'micTrailingAudioMs', label: '尾音保留', unit: 'ms', step: 100, group: '麦克风 VAD' },
-  { key: 'micMinStartRms', label: '起声 RMS 下限', unit: '', step: 20, group: '麦克风 VAD' },
-  { key: 'micMinActiveRms', label: '持续 RMS 下限', unit: '', step: 20, group: '麦克风 VAD' },
-];
 
 function formatDuration(startedAt: number | null): string {
   if (!startedAt) return '00:00';
@@ -98,11 +57,8 @@ export default function VoiceCallScreen() {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const wasCallActiveRef = useRef(false);
-  const cameraRef = useRef<CameraView>(null);
   const [durationText, setDurationText] = useState('00:00');
   const [cameraExpanded, setCameraExpanded] = useState(false);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [tuningOpen, setTuningOpen] = useState(false);
   const snapshot = useVoiceCallStore((state) => state.snapshot);
   const starting = useVoiceCallStore((state) => state.starting);
   const startCall = useVoiceCallStore((state) => state.startCall);
@@ -115,11 +71,8 @@ export default function VoiceCallScreen() {
   const cameraFacing = useVoiceCallStore((state) => state.cameraFacing);
   const setCameraFacing = useVoiceCallStore((state) => state.setCameraFacing);
   const localVideoTrack = useVoiceCallStore((state) => state.localVideoTrack);
-  const setVisualFrameProvider = useVoiceCallStore((state) => state.setVisualFrameProvider);
   const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
-  const voiceCallTuningConfig = useSettingsStore((state) => state.voiceCallTuningConfig);
   const isLiveKit = useSettingsStore((state) => state.voiceCallEngine === 'livekit');
-  const setVoiceCallTuningConfig = useSettingsStore((state) => state.setVoiceCallTuningConfig);
   const assistantName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
   const assistantAvatarUri = appearanceConfig?.assistantAvatarImageUri;
   const callBackgroundUri = useSettingsStore((state) => state.voiceCallBackgroundImageUri);
@@ -158,26 +111,6 @@ export default function VoiceCallScreen() {
     wasCallActiveRef.current = snapshot.active;
   }, [router, snapshot.active]);
 
-  useEffect(() => {
-    if (!isLiveKit && mode === 'video' && !cameraPermission?.granted) {
-      requestCameraPermission().catch(() => undefined);
-    }
-  }, [cameraPermission?.granted, isLiveKit, mode, requestCameraPermission]);
-
-  useEffect(() => {
-    // Screen sharing owns its frame provider at session level so minimizing to the
-    // floating ball does not clear it when this screen unmounts.
-    if (isLiveKit || mode === 'screen') return;
-    if (!snapshot.active || mode === 'voice') {
-      setVisualFrameProvider(null);
-      return;
-    }
-    setVisualFrameProvider(async () => {
-      const picture = await cameraRef.current?.takePictureAsync({ quality: 0.72, skipProcessing: false });
-      return picture?.uri || null;
-    });
-    return () => setVisualFrameProvider(null);
-  }, [isLiveKit, mode, setVisualFrameProvider, snapshot.active]);
 
   useEffect(() => {
     setDurationText(formatDuration(snapshot.startedAt));
@@ -247,16 +180,6 @@ export default function VoiceCallScreen() {
       {isVisualCall && callBackgroundUri && !cameraExpanded && (
         <Image source={{ uri: callBackgroundUri }} style={styles.visualBackground} resizeMode="cover" />
       )}
-      {!isLiveKit && mode === 'video' && cameraPermission?.granted && cameraExpanded && (
-        <CameraView
-          ref={cameraRef}
-          style={styles.visualBackground}
-          facing={cameraFacing}
-          mirror={cameraFacing === 'front'}
-          flash="off"
-          enableTorch={false}
-        />
-      )}
       {isLiveKit && mode === 'video' && localVideoTrack && cameraExpanded && (
         <VideoView
           style={styles.visualBackground}
@@ -269,27 +192,13 @@ export default function VoiceCallScreen() {
         <Pressable style={styles.pipButton} onPress={handleMinimize} disabled={!snapshot.active}>
           <PictureInPicture2 size={27} color="rgba(255,255,255,0.78)" strokeWidth={1.7} />
         </Pressable>
-        <Pressable style={styles.tuningButton} onPress={() => mode === 'video' ? void handleSwitchCamera() : setTuningOpen(true)}>
-          {mode === 'video' ? (
+        {mode === 'video' && (
+          <Pressable style={styles.tuningButton} onPress={() => void handleSwitchCamera()}>
             <SwitchCamera size={25} color="rgba(255,255,255,0.9)" strokeWidth={1.9} />
-          ) : (
-            <SlidersHorizontal size={24} color="rgba(255,255,255,0.82)" strokeWidth={1.9} />
-          )}
-        </Pressable>
+          </Pressable>
+        )}
       </View>
 
-      {!isLiveKit && mode === 'video' && cameraPermission?.granted && !cameraExpanded && (
-        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(true)}>
-          <CameraView
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            facing={cameraFacing}
-            mirror={cameraFacing === 'front'}
-            flash="off"
-            enableTorch={false}
-          />
-        </Pressable>
-      )}
       {isLiveKit && mode === 'video' && localVideoTrack && !cameraExpanded && (
         <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(true)}>
           <VideoView
@@ -300,24 +209,12 @@ export default function VoiceCallScreen() {
           />
         </Pressable>
       )}
-      {!isLiveKit && mode === 'video' && cameraExpanded && callBackgroundUri && (
-        <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(false)}>
-          <Image source={{ uri: callBackgroundUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        </Pressable>
-      )}
       {isLiveKit && mode === 'video' && cameraExpanded && callBackgroundUri && (
         <Pressable style={[styles.cameraWindow, { top: insets.top + 66 }]} onPress={() => setCameraExpanded(false)}>
           <Image source={{ uri: callBackgroundUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         </Pressable>
       )}
 
-      <VoiceTuningModal
-        visible={tuningOpen}
-        config={voiceCallTuningConfig}
-        onClose={() => setTuningOpen(false)}
-        onChange={setVoiceCallTuningConfig}
-        onReset={() => setVoiceCallTuningConfig(createDefaultVoiceCallTuningConfig())}
-      />
 
       {!isVisualCall && <View style={styles.profileSection}>
         <View style={styles.avatar}>
@@ -427,114 +324,6 @@ function ControlButton({
       </View>
       <Text style={styles.controlLabel} numberOfLines={1}>{label}</Text>
     </Pressable>
-  );
-}
-
-function VoiceTuningModal({
-  visible,
-  config,
-  onClose,
-  onChange,
-  onReset,
-}: {
-  visible: boolean;
-  config: VoiceCallTuningConfig;
-  onClose: () => void;
-  onChange: (config: Partial<VoiceCallTuningConfig>) => void;
-  onReset: () => void;
-}) {
-  const groups = useMemo(() => {
-    return TUNING_FIELDS.reduce<Array<{ title: string; fields: TuningField[] }>>((result, field) => {
-      const group = result.find((item) => item.title === field.group);
-      if (group) {
-        group.fields.push(field);
-      } else {
-        result.push({ title: field.group, fields: [field] });
-      }
-      return result;
-    }, []);
-  }, []);
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.tuningPanel}>
-          <View style={styles.tuningHeader}>
-            <Text style={styles.tuningTitle}>语音调参</Text>
-            <View style={styles.tuningHeaderActions}>
-              <Pressable style={styles.tuningIconButton} onPress={onReset}>
-                <RotateCcw size={18} color="#d8d8d8" strokeWidth={2} />
-              </Pressable>
-              <Pressable style={styles.tuningIconButton} onPress={onClose}>
-                <X size={20} color="#d8d8d8" strokeWidth={2} />
-              </Pressable>
-            </View>
-          </View>
-          <ScrollView style={styles.tuningScroll} contentContainerStyle={styles.tuningScrollContent}>
-            {groups.map((group) => (
-              <View key={group.title} style={styles.tuningGroup}>
-                <Text style={styles.tuningGroupTitle}>{group.title}</Text>
-                {group.fields.map((field) => (
-                  <TuningRow
-                    key={field.key}
-                    field={field}
-                    value={config[field.key]}
-                    onChange={(value) => onChange({ [field.key]: value } as Partial<VoiceCallTuningConfig>)}
-                  />
-                ))}
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function TuningRow({
-  field,
-  value,
-  onChange,
-}: {
-  field: TuningField;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  const decimals = field.decimals ?? 0;
-  const formatted = decimals > 0 ? value.toFixed(decimals) : String(Math.round(value));
-  const commitText = (text: string) => {
-    const numeric = Number(text.replace(',', '.'));
-    if (Number.isFinite(numeric)) {
-      onChange(decimals > 0 ? Number(numeric.toFixed(decimals)) : Math.round(numeric));
-    }
-  };
-  const adjust = (direction: -1 | 1) => {
-    const next = value + direction * field.step;
-    onChange(decimals > 0 ? Number(next.toFixed(decimals)) : Math.round(next));
-  };
-
-  return (
-    <View style={styles.tuningRow}>
-      <View style={styles.tuningLabelBlock}>
-        <Text style={styles.tuningLabel} numberOfLines={1}>{field.label}</Text>
-        {!!field.unit && <Text style={styles.tuningUnit}>{field.unit}</Text>}
-      </View>
-      <View style={styles.tuningStepper}>
-        <Pressable style={styles.stepButton} onPress={() => adjust(-1)}>
-          <Text style={styles.stepButtonText}>-</Text>
-        </Pressable>
-        <TextInput
-          style={styles.tuningInput}
-          value={formatted}
-          keyboardType="numeric"
-          selectTextOnFocus
-          onChangeText={commitText}
-        />
-        <Pressable style={styles.stepButton} onPress={() => adjust(1)}>
-          <Text style={styles.stepButtonText}>+</Text>
-        </Pressable>
-      </View>
-    </View>
   );
 }
 

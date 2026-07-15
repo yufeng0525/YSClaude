@@ -9,7 +9,6 @@ type Subscription = { remove: () => void };
 export class ElevenLabsVoiceCallSession {
   private conversation: VoiceConversation | null = null;
   private listeners = new Set<SnapshotListener>();
-  private visualFrameProvider: (() => Promise<string | null>) | null = null;
   private stopping = false;
   private snapshot: VoiceCallSnapshot = {
     active: false,
@@ -28,10 +27,6 @@ export class ElevenLabsVoiceCallSession {
     this.listeners.add(listener);
     listener(this.snapshot);
     return { remove: () => this.listeners.delete(listener) };
-  }
-
-  setVisualFrameProvider(provider: (() => Promise<string | null>) | null): void {
-    this.visualFrameProvider = provider;
   }
 
   async start(): Promise<void> {

@@ -8,7 +8,7 @@
 - 通话 STT：Aliyun
 - 通话 TTS：Cartesia
 
-App 不再启动 `VoiceCallAudioModule` 的 PCM 采集、STT WebSocket 或 TTS 播放器，而是由 LiveKit React Native SDK 独占 communication audio session，通过 WebRTC 发布麦克风并播放 Agent 远端音频。
+App 由 LiveKit React Native SDK 独占 communication audio session，通过 WebRTC 发布麦克风并播放 Agent 远端音频；旧的本地 PCM → STT → LLM → TTS 通话引擎及其 `VoiceCallAudioModule` 已移除。
 
 当前聊天 API 配置会交给 Agent 的 OpenAI-compatible LLM adapter，因此语音通话和文字聊天使用同一个模型端点与模型名。开始通话时，App 会读取当前窗口对应的 SQLite 会话历史，排除已隐藏消息，并在 dispatch 大小预算内从最近消息向前注入 Agent 的初始 `ChatContext`。
 

@@ -80,13 +80,6 @@
       ],
       "expo-asset",
       [
-        "expo-camera",
-        {
-          "cameraPermission": "允许 YSClaude 使用摄像头进行视频通话，并在每次说完后截取一帧发送给 AI。",
-          "recordAudioAndroid": false
-        }
-      ],
-      [
         "expo-sharing",
         {
           "android": {
