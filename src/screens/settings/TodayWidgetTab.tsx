@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../stores/settings';
 import { syncTodayWidget } from '../../services/todayWidget';
 import { copyFileFromUri } from '../../utils/fileSystem';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, SettingsGroup, SettingsRow, TextEditRow } from './ui';
 
 type TodayWidgetTabProps = {
   showToast: (message: string) => void;
@@ -112,87 +113,74 @@ export function TodayWidgetTab({ showToast, keyboardBottomInset }: TodayWidgetTa
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.sectionTitle}>Android 小组件</Text>
-      <Text style={styles.hint}>桌面小组件会显示今天的应用内待办，主题颜色跟随系统日夜间。</Text>
-
-      <View style={styles.appearanceAssetRow}>
-        <View style={[styles.appearanceImagePreview, { borderRadius: 29 }]}>
-          {effectiveAvatarUri ? (
-            <Image source={{ uri: effectiveAvatarUri }} style={styles.appearanceImageThumb} resizeMode="cover" />
-          ) : (
-            <Text style={styles.appearanceImagePlaceholder}>YS</Text>
-          )}
-        </View>
-        <View style={styles.appearanceIconText}>
-          <Text style={styles.label}>头像</Text>
-          <Text style={styles.hint}>{todayWidgetConfig.avatarUri ? '已使用小组件专属头像' : '默认跟随聊天用户头像'}</Text>
-        </View>
-        <View style={styles.appearanceIconActions}>
-          <Pressable
-            style={[styles.smallActionButton, pickingAvatar && styles.smallActionButtonDisabled]}
-            onPress={pickAvatar}
-            disabled={pickingAvatar}
-          >
-            {pickingAvatar ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
-          </Pressable>
-          <Pressable
-            style={[styles.smallActionButton, !todayWidgetConfig.avatarUri && styles.smallActionButtonDisabled]}
-            onPress={() => updateConfig({ avatarUri: undefined })}
-            disabled={!todayWidgetConfig.avatarUri}
-          >
-            <Text style={[styles.smallActionText, !todayWidgetConfig.avatarUri && styles.smallActionTextDisabled]}>默认</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>显示名</Text>
-        <TextInput
-          style={styles.input}
-          value={todayWidgetConfig.displayName}
-          onChangeText={(value) => updateConfig({ displayName: value })}
+      <SettingsGroup
+        header="Android 小组件"
+        footer="桌面小组件会显示今天的应用内待办，主题颜色跟随系统日夜间。"
+      >
+        <SettingsRow
+          label="头像"
+          sublabel={todayWidgetConfig.avatarUri ? '已使用小组件专属头像' : '默认跟随聊天用户头像'}
+          left={
+            <View style={[styles.appearanceImagePreview, { borderRadius: 29 }]}>
+              {effectiveAvatarUri ? (
+                <Image source={{ uri: effectiveAvatarUri }} style={styles.appearanceImageThumb} resizeMode="cover" />
+              ) : (
+                <Text style={styles.appearanceImagePlaceholder}>YS</Text>
+              )}
+            </View>
+          }
+          right={
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, pickingAvatar && styles.smallActionButtonDisabled]}
+                onPress={pickAvatar}
+                disabled={pickingAvatar}
+              >
+                {pickingAvatar ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !todayWidgetConfig.avatarUri && styles.smallActionButtonDisabled]}
+                onPress={() => updateConfig({ avatarUri: undefined })}
+                disabled={!todayWidgetConfig.avatarUri}
+              >
+                <Text style={[styles.smallActionText, !todayWidgetConfig.avatarUri && styles.smallActionTextDisabled]}>默认</Text>
+              </Pressable>
+            </View>
+          }
+        />
+        <TextEditRow
+          label="显示名"
+          value={todayWidgetConfig.displayName || ''}
           placeholder={effectiveDisplayName}
-          placeholderTextColor={colors.textTertiary}
+          onSave={(value) => updateConfig({ displayName: value })}
         />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>Handle</Text>
-        <TextInput
-          style={styles.input}
-          value={todayWidgetConfig.handle}
-          onChangeText={(value) => updateConfig({ handle: value })}
+        <TextEditRow
+          label="Handle"
+          value={todayWidgetConfig.handle || ''}
           placeholder={effectiveHandle}
-          placeholderTextColor={colors.textTertiary}
-          autoCapitalize="none"
+          onSave={(value) => updateConfig({ handle: value })}
         />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>4x4 签名</Text>
-        <TextInput
-          style={[styles.input, styles.multilineInput]}
-          value={todayWidgetConfig.quote}
-          onChangeText={(value) => updateConfig({ quote: value })}
+        <TextEditRow
+          label="4x4 签名"
+          value={todayWidgetConfig.quote || ''}
           placeholder="One thing at a time."
-          placeholderTextColor={colors.textTertiary}
           multiline
+          onSave={(value) => updateConfig({ quote: value })}
         />
-      </View>
+      </SettingsGroup>
 
-      <View style={styles.previewBox}>
-        <Text style={styles.previewHint}>预览数据</Text>
-        <View style={styles.previewItem}>
-          <Text style={styles.previewLabel}>{effectiveDisplayName} @{effectiveHandle.replace(/^@+/, '')}</Text>
-          <Text style={styles.previewText}>中间列表会自动读取今天在「日历」里创建的待办。</Text>
-        </View>
-      </View>
+      <SettingsGroup
+        header="预览数据"
+        footer="中间列表会自动读取今天在「日历」里创建的待办。"
+      >
+        <SettingsRow
+          label={`${effectiveDisplayName} @${effectiveHandle.replace(/^@+/, '')}`}
+        />
+      </SettingsGroup>
 
-      <View style={styles.actions}>
-        <Pressable style={[styles.saveButton, syncing && styles.importButtonDisabled]} onPress={syncWidget} disabled={syncing}>
-          {syncing ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.saveButtonText}>立即同步小组件</Text>}
-        </Pressable>
-      </View>
+      <SettingsGroup>
+        <ButtonRow label="立即同步小组件" onPress={syncWidget} loading={syncing} />
+      </SettingsGroup>
     </ScrollView>
   );
 }

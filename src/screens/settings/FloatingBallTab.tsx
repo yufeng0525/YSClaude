@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
@@ -14,8 +14,8 @@ import {
 } from '../../services/floatingBall';
 import { getTTSConfigMissingMessage, isTTSConfigReady } from '../../services/tts';
 import { copyFileFromUri } from '../../utils/fileSystem';
-import { ClampedNumberInput } from './ClampedNumberInput';
 import { createSettingsStyles } from './styles';
+import { SettingsGroup, SettingsRow, SwitchRow, TextEditRow } from './ui';
 
 type FloatingBallTabProps = {
   showToast: (message: string) => void;
@@ -216,147 +216,134 @@ export function FloatingBallTab({ showToast, keyboardBottomInset }: FloatingBall
     showToast(value ? '悬浮球 TTS 已开启' : '悬浮球 TTS 已关闭');
   }
 
+  function parseSizeInput(text: string): number | null {
+    const value = parseInt(text.trim(), 10);
+    if (!Number.isFinite(value)) return null;
+    return Math.min(FLOATING_BALL_SIZE_MAX, Math.max(FLOATING_BALL_SIZE_MIN, value));
+  }
+
   return (
     <ScrollView
       style={styles.content}
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.switchRow}>
-        <Text style={styles.label}>开启悬浮球</Text>
-        <Switch
+      <SettingsGroup>
+        <SwitchRow
+          label="开启悬浮球"
           value={floatingBallConfig.enabled}
           onValueChange={handleToggle}
           disabled={busy}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>悬浮球素材</Text>
-      <Text style={styles.hint}>支持 PNG、JPG、GIF。正常态用于平时显示，贴边态用于吸附屏幕边缘；每种状态最多 {CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个素材。</Text>
-      <Text style={styles.hint}>正常态 {normalImageUris.length} / {CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个，贴边态 {edgeImageUris.length} / {CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个</Text>
-      {([
-        { kind: 'normal' as const, label: '正常态', uri: floatingBallConfig.normalImageUri },
-        { kind: 'edge' as const, label: '贴边态', uri: floatingBallConfig.edgeImageUri },
-      ]).map((item) => {
-        const isPicking = pickingBallImage === item.kind;
-        return (
-          <View key={item.kind} style={styles.appearanceAssetRow}>
-            <View style={styles.floatingBallPreview}>
-              {item.uri ? (
-                <Image source={{ uri: item.uri }} style={styles.appearanceImageThumb} resizeMode="contain" />
-              ) : (
-                <View style={styles.defaultFloatingBallPreview} />
-              )}
-            </View>
-            <View style={styles.appearanceIconText}>
-              <Text style={styles.label}>{item.label}</Text>
-              <Text style={styles.hint}>{item.uri ? '已使用自定义素材' : '使用默认球形'}</Text>
-            </View>
-            <View style={styles.appearanceIconActions}>
-              <Pressable
-                style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
-                onPress={() => handlePickFloatingBallImage(item.kind)}
-                disabled={!!pickingBallImage}
-              >
-                {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
-              </Pressable>
-              <Pressable
-                style={[styles.smallActionButton, !item.uri && styles.smallActionButtonDisabled]}
-                onPress={() => handleClearFloatingBallImage(item.kind)}
-                disabled={!item.uri}
-              >
-                <Text style={[styles.smallActionText, !item.uri && styles.smallActionTextDisabled]}>默认</Text>
-              </Pressable>
-            </View>
-          </View>
-        );
-      })}
+      <SettingsGroup
+        header="悬浮球素材"
+        footer={`支持 PNG、JPG、GIF。正常态用于平时显示，贴边态用于吸附屏幕边缘；每种状态最多 ${CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个素材。正常态 ${normalImageUris.length} / ${CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个，贴边态 ${edgeImageUris.length} / ${CUSTOM_FLOATING_BALL_SELECTION_LIMIT} 个。`}
+      >
+        {([
+          { kind: 'normal' as const, label: '正常态', uri: floatingBallConfig.normalImageUri },
+          { kind: 'edge' as const, label: '贴边态', uri: floatingBallConfig.edgeImageUri },
+        ]).map((item) => {
+          const isPicking = pickingBallImage === item.kind;
+          return (
+            <SettingsRow
+              key={item.kind}
+              label={item.label}
+              sublabel={item.uri ? '已使用自定义素材' : '使用默认球形'}
+              left={
+                <View style={styles.floatingBallPreview}>
+                  {item.uri ? (
+                    <Image source={{ uri: item.uri }} style={styles.appearanceImageThumb} resizeMode="contain" />
+                  ) : (
+                    <View style={styles.defaultFloatingBallPreview} />
+                  )}
+                </View>
+              }
+              right={
+                <View style={styles.appearanceIconActions}>
+                  <Pressable
+                    style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
+                    onPress={() => handlePickFloatingBallImage(item.kind)}
+                    disabled={!!pickingBallImage}
+                  >
+                    {isPicking ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.smallActionText}>替换</Text>}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.smallActionButton, !item.uri && styles.smallActionButtonDisabled]}
+                    onPress={() => handleClearFloatingBallImage(item.kind)}
+                    disabled={!item.uri}
+                  >
+                    <Text style={[styles.smallActionText, !item.uri && styles.smallActionTextDisabled]}>默认</Text>
+                  </Pressable>
+                </View>
+              }
+            />
+          );
+        })}
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>悬浮球大小</Text>
-      <Text style={styles.hint}>单位为 dp，正常态和贴边态可分别调整，范围 {FLOATING_BALL_SIZE_MIN}-{FLOATING_BALL_SIZE_MAX}。</Text>
-      <View style={styles.floatingBallSizeRow}>
-        <View style={styles.floatingBallSizeField}>
-          <Text style={styles.label}>正常态大小</Text>
-          <ClampedNumberInput
-            value={normalSizeDp}
-            fallback={FLOATING_BALL_SIZE_DEFAULT}
-            min={FLOATING_BALL_SIZE_MIN}
-            max={FLOATING_BALL_SIZE_MAX}
-            placeholder={String(FLOATING_BALL_SIZE_DEFAULT)}
-            onCommit={(value) => handleSizeChange('normal', value)}
-          />
-        </View>
-        <View style={styles.floatingBallSizeField}>
-          <Text style={styles.label}>贴边态大小</Text>
-          <ClampedNumberInput
-            value={edgeSizeDp}
-            fallback={FLOATING_BALL_SIZE_DEFAULT}
-            min={FLOATING_BALL_SIZE_MIN}
-            max={FLOATING_BALL_SIZE_MAX}
-            placeholder={String(FLOATING_BALL_SIZE_DEFAULT)}
-            onCommit={(value) => handleSizeChange('edge', value)}
-          />
-        </View>
-      </View>
+      <SettingsGroup
+        header="悬浮球大小"
+        footer={`单位为 dp，范围 ${FLOATING_BALL_SIZE_MIN}-${FLOATING_BALL_SIZE_MAX}。`}
+      >
+        <TextEditRow
+          label="正常态大小"
+          value={String(normalSizeDp)}
+          keyboardType="number-pad"
+          inputPlaceholder={String(FLOATING_BALL_SIZE_DEFAULT)}
+          validate={(text) => (parseSizeInput(text) === null ? `请输入 ${FLOATING_BALL_SIZE_MIN}-${FLOATING_BALL_SIZE_MAX} 的数字` : null)}
+          onSave={(text) => handleSizeChange('normal', parseSizeInput(text) ?? FLOATING_BALL_SIZE_DEFAULT)}
+        />
+        <TextEditRow
+          label="贴边态大小"
+          value={String(edgeSizeDp)}
+          keyboardType="number-pad"
+          inputPlaceholder={String(FLOATING_BALL_SIZE_DEFAULT)}
+          validate={(text) => (parseSizeInput(text) === null ? `请输入 ${FLOATING_BALL_SIZE_MIN}-${FLOATING_BALL_SIZE_MAX} 的数字` : null)}
+          onSave={(text) => handleSizeChange('edge', parseSizeInput(text) ?? FLOATING_BALL_SIZE_DEFAULT)}
+        />
+      </SettingsGroup>
 
-      <View style={styles.switchRow}>
-        <View style={styles.nativeToolText}>
-          <Text style={styles.label}>素材自动切换</Text>
-          <Text style={styles.hint}>开启后按当前状态，从正常态或贴边态素材池随机切换。</Text>
-        </View>
-        <Switch
+      <SettingsGroup header="行为">
+        <SwitchRow
+          label="素材自动切换"
+          sublabel="开启后按当前状态，从正常态或贴边态素材池随机切换"
           value={assetAutoSwitchEnabled}
           onValueChange={(value) => {
             setFloatingBallConfig({ assetAutoSwitchEnabled: value });
             showToast(value ? '素材自动切换已开启' : '素材自动切换已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>切换间隔（秒）</Text>
-        <ClampedNumberInput
-          value={assetAutoSwitchIntervalSeconds}
-          fallback={8}
-          min={1}
-          max={3600}
-          placeholder="8"
-          onCommit={(value) => setFloatingBallConfig({ assetAutoSwitchIntervalSeconds: value })}
+        <TextEditRow
+          label="切换间隔"
+          value={String(assetAutoSwitchIntervalSeconds)}
+          displayValue={`${assetAutoSwitchIntervalSeconds} 秒`}
+          keyboardType="number-pad"
+          inputPlaceholder="8"
+          dialogDescription="单位秒，范围 1-3600"
+          validate={(text) => {
+            const value = parseInt(text.trim(), 10);
+            return Number.isFinite(value) && value >= 1 && value <= 3600 ? null : '请输入 1-3600 的数字';
+          }}
+          onSave={(text) => setFloatingBallConfig({ assetAutoSwitchIntervalSeconds: parseInt(text.trim(), 10) })}
         />
-      </View>
-
-      <View style={styles.switchRow}>
-        <View style={styles.nativeToolText}>
-          <Text style={styles.label}>悬浮球 TTS</Text>
-          <Text style={styles.hint}>使用 TTS 配置中的 MiniMax 语音参数朗读悬浮球气泡文字</Text>
-        </View>
-        <Switch
+        <SwitchRow
+          label="悬浮球 TTS"
+          sublabel="使用 TTS 配置中的 MiniMax 语音参数朗读悬浮球气泡文字"
           value={!!floatingBallConfig.ttsEnabled}
           onValueChange={handleTTSToggle}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-
-      <View style={styles.switchRow}>
-        <View style={styles.nativeToolText}>
-          <Text style={styles.label}>截图后自动获取回复</Text>
-          <Text style={styles.hint}>仅影响点按截图共享；长按截图+节点树模式仍等待手动获取回复</Text>
-        </View>
-        <Switch
+        <SwitchRow
+          label="截图后自动获取回复"
+          sublabel="仅影响点按截图共享；长按截图+节点树模式仍等待手动获取回复"
           value={!!floatingBallConfig.autoReplyOnScreenshotShare}
           onValueChange={(value) => {
             setFloatingBallConfig({ autoReplyOnScreenshotShare: value });
             showToast(value ? '截图自动回复已开启' : '截图自动回复已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
+      </SettingsGroup>
     </ScrollView>
   );
 }

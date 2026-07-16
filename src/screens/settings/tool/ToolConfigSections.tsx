@@ -1,4 +1,5 @@
-﻿import { Pressable, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, Switch, Text, View } from 'react-native';
+import { ButtonRow, SettingsGroup, SettingsRow, TextEditRow } from '../ui';
 
 type BuiltInToolCard = {
   key: string;
@@ -39,14 +40,65 @@ type McpToolsSectionProps = {
   getEnabledResourceCount: (server: any) => number;
 };
 
-type OtherFeaturesSectionProps = {
-  styles: any;
-  colors: any;
+type OtherFeaturesSectionProps = BuiltInToolsSectionProps;
+
+function SectionHeader({
+  title,
+  hint,
+  expanded,
+  onPress,
+  styles,
+}: {
+  title: string;
+  hint: string;
   expanded: boolean;
+  onPress: () => void;
+  styles: any;
+}) {
+  return (
+    <Pressable style={styles.toolGroupHeader} onPress={onPress}>
+      <View style={styles.switchText}>
+        <Text style={styles.toolGroupTitle}>{title}</Text>
+        <Text style={styles.hint}>{hint}</Text>
+      </View>
+      <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
+    </Pressable>
+  );
+}
+
+function ToolRows({
+  tools,
+  colors,
+  onSelectTool,
+  footer,
+}: {
   tools: BuiltInToolCard[];
-  onToggleExpanded: () => void;
+  colors: any;
   onSelectTool: (key: string) => void;
-};
+  footer: string;
+}) {
+  return (
+    <SettingsGroup footer={footer}>
+      {tools.map((tool) => (
+        <SettingsRow
+          key={tool.key}
+          label={tool.name}
+          sublabel={`${tool.intro} · ${tool.meta}`}
+          onPress={() => onSelectTool(tool.key)}
+          showChevron
+          right={
+            <Switch
+              value={tool.enabled}
+              onValueChange={tool.onValueChange}
+              trackColor={{ false: colors.inputBorder, true: colors.primary }}
+              thumbColor="#FFFFFF"
+            />
+          }
+        />
+      ))}
+    </SettingsGroup>
+  );
+}
 
 export function BuiltInToolsSection({
   styles,
@@ -58,40 +110,20 @@ export function BuiltInToolsSection({
 }: BuiltInToolsSectionProps) {
   return (
     <>
-      <Pressable style={styles.toolGroupHeader} onPress={onToggleExpanded}>
-        <View style={styles.switchText}>
-          <Text style={styles.toolGroupTitle}>内置工具</Text>
-          <Text style={styles.hint}>点击卡片查看和编辑详情；开关变更会自动保存。</Text>
-        </View>
-        <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
-      </Pressable>
+      <SectionHeader
+        title="内置工具"
+        hint="按类别管理 AI 可调用的内置能力。"
+        expanded={expanded}
+        onPress={onToggleExpanded}
+        styles={styles}
+      />
       {expanded && (
-        <View style={styles.toolCardGrid}>
-          {tools.map((tool) => (
-            <Pressable
-              key={tool.key}
-              style={[styles.toolCard, tool.enabled && styles.toolCardEnabled]}
-              onPress={() => onSelectTool(tool.key)}
-            >
-              <View style={styles.toolCardTop}>
-                <View style={styles.toolCardText}>
-                  <Text style={styles.toolCardName} numberOfLines={1}>{tool.name}</Text>
-                  <Text style={styles.toolCardMeta}>{tool.meta}</Text>
-                </View>
-                <Switch
-                  value={tool.enabled}
-                  onValueChange={tool.onValueChange}
-                  trackColor={{ false: colors.inputBorder, true: colors.primary }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              <Text style={styles.toolCardIntro} numberOfLines={3}>{tool.intro}</Text>
-              <Text style={[styles.toolCardStatus, tool.enabled && styles.toolCardStatusEnabled]}>
-                {tool.enabled ? '已开启' : '已关闭'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <ToolRows
+          tools={tools}
+          colors={colors}
+          onSelectTool={onSelectTool}
+          footer="点击设置行可查看和编辑详情；右侧开关变更会自动保存。"
+        />
       )}
     </>
   );
@@ -119,66 +151,52 @@ export function McpToolsSection({
 }: McpToolsSectionProps) {
   return (
     <>
-      <Pressable style={styles.toolGroupHeader} onPress={onToggleExpanded}>
-        <View style={styles.switchText}>
-          <Text style={styles.toolGroupTitle}>自定义 MCP</Text>
-          <Text style={styles.hint}>每个远程 MCP 服务都单独用卡片展示，点开后可以同步、编辑或删除。</Text>
-        </View>
-        <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
-      </Pressable>
+      <SectionHeader
+        title="自定义 MCP"
+        hint="连接远程 MCP 服务并管理它们暴露的工具与资源。"
+        expanded={expanded}
+        onPress={onToggleExpanded}
+        styles={styles}
+      />
       {expanded && (
         <>
-          <View style={styles.field}>
-            <Text style={styles.label}>每轮最大调用次数</Text>
-            <TextInput
-              style={styles.input}
+          <SettingsGroup header="MCP 调用">
+            <TextEditRow
+              label="每轮最大调用次数"
               value={mcpMaxCalls}
-              onChangeText={onChangeMaxCalls}
               keyboardType="number-pad"
-              placeholder="6"
-              placeholderTextColor={colors.textTertiary}
+              inputPlaceholder="6"
+              onSave={onChangeMaxCalls}
             />
-          </View>
-          <View style={styles.toolAddPanel}>
-            <Text style={styles.sectionTitle}>添加 MCP 服务</Text>
-            <TextInput style={styles.input} value={mcpServerName} onChangeText={onChangeServerName} placeholder="服务名称" placeholderTextColor={colors.textTertiary} />
-            <TextInput style={styles.input} value={mcpServerUrl} onChangeText={onChangeServerUrl} placeholder="https://example.com/mcp" placeholderTextColor={colors.textTertiary} autoCapitalize="none" />
-            <TextInput style={styles.input} value={mcpServerAuth} onChangeText={onChangeServerAuth} placeholder="授权信息，可选" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" />
-            <Pressable style={styles.addPathButton} onPress={onAddServer}>
-              <Text style={styles.addPathButtonText}>添加服务</Text>
-            </Pressable>
-          </View>
+          </SettingsGroup>
+          <SettingsGroup header="添加 MCP 服务">
+            <TextEditRow label="服务名称" value={mcpServerName} inputPlaceholder="服务名称" onSave={onChangeServerName} />
+            <TextEditRow label="服务地址" value={mcpServerUrl} inputPlaceholder="https://example.com/mcp" onSave={onChangeServerUrl} />
+            <TextEditRow label="授权信息" value={mcpServerAuth} placeholder="可选" secure inputPlaceholder="Bearer ..." onSave={onChangeServerAuth} />
+            <ButtonRow label="添加服务" onPress={onAddServer} />
+          </SettingsGroup>
           {mcpServers.length === 0 ? (
             <Text style={styles.emptyText}>尚未添加 MCP 服务</Text>
           ) : (
-            <View style={styles.toolCardGrid}>
+            <SettingsGroup header="已添加服务">
               {mcpServers.map((server) => (
-                <Pressable
+                <SettingsRow
                   key={server.id}
-                  style={[styles.toolCard, server.enabled && styles.toolCardEnabled]}
+                  label={server.name}
+                  sublabel={`${server.url} · 工具 ${getEnabledToolCount(server)}/${server.tools.length} · 资源 ${getEnabledResourceCount(server)}/${(server.resources || []).length} · 提示词 ${(server.prompts || []).length}`}
                   onPress={() => onSelectServer(server.id)}
-                >
-                  <View style={styles.toolCardTop}>
-                    <View style={styles.toolCardText}>
-                      <Text style={styles.toolCardName} numberOfLines={1}>{server.name}</Text>
-                      <Text style={styles.toolCardMeta}>
-                        工具 {getEnabledToolCount(server)}/{server.tools.length} · 资源 {getEnabledResourceCount(server)}/{(server.resources || []).length} · 提示词 {(server.prompts || []).length}
-                      </Text>
-                    </View>
+                  showChevron
+                  right={
                     <Switch
                       value={server.enabled}
                       onValueChange={(value) => onUpdateServer(server.id, { enabled: value })}
                       trackColor={{ false: colors.inputBorder, true: colors.primary }}
                       thumbColor="#FFFFFF"
                     />
-                  </View>
-                  <Text style={styles.toolCardIntro} numberOfLines={2}>{server.url}</Text>
-                  <Text style={[styles.toolCardStatus, server.enabled && styles.toolCardStatusEnabled]}>
-                    {server.enabled ? '已开启' : '已关闭'}
-                  </Text>
-                </Pressable>
+                  }
+                />
               ))}
-            </View>
+            </SettingsGroup>
           )}
         </>
       )}
@@ -196,40 +214,20 @@ export function OtherFeaturesSection({
 }: OtherFeaturesSectionProps) {
   return (
     <>
-      <Pressable style={styles.toolGroupHeader} onPress={onToggleExpanded}>
-        <View style={styles.switchText}>
-          <Text style={styles.toolGroupTitle}>其他功能</Text>
-          <Text style={styles.hint}>配置不属于 AI 工具调用的本地辅助能力。</Text>
-        </View>
-        <Text style={styles.platformToggleIcon}>{expanded ? '↑' : '↓'}</Text>
-      </Pressable>
+      <SectionHeader
+        title="其他功能"
+        hint="管理不属于 AI 工具调用的本地辅助能力。"
+        expanded={expanded}
+        onPress={onToggleExpanded}
+        styles={styles}
+      />
       {expanded && (
-        <View style={styles.toolCardGrid}>
-          {tools.map((tool) => (
-            <Pressable
-              key={tool.key}
-              style={[styles.toolCard, tool.enabled && styles.toolCardEnabled]}
-              onPress={() => onSelectTool(tool.key)}
-            >
-              <View style={styles.toolCardTop}>
-                <View style={styles.toolCardText}>
-                  <Text style={styles.toolCardName} numberOfLines={1}>{tool.name}</Text>
-                  <Text style={styles.toolCardMeta}>{tool.meta}</Text>
-                </View>
-                <Switch
-                  value={tool.enabled}
-                  onValueChange={tool.onValueChange}
-                  trackColor={{ false: colors.inputBorder, true: colors.primary }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              <Text style={styles.toolCardIntro} numberOfLines={3}>{tool.intro}</Text>
-              <Text style={[styles.toolCardStatus, tool.enabled && styles.toolCardStatusEnabled]}>
-                {tool.enabled ? '已开启' : '已关闭'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <ToolRows
+          tools={tools}
+          colors={colors}
+          onSelectTool={onSelectTool}
+          footer="点击设置行可查看配置详情。"
+        />
       )}
     </>
   );

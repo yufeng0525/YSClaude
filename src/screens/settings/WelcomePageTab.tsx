@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
@@ -7,6 +7,7 @@ import { useSettingsPageColors } from '../../theme/colors';
 import { useSettingsStore } from '../../stores/settings';
 import { copyFileFromUri } from '../../utils/fileSystem';
 import { createSettingsStyles } from './styles';
+import { SettingsGroup, SettingsRow, SwitchRow, TextEditRow } from './ui';
 
 type WelcomePageTabProps = {
   showToast: (message: string) => void;
@@ -120,76 +121,77 @@ export function WelcomePageTab({ showToast, keyboardBottomInset }: WelcomePageTa
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.sectionTitle}>中心 Logo</Text>
-      <View style={styles.appearanceAssetRow}>
-        <View style={styles.welcomeLogoPreview}>
-          <Image
-            source={welcomeLogoImageUri ? { uri: welcomeLogoImageUri } : require('../../../assets/claudelogo.png')}
-            style={styles.welcomeLogoImage}
-            resizeMode="contain"
-          />
-        </View>
-        <View style={styles.appearanceIconText}>
-          <Text style={styles.label}>欢迎页中心 Logo</Text>
-          <Text style={styles.hint}>显示在聊天页空状态欢迎语上方，建议使用正方形透明 PNG。</Text>
-        </View>
-        <View style={styles.appearanceIconActions}>
-          <Pressable
-            style={[styles.smallActionButton, pickingWelcomeLogo && styles.smallActionButtonDisabled]}
-            onPress={handlePickWelcomeLogo}
-            disabled={pickingWelcomeLogo}
-          >
-            <Text style={[styles.smallActionText, pickingWelcomeLogo && styles.smallActionTextDisabled]}>
-              {pickingWelcomeLogo ? '选择中' : '上传'}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.smallActionButton, !welcomeLogoImageUri && styles.smallActionButtonDisabled]}
-            onPress={handleClearWelcomeLogo}
-            disabled={!welcomeLogoImageUri}
-          >
-            <Text style={[styles.smallActionText, !welcomeLogoImageUri && styles.smallActionTextDisabled]}>默认</Text>
-          </Pressable>
-        </View>
-      </View>
+      <SettingsGroup
+        header="中心 Logo"
+        footer="显示在聊天页空状态欢迎语上方，建议使用正方形透明 PNG。"
+      >
+        <SettingsRow
+          label="欢迎页中心 Logo"
+          left={
+            <View style={styles.welcomeLogoPreview}>
+              <Image
+                source={welcomeLogoImageUri ? { uri: welcomeLogoImageUri } : require('../../../assets/claudelogo.png')}
+                style={styles.welcomeLogoImage}
+                resizeMode="contain"
+              />
+            </View>
+          }
+          right={
+            <View style={styles.appearanceIconActions}>
+              <Pressable
+                style={[styles.smallActionButton, pickingWelcomeLogo && styles.smallActionButtonDisabled]}
+                onPress={handlePickWelcomeLogo}
+                disabled={pickingWelcomeLogo}
+              >
+                <Text style={[styles.smallActionText, pickingWelcomeLogo && styles.smallActionTextDisabled]}>
+                  {pickingWelcomeLogo ? '选择中' : '上传'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.smallActionButton, !welcomeLogoImageUri && styles.smallActionButtonDisabled]}
+                onPress={handleClearWelcomeLogo}
+                disabled={!welcomeLogoImageUri}
+              >
+                <Text style={[styles.smallActionText, !welcomeLogoImageUri && styles.smallActionTextDisabled]}>默认</Text>
+              </Pressable>
+            </View>
+          }
+        />
+      </SettingsGroup>
 
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>系统默认欢迎语</Text>
-          <Text style={styles.hint}>开启后，内置欢迎语会和用户自定义欢迎语一起随机抽取。</Text>
-        </View>
-        <Switch
+      <SettingsGroup
+        header="欢迎语"
+        footer="内置欢迎语会用「你的名字」替换 user，例如 Welcome,user。"
+      >
+        <SwitchRow
+          label="系统默认欢迎语"
+          sublabel="开启后，内置欢迎语会和自定义欢迎语一起随机抽取"
           value={useDefaultGreetings}
           onValueChange={handleDefaultGreetingToggle}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>你的名字</Text>
-        <TextInput
-          style={styles.input}
+        <TextEditRow
+          label="你的名字"
           value={defaultGreetingName}
-          onChangeText={(value) => setAppearanceConfig({ defaultGreetingName: value })}
           placeholder="user"
-          placeholderTextColor={colors.textTertiary}
-          returnKeyType="done"
+          dialogDescription="用于替换内置欢迎语里的 user"
+          onSave={(value) => {
+            setAppearanceConfig({ defaultGreetingName: value.trim() });
+            showToast('名字已保存');
+          }}
         />
-        <Text style={styles.hint}>用于替换内置欢迎语里的 user，例如 Welcome,user。</Text>
-      </View>
-
-      <Text style={styles.sectionTitle}>欢迎语池</Text>
-      <Text style={styles.hint}>每行一条，聊天页空状态刷新时会随机抽取一条。留空时显示 What shall we think through?</Text>
-      <TextInput
-        style={[styles.input, styles.multilineInput, styles.greetingInput]}
-        value={customGreetings}
-        onChangeText={(value) => setAppearanceConfig({ customGreetings: value })}
-        multiline
-        placeholder={'What shall we think through?\n今天想拆哪件事？'}
-        placeholderTextColor={colors.textTertiary}
-        textAlignVertical="top"
-      />
+        <TextEditRow
+          label="欢迎语池"
+          value={customGreetings}
+          placeholder="默认"
+          multiline
+          dialogDescription="每行一条，聊天页空状态刷新时随机抽取。留空时显示 What shall we think through?"
+          inputPlaceholder={'What shall we think through?\n今天想拆哪件事？'}
+          onSave={(value) => {
+            setAppearanceConfig({ customGreetings: value });
+            showToast('欢迎语池已保存');
+          }}
+        />
+      </SettingsGroup>
     </ScrollView>
   );
 }

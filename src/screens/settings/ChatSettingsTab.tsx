@@ -25,6 +25,7 @@ import {
 import { mergeRanges } from '../../utils/ranges';
 import { copyFileFromUri } from '../../utils/fileSystem';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, SelectRow, SettingsGroup, SettingsRow, SwitchRow, TextEditRow } from './ui';
 
 type SettingsTabProps = {
   showToast: (message: string) => void;
@@ -398,9 +399,12 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     showToast(`Token 预警 ${num}`);
   }
 
-  function handleSavePromptCacheQuietHours() {
-    const startMinutes = parseClockMinutes(quietStartText);
-    const endMinutes = parseClockMinutes(quietEndText);
+  function handleSavePromptCacheQuietHours(
+    nextQuietStart = quietStartText,
+    nextQuietEnd = quietEndText,
+  ) {
+    const startMinutes = parseClockMinutes(nextQuietStart);
+    const endMinutes = parseClockMinutes(nextQuietEnd);
     if (startMinutes === null || endMinutes === null) {
       Alert.alert('提示', '请输入 HH:mm 格式的时间，例如 23:00');
       setQuietStartText(formatClockMinutes(promptCacheConfig?.quietStartMinutes ?? 23 * 60));
@@ -420,10 +424,10 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     showToast('远程保活勿扰时段已保存');
   }
 
-  function handleSaveRemoteKeepaliveConfig() {
+  function handleSaveRemoteKeepaliveConfig(overrides?: { serverUrl?: string; authToken?: string }) {
     setPromptCacheConfig({
-      remoteServerUrl: remoteServerUrlText.trim(),
-      remoteAuthToken: remoteAuthTokenText.trim(),
+      remoteServerUrl: (overrides?.serverUrl ?? remoteServerUrlText).trim(),
+      remoteAuthToken: (overrides?.authToken ?? remoteAuthTokenText).trim(),
       pushChannel: promptCacheConfig?.pushChannel || 'dingtalk',
       dingTalkWebhook: dingTalkWebhookText.trim(),
       dingTalkSecret: dingTalkSecretText.trim(),
@@ -481,10 +485,14 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     };
   }
 
-  function handleSaveDingTalkConfig() {
-    const webhook = dingTalkWebhookText.trim();
-    const secret = dingTalkSecretText.trim();
-    const atMobiles = dingTalkAtMobilesText.trim();
+  function handleSaveDingTalkConfig(
+    nextWebhook = dingTalkWebhookText,
+    nextSecret = dingTalkSecretText,
+    nextAtMobiles = dingTalkAtMobilesText,
+  ) {
+    const webhook = nextWebhook.trim();
+    const secret = nextSecret.trim();
+    const atMobiles = nextAtMobiles.trim();
     setPromptCacheConfig({
       pushChannel: webhook ? 'dingtalk' : promptCacheConfig?.pushChannel,
       dingTalkWebhook: webhook,
@@ -524,10 +532,14 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
     }
   }
 
-  function handleSaveWxPusherConfig() {
-    const appToken = wxPusherAppTokenText.trim();
-    const uid = wxPusherUidText.trim();
-    const topicIds = wxPusherTopicIdsText.trim();
+  function handleSaveWxPusherConfig(
+    nextAppToken = wxPusherAppTokenText,
+    nextUid = wxPusherUidText,
+    nextTopicIds = wxPusherTopicIdsText,
+  ) {
+    const appToken = nextAppToken.trim();
+    const uid = nextUid.trim();
+    const topicIds = nextTopicIds.trim();
     setPromptCacheConfig({
       pushChannel: appToken && (uid || topicIds) ? 'wxpusher' : promptCacheConfig?.pushChannel,
       wxPusherAppToken: appToken,
@@ -667,112 +679,107 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
       keyboardShouldPersistTaps="handled"
     >
       {/* System Prompt */}
-      <Text style={styles.sectionTitle}>System Prompt</Text>
-      <Text style={styles.hint}>此内容会放在所有消息最前面发送给 AI</Text>
-      <TextInput
-        style={[styles.input, { minHeight: 100, textAlignVertical: 'top' }]}
-        value={promptText}
-        onChangeText={setPromptText}
-        onBlur={() => setSystemPrompt(promptText.trim())}
-        multiline
-        placeholder="You are a helpful assistant."
-        placeholderTextColor={colors.textTertiary}
-      />
-      <Text style={styles.label}>发送身份</Text>
-      <View style={styles.segmentedRow}>
-        {STABLE_PROMPT_ROLE_OPTIONS.map((item) => (
-          <Pressable
-            key={item.value}
-            style={[styles.segmentedButton, (stablePromptRole || 'system') === item.value && styles.segmentedButtonActive]}
-            onPress={() => {
-              setStablePromptRole(item.value);
-              showToast(`System Prompt 将以 ${item.label} 身份发送`);
-            }}
-          >
-            <Text style={[styles.segmentedText, (stablePromptRole || 'system') === item.value && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>使用 Claude Code OAuth 反代且开启 cloak 时，建议选 User，避免稳定提示词和收藏日记被上游 system cloaking 清洗。</Text>
+      <SettingsGroup
+        header="System Prompt"
+        footer="使用 Claude Code OAuth 反代且开启 cloak 时，发送身份建议选 User，避免稳定提示词和收藏日记被上游 system cloaking 清洗。"
+      >
+        <TextEditRow
+          label="System Prompt"
+          sublabel="此内容会放在所有消息最前面发送给 AI"
+          value={promptText}
+          placeholder="未设置"
+          multiline
+          inputPlaceholder="You are a helpful assistant."
+          onSave={(value) => {
+            setPromptText(value);
+            setSystemPrompt(value.trim());
+            showToast('System Prompt 已保存');
+          }}
+        />
+        <SelectRow
+          label="发送身份"
+          options={STABLE_PROMPT_ROLE_OPTIONS}
+          value={stablePromptRole || 'system'}
+          onSelect={(value) => {
+            setStablePromptRole(value as StablePromptRole);
+            const label = STABLE_PROMPT_ROLE_OPTIONS.find((item) => item.value === value)?.label;
+            showToast(`System Prompt 将以 ${label} 身份发送`);
+          }}
+        />
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>生图配置</Text>
-      <Text style={styles.hint}>AI 回复中的 [Pic:图片描述] 会与这里的基础提示词组合后发送给生图 API；这里不会作为真实图片发回给聊天 AI。</Text>
-      <TextInput
-        style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
-        value={imagePromptText}
-        onChangeText={setImagePromptText}
-        onBlur={() => setImageGenerationPrompt(imagePromptText.trim())}
-        multiline
-        placeholder="例如：高质量图片，画面清晰，主体明确，无水印。"
-        placeholderTextColor={colors.textTertiary}
-      />
+      <SettingsGroup
+        header="生图配置"
+        footer="AI 回复中的 [Pic:图片描述] 会与基础提示词组合后发送给生图 API；这里不会作为真实图片发回给聊天 AI。"
+      >
+        <TextEditRow
+          label="生图基础提示词"
+          value={imagePromptText}
+          placeholder="未设置"
+          multiline
+          inputPlaceholder="例如：高质量图片，画面清晰，主体明确，无水印。"
+          onSave={(value) => {
+            setImagePromptText(value);
+            setImageGenerationPrompt(value.trim());
+            showToast('生图提示词已保存');
+          }}
+        />
+      </SettingsGroup>
 
-      <View style={styles.imageFaceReferenceHeader}>
-        <View style={styles.imageFaceReferenceHeaderText}>
-          <Text style={styles.label}>锁脸参考图</Text>
-          <Text style={styles.hint}>启用的参考图会自动用于文生图/图生图，和输入框临时参考图一起传给生图 API。</Text>
-        </View>
-        <Pressable
-          style={[styles.smallActionButton, pickingFaceReferences && styles.smallActionButtonDisabled]}
+      <SettingsGroup
+        header="锁脸参考图"
+        footer={`启用的参考图会自动用于文生图/图生图，和输入框临时参考图一起传给生图 API。已启用 ${enabledFaceReferenceCount} / ${faceReferences.length} 张，最多 ${IMAGE_GENERATION_FACE_REFERENCE_SELECTION_LIMIT} 张。`}
+      >
+        <ButtonRow
+          label="上传参考图"
           onPress={handlePickFaceReferences}
+          loading={pickingFaceReferences}
           disabled={pickingFaceReferences}
-        >
-          <Text style={[styles.smallActionText, pickingFaceReferences && styles.smallActionTextDisabled]}>
-            {pickingFaceReferences ? '选择中' : '上传'}
-          </Text>
-        </Pressable>
-      </View>
-      <Text style={styles.hint}>
-        已启用 {enabledFaceReferenceCount} / {faceReferences.length} 张，最多 {IMAGE_GENERATION_FACE_REFERENCE_SELECTION_LIMIT} 张。
-      </Text>
-      {faceReferences.length === 0 ? (
-        <View style={styles.imageFaceReferenceEmpty}>
-          <Text style={styles.hint}>暂无锁脸参考图。</Text>
-        </View>
-      ) : (
-        <View style={styles.imageFaceReferenceGrid}>
-          {faceReferences.map((reference, index) => {
-            const enabled = reference.enabled !== false;
-            return (
-              <View
-                key={reference.id}
-                style={[
-                  styles.imageFaceReferenceItem,
-                  enabled && styles.imageFaceReferenceItemActive,
-                ]}
-              >
-                <Image source={{ uri: reference.uri }} style={styles.imageFaceReferenceImage} resizeMode="cover" />
-                <View style={styles.imageFaceReferenceMeta}>
-                  <Text style={styles.imageFaceReferenceLabel}>参考图 {index + 1}</Text>
-                  <Switch
-                    value={enabled}
-                    onValueChange={(value) => handleToggleFaceReference(reference.id, value)}
-                    trackColor={{ false: colors.inputBorder, true: colors.primary }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-                <Pressable
-                  style={styles.imageFaceReferenceRemove}
-                  onPress={() => handleRemoveFaceReference(reference)}
+        />
+        {faceReferences.length === 0 ? (
+          <SettingsRow label="暂无锁脸参考图" />
+        ) : (
+          <View style={styles.imageFaceReferenceGrid}>
+            {faceReferences.map((reference, index) => {
+              const enabled = reference.enabled !== false;
+              return (
+                <View
+                  key={reference.id}
+                  style={[
+                    styles.imageFaceReferenceItem,
+                    enabled && styles.imageFaceReferenceItemActive,
+                  ]}
                 >
-                  <Text style={styles.imageFaceReferenceRemoveText}>删除</Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </View>
-      )}
+                  <Image source={{ uri: reference.uri }} style={styles.imageFaceReferenceImage} resizeMode="cover" />
+                  <View style={styles.imageFaceReferenceMeta}>
+                    <Text style={styles.imageFaceReferenceLabel}>参考图 {index + 1}</Text>
+                    <Switch
+                      value={enabled}
+                      onValueChange={(value) => handleToggleFaceReference(reference.id, value)}
+                      trackColor={{ false: colors.inputBorder, true: colors.primary }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                  <Pressable
+                    style={styles.imageFaceReferenceRemove}
+                    onPress={() => handleRemoveFaceReference(reference)}
+                  >
+                    <Text style={styles.imageFaceReferenceRemoveText}>删除</Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </SettingsGroup>
 
       {/* 消息条数 */}
-      <Text style={styles.sectionTitle}>当前对话</Text>
-      <View style={styles.infoRow}>
-        <Text style={styles.infoLabel}>已加载消息</Text>
-        <Text style={styles.infoValue}>
-          {messageCount > 0 ? `${loadedFloorFrom}-${loadedFloorTo}` : '0'} 条
-        </Text>
-      </View>
+      <SettingsGroup header="当前对话">
+        <SettingsRow
+          label="已加载消息"
+          value={`${messageCount > 0 ? `${loadedFloorFrom}-${loadedFloorTo}` : '0'} 条`}
+        />
+      </SettingsGroup>
 
       {/* 隐藏消息 */}
       <Text style={styles.sectionTitle}>隐藏消息</Text>
@@ -870,260 +877,241 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
       )}
 
       {/* AI 输出字数限制 */}
-      <Text style={styles.sectionTitle}>AI 输出限制</Text>
-      <Text style={styles.hint}>限制 AI 单次回复的最大 token 数，留空则不限制</Text>
-      <View style={styles.modelRow}>
-        <TextInput style={[styles.input, { flex: 1 }]} value={tokensStr} onChangeText={setTokensStr}
-          keyboardType="number-pad" placeholder="不限制" placeholderTextColor={colors.textTertiary} />
-        <Pressable style={styles.fetchButton} onPress={handleSaveTokens}>
-          <Text style={styles.fetchButtonText}>保存</Text>
-        </Pressable>
-      </View>
-
-      <Text style={styles.sectionTitle}>Token 预警</Text>
-      <Text style={styles.hint}>当一次发送触发的 API 调用 total tokens 超过该数值时，弹窗提醒压缩总结对话；留空则关闭预警</Text>
-      <View style={styles.modelRow}>
-        <TextInput
-          style={[styles.input, { flex: 1 }]}
-          value={tokenWarningStr}
-          onChangeText={setTokenWarningStr}
+      <SettingsGroup
+        header="AI 输出限制"
+        footer="限制 AI 单次回复的最大 token 数；预警在一次发送的 total tokens 超过阈值时弹窗提醒压缩总结对话。留空则不限制/关闭。"
+      >
+        <TextEditRow
+          label="最大输出 Tokens"
+          value={tokensStr}
+          placeholder="不限制"
           keyboardType="number-pad"
-          placeholder="关闭预警"
-          placeholderTextColor={colors.textTertiary}
+          dialogDescription="留空则不限制"
+          validate={(text) => {
+            const val = text.trim();
+            if (!val) return null;
+            const num = parseInt(val, 10);
+            return isNaN(num) || num <= 0 ? '请输入有效的正整数' : null;
+          }}
+          onSave={(text) => {
+            const val = text.trim();
+            setTokensStr(val);
+            if (!val) {
+              setMaxOutputTokens(null);
+              showToast('输出字数不限制');
+            } else {
+              const num = parseInt(val, 10);
+              setMaxOutputTokens(num);
+              showToast(`AI 最大输出 ${num} tokens`);
+            }
+          }}
         />
-        <Pressable style={styles.fetchButton} onPress={handleSaveTokenWarning}>
-          <Text style={styles.fetchButtonText}>保存</Text>
-        </Pressable>
-      </View>
-
-      {/* 不发送思维链 */}
-      <Text style={styles.sectionTitle}>思维链</Text>
-      <Text style={styles.hint}>开启后，AI 历史消息中的思维链内容不会发送给 AI，但仍会正常存储和显示，可节省 token</Text>
-      <View style={styles.switchRow}>
-        <Text style={styles.label}>不发送思维链</Text>
-        <Switch
+        <TextEditRow
+          label="Token 预警阈值"
+          value={tokenWarningStr}
+          placeholder="关闭预警"
+          keyboardType="number-pad"
+          dialogDescription="留空则关闭预警"
+          validate={(text) => {
+            const val = text.trim();
+            if (!val) return null;
+            const num = parseInt(val, 10);
+            return isNaN(num) || num <= 0 ? '请输入有效的正整数' : null;
+          }}
+          onSave={(text) => {
+            const val = text.trim();
+            setTokenWarningStr(val);
+            if (!val) {
+              setTokenWarningThreshold(null);
+              showToast('Token 预警已关闭');
+            } else {
+              const num = parseInt(val, 10);
+              setTokenWarningThreshold(num);
+              showToast(`Token 预警 ${num}`);
+            }
+          }}
+        />
+        <SwitchRow
+          label="不发送思维链"
+          sublabel="AI 历史消息中的思维链内容不会发送给 AI，但仍会正常存储和显示，可节省 token"
           value={stripThinking}
           onValueChange={setStripThinking}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
         />
-      </View>
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>Prompt 缓存远程保活</Text>
-      <Text style={styles.hint}>基础开关、缓存时间和渠道已集中到 API 配置；这里仅配置 1h cache 的远程保活和主动推送。</Text>
-      <View style={styles.remoteKeepalivePanel}>
-        <View style={styles.switchRow}>
-          <View style={styles.switchText}>
-            <Text style={styles.label}>远程保活</Text>
-            <Text style={styles.hint}>开启后同步当前或已有 1h cache 快照到服务端；关闭会立即停用服务端保活。</Text>
-          </View>
-          <Switch
-            value={!!promptCacheConfig?.remoteKeepaliveEnabled}
-            onValueChange={(value) => void handleToggleRemoteKeepalive(value)}
-            disabled={switchingRemoteKeepalive}
-            trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          />
-        </View>
-        <Text style={styles.hint}>远程服务会保存最后一次成功使用 1h cache 的请求快照，并按 55 分钟自动调用保活。自托管时会在服务端保存 API Key 和对话快照。</Text>
-          <Text style={styles.label}>服务地址</Text>
-          <TextInput
-            style={styles.input}
-            value={remoteServerUrlText}
-            onChangeText={setRemoteServerUrlText}
-            onBlur={handleSaveRemoteKeepaliveConfig}
-            placeholder="http://你的服务器:8789"
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-          />
-          <Text style={styles.label}>访问令牌</Text>
-          <TextInput
-            style={styles.input}
-            value={remoteAuthTokenText}
-            onChangeText={setRemoteAuthTokenText}
-            onBlur={handleSaveRemoteKeepaliveConfig}
-            placeholder="KEEPALIVE_AUTH_TOKEN"
-            placeholderTextColor={colors.textTertiary}
-            secureTextEntry
-            autoCapitalize="none"
-          />
-          <Pressable
-            style={[styles.importButton, checkingRemoteKeepalive && styles.importButtonDisabled]}
-            onPress={handleCheckRemoteKeepaliveServer}
-            disabled={checkingRemoteKeepalive}
-          >
-            {checkingRemoteKeepalive ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.importButtonText}>测试远程服务</Text>
-            )}
-          </Pressable>
-          <Text style={styles.label}>推送渠道</Text>
-          <View style={styles.segmentedRow}>
-            {PROMPT_CACHE_PUSH_CHANNEL_OPTIONS.map((item) => (
-              <Pressable
-                key={item.value}
-                style={[styles.segmentedButton, (promptCacheConfig?.pushChannel || 'dingtalk') === item.value && styles.segmentedButtonActive]}
-                onPress={() => {
-                  setPromptCacheConfig({ pushChannel: item.value });
-                  pushRemotePushConfig({
-                    ...currentPushConfig(),
-                    pushChannel: item.value,
-                  }).catch(() => undefined);
-                }}
-              >
-                <Text style={[styles.segmentedText, (promptCacheConfig?.pushChannel || 'dingtalk') === item.value && styles.segmentedTextActive]}>
-                  {item.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={styles.label}>钉钉机器人 Webhook</Text>
-          <Text style={styles.hint}>AI 主动留言时通过钉钉群机器人发送到钉钉 App。建议在钉钉里建一个只给自己的提醒群，机器人安全设置使用加签。</Text>
-          <TextInput
-            style={styles.input}
-            value={dingTalkWebhookText}
-            onChangeText={setDingTalkWebhookText}
-            onBlur={handleSaveDingTalkConfig}
-            placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            keyboardType="url"
-          />
-          <Text style={styles.label}>钉钉加签 Secret（可选）</Text>
-          <TextInput
-            style={styles.input}
-            value={dingTalkSecretText}
-            onChangeText={setDingTalkSecretText}
-            onBlur={handleSaveDingTalkConfig}
-            placeholder="SECxxxxxxxxxxxxxxxxxxxxxxxx"
-            placeholderTextColor={colors.textTertiary}
-            secureTextEntry
-            autoCapitalize="none"
-          />
-          <Text style={styles.label}>@ 手机号（可选）</Text>
-          <TextInput
-            style={styles.input}
-            value={dingTalkAtMobilesText}
-            onChangeText={setDingTalkAtMobilesText}
-            onBlur={handleSaveDingTalkConfig}
-            placeholder="13800138000,13900139000"
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            keyboardType="numbers-and-punctuation"
-          />
-          <Pressable
-            style={[styles.importButton, testingDingTalkPush && styles.importButtonDisabled]}
-            onPress={handleTestDingTalkPush}
-            disabled={testingDingTalkPush}
-          >
-            {testingDingTalkPush ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.importButtonText}>测试钉钉推送</Text>
-            )}
-          </Pressable>
-          <Text style={styles.label}>WxPusher AppToken</Text>
-          <Text style={styles.hint}>适合在一加等杀后台严格的手机上作为稳定回退；通知来自 WxPusher/微信，点击后可跳转到 YSClaude 对话。</Text>
-          <TextInput
-            style={styles.input}
-            value={wxPusherAppTokenText}
-            onChangeText={setWxPusherAppTokenText}
-            onBlur={handleSaveWxPusherConfig}
-            placeholder="AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            placeholderTextColor={colors.textTertiary}
-            secureTextEntry
-            autoCapitalize="none"
-          />
-          <Text style={styles.label}>WxPusher UID</Text>
-          <TextInput
-            style={styles.input}
-            value={wxPusherUidText}
-            onChangeText={setWxPusherUidText}
-            onBlur={handleSaveWxPusherConfig}
-            placeholder="UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-          />
-          <Text style={styles.label}>WxPusher Topic IDs（可选）</Text>
-          <TextInput
-            style={styles.input}
-            value={wxPusherTopicIdsText}
-            onChangeText={setWxPusherTopicIdsText}
-            onBlur={handleSaveWxPusherConfig}
-            placeholder="123,456"
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-            keyboardType="numbers-and-punctuation"
-          />
-          <Pressable
-            style={[styles.importButton, testingWxPusherPush && styles.importButtonDisabled]}
-            onPress={handleTestWxPusherPush}
-            disabled={testingWxPusherPush}
-          >
-            {testingWxPusherPush ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.importButtonText}>测试 WxPusher 推送</Text>
-            )}
-          </Pressable>
-          <View style={styles.switchRow}>
-            <View style={styles.switchText}>
-              <Text style={styles.label}>远程自主活动</Text>
-              <Text style={styles.hint}>开启后服务端保活时会告知 AI 已过去的时间，由它自主决定是否留言或记录活动；关闭则仅做缓存续期。修改将在下一次快照同步后生效。</Text>
-            </View>
-            <Switch
-              value={promptCacheConfig?.remoteAgentTickEnabled !== false}
-              onValueChange={(value) => {
-                setPromptCacheConfig({ remoteAgentTickEnabled: value });
-                showToast(value ? '远程自主活动已开启' : '远程自主活动已关闭');
-              }}
-              trackColor={{ false: colors.inputBorder, true: colors.primary }}
-            />
-          </View>
-        </View>
+      <SettingsGroup
+        header="Prompt 缓存远程保活"
+        footer="远程服务会保存最后一次成功使用 1h cache 的请求快照，并按 55 分钟自动调用保活。自托管时会在服务端保存 API Key 和对话快照。基础开关、缓存时间和渠道已集中到 API 配置。"
+      >
+        <SwitchRow
+          label="远程保活"
+          sublabel="开启后同步当前或已有 1h cache 快照到服务端；关闭会立即停用服务端保活"
+          value={!!promptCacheConfig?.remoteKeepaliveEnabled}
+          onValueChange={(value) => void handleToggleRemoteKeepalive(value)}
+          disabled={switchingRemoteKeepalive}
+        />
+        <TextEditRow
+          label="服务地址"
+          value={remoteServerUrlText}
+          inputPlaceholder="http://你的服务器:8789"
+          onSave={(value) => {
+            setRemoteServerUrlText(value);
+            handleSaveRemoteKeepaliveConfig({ serverUrl: value });
+          }}
+        />
+        <TextEditRow
+          label="访问令牌"
+          value={remoteAuthTokenText}
+          secure
+          inputPlaceholder="KEEPALIVE_AUTH_TOKEN"
+          onSave={(value) => {
+            setRemoteAuthTokenText(value);
+            handleSaveRemoteKeepaliveConfig({ authToken: value });
+          }}
+        />
+        <ButtonRow
+          label="测试远程服务"
+          onPress={handleCheckRemoteKeepaliveServer}
+          loading={checkingRemoteKeepalive}
+        />
+        <SwitchRow
+          label="远程自主活动"
+          sublabel="开启后服务端保活时会告知 AI 已过去的时间，由它自主决定是否留言或记录活动；关闭则仅做缓存续期。修改将在下一次快照同步后生效。"
+          value={promptCacheConfig?.remoteAgentTickEnabled !== false}
+          onValueChange={(value) => {
+            setPromptCacheConfig({ remoteAgentTickEnabled: value });
+            showToast(value ? '远程自主活动已开启' : '远程自主活动已关闭');
+          }}
+        />
+      </SettingsGroup>
 
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>非保活时段</Text>
-          <Text style={styles.hint}>远程保活点落在该时段内时，取消本轮保活。</Text>
-        </View>
-        <Switch
+      <SettingsGroup header="主动推送">
+        <SelectRow
+          label="推送渠道"
+          options={PROMPT_CACHE_PUSH_CHANNEL_OPTIONS}
+          value={promptCacheConfig?.pushChannel || 'dingtalk'}
+          onSelect={(value) => {
+            setPromptCacheConfig({ pushChannel: value as PromptCacheConfig['pushChannel'] });
+            pushRemotePushConfig({
+              ...currentPushConfig(),
+              pushChannel: value as PromptCacheConfig['pushChannel'],
+            }).catch(() => undefined);
+          }}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="钉钉推送"
+        footer="AI 主动留言时通过钉钉群机器人发送到钉钉 App。建议在钉钉里建一个只给自己的提醒群，机器人安全设置使用加签。"
+      >
+        <TextEditRow
+          label="机器人 Webhook"
+          value={dingTalkWebhookText}
+          inputPlaceholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+          onSave={(value) => {
+            setDingTalkWebhookText(value);
+            handleSaveDingTalkConfig(value);
+          }}
+        />
+        <TextEditRow
+          label="加签 Secret"
+          value={dingTalkSecretText}
+          placeholder="可选"
+          secure
+          inputPlaceholder="SECxxxxxxxxxxxxxxxxxxxxxxxx"
+          onSave={(value) => {
+            setDingTalkSecretText(value);
+            handleSaveDingTalkConfig();
+          }}
+        />
+        <TextEditRow
+          label="@ 手机号"
+          value={dingTalkAtMobilesText}
+          placeholder="可选"
+          inputPlaceholder="13800138000,13900139000"
+          onSave={(value) => {
+            setDingTalkAtMobilesText(value);
+            handleSaveDingTalkConfig();
+          }}
+        />
+        <ButtonRow label="测试钉钉推送" onPress={handleTestDingTalkPush} loading={testingDingTalkPush} />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="WxPusher 推送"
+        footer="适合在一加等杀后台严格的手机上作为稳定回退；通知来自 WxPusher/微信，点击后可跳转到 YSClaude 对话。"
+      >
+        <TextEditRow
+          label="AppToken"
+          value={wxPusherAppTokenText}
+          secure
+          inputPlaceholder="AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          onSave={(value) => {
+            setWxPusherAppTokenText(value);
+            handleSaveWxPusherConfig();
+          }}
+        />
+        <TextEditRow
+          label="UID"
+          value={wxPusherUidText}
+          inputPlaceholder="UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          onSave={(value) => {
+            setWxPusherUidText(value);
+            handleSaveWxPusherConfig();
+          }}
+        />
+        <TextEditRow
+          label="Topic IDs"
+          value={wxPusherTopicIdsText}
+          placeholder="可选"
+          inputPlaceholder="123,456"
+          onSave={(value) => {
+            setWxPusherTopicIdsText(value);
+            handleSaveWxPusherConfig();
+          }}
+        />
+        <ButtonRow label="测试 WxPusher 推送" onPress={handleTestWxPusherPush} loading={testingWxPusherPush} />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="非保活时段"
+        footer="远程保活点落在该时段内时，取消本轮保活。"
+      >
+        <SwitchRow
+          label="启用非保活时段"
           value={!!promptCacheConfig?.quietHoursEnabled}
           onValueChange={(value) => {
             setPromptCacheConfig({ quietHoursEnabled: value });
             showToast(value ? '远程保活勿扰已开启' : '远程保活勿扰已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
         />
-      </View>
-
-      {!!promptCacheConfig?.quietHoursEnabled && (
-        <View style={styles.promptCacheQuietPanel}>
-          <View style={styles.promptCacheQuietField}>
-            <Text style={styles.label}>开始</Text>
-            <TextInput
-              style={styles.input}
-              value={quietStartText}
-              onChangeText={setQuietStartText}
-              onBlur={handleSavePromptCacheQuietHours}
-              keyboardType="numbers-and-punctuation"
-              placeholder="23:00"
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-          <View style={styles.promptCacheQuietField}>
-            <Text style={styles.label}>结束</Text>
-            <TextInput
-              style={styles.input}
-              value={quietEndText}
-              onChangeText={setQuietEndText}
-              onBlur={handleSavePromptCacheQuietHours}
-              keyboardType="numbers-and-punctuation"
-              placeholder="07:00"
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-        </View>
-      )}
+        {!!promptCacheConfig?.quietHoursEnabled && (
+          <TextEditRow
+            label="开始时间"
+            value={quietStartText}
+            inputPlaceholder="23:00"
+            dialogDescription="HH:mm 格式，例如 23:00"
+            validate={(text) => (parseClockMinutes(text) === null ? '请输入 HH:mm 格式的时间' : null)}
+            onSave={(value) => {
+              setQuietStartText(value);
+              handleSavePromptCacheQuietHours(value, quietEndText);
+            }}
+          />
+        )}
+        {!!promptCacheConfig?.quietHoursEnabled && (
+          <TextEditRow
+            label="结束时间"
+            value={quietEndText}
+            inputPlaceholder="07:00"
+            dialogDescription="HH:mm 格式，例如 07:00"
+            validate={(text) => (parseClockMinutes(text) === null ? '请输入 HH:mm 格式的时间' : null)}
+            onSave={(value) => {
+              setQuietEndText(value);
+              handleSavePromptCacheQuietHours(quietStartText, value);
+            }}
+          />
+        )}
+      </SettingsGroup>
 
     </ScrollView>
   );

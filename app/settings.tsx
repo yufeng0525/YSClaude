@@ -62,7 +62,6 @@ export default function SettingsScreen() {
         </Pressable>
         <View style={styles.headerTitleBlock}>
           <Text style={styles.title}>设置</Text>
-          <Text style={styles.subtitle}>偏好、工具和外观</Text>
         </View>
         <View style={styles.backButton} />
       </View>

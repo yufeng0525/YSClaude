@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSettingsPageColors } from '../../theme/colors';
 import {
@@ -16,6 +16,7 @@ import { createAndShareBackup, pickBackupFile, restoreBackup, type PickedBackup 
 import { disablePromptCacheRemoteKeepalive } from '../../services/promptCacheKeepalive';
 import { formatFullTime } from '../../utils/time';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, OptionListDialog, SelectRow, SettingsGroup, SwitchRow, TextEditRow } from './ui';
 
 type SettingsTabProps = {
   showToast: (message: string) => void;
@@ -44,7 +45,6 @@ const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string }> =
   { value: 'high', label: 'high' },
 ];
 type ModelPickerTarget = 'chat' | 'image';
-type ImageOptionTarget = 'size' | 'quality';
 
 export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
   const colors = useSettingsPageColors();
@@ -83,7 +83,6 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
   const [models, setModels] = useState<string[]>([]);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [modelPickerTarget, setModelPickerTarget] = useState<ModelPickerTarget>('chat');
-  const [showImageOptionPicker, setShowImageOptionPicker] = useState<ImageOptionTarget | null>(null);
   const [testing, setTesting] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
@@ -286,15 +285,6 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
     setShowModelPicker(false);
   }
 
-  function handleSelectImageOption(item: string) {
-    if (showImageOptionPicker === 'quality') {
-      setImageQuality(item);
-    } else {
-      setImageSize(item);
-    }
-    setShowImageOptionPicker(null);
-  }
-
   function handleSelectConfig(index: number) {
     setActiveConfig(index);
     loadConfig(index);
@@ -429,118 +419,92 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
         </>
       )}
 
-      <Text style={styles.sectionTitle}>API 配置</Text>
-      <View style={styles.field}>
-        <Text style={styles.label}>配置名称</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName}
-          placeholder="例如：Claude 中转" placeholderTextColor={colors.textTertiary} />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Base URL</Text>
-        <TextInput style={styles.input} value={baseUrl} onChangeText={setBaseUrl}
-          placeholder="https://api.openai.com/v1" placeholderTextColor={colors.textTertiary} autoCapitalize="none" />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>API Key</Text>
-        <TextInput style={styles.input} value={apiKey} onChangeText={setApiKey}
-          placeholder="sk-..." placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Model</Text>
-        <View style={styles.modelRow}>
-          <TextInput style={[styles.input, { flex: 1 }]} value={model} onChangeText={setModel}
-            placeholder="claude-sonnet-4-6" placeholderTextColor={colors.textTertiary} autoCapitalize="none" />
-          <Pressable style={styles.fetchButton} onPress={() => handleFetchModels('chat')} disabled={fetching}>
-            {fetching ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.fetchButtonText}>拉取</Text>}
-          </Pressable>
-        </View>
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Temperature</Text>
-        <TextInput
-          style={styles.input}
-          value={temperature}
-          onChangeText={setTemperature}
-          keyboardType="decimal-pad"
-          placeholder="留空使用服务默认值"
-          placeholderTextColor={colors.textTertiary}
+      <SettingsGroup header="API 配置">
+        <TextEditRow
+          label="配置名称"
+          value={name}
+          inputPlaceholder="例如：Claude 中转"
+          onSave={(value) => setName(value)}
         />
-      </View>
-      <Text style={styles.label}>Thinking 强度</Text>
-      <View style={styles.segmentedRow}>
-        {THINKING_EFFORT_OPTIONS.map((item) => (
-          <Pressable
-            key={item.value}
-            style={[styles.segmentedButton, thinkingEffort === item.value && styles.segmentedButtonActive]}
-            onPress={() => setThinkingEffort(item.value)}
-          >
-            <Text style={[styles.segmentedText, thinkingEffort === item.value && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>强度越高通常思考更充分，但可能更慢、消耗更多 reasoning tokens。</Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>让 AI 生成思维链</Text>
-          <Text style={styles.hint}>开启后，请求会按下方渠道附加 reasoning 参数。</Text>
-        </View>
-        <Switch
+        <TextEditRow
+          label="Base URL"
+          value={baseUrl}
+          inputPlaceholder="https://api.openai.com/v1"
+          onSave={(value) => setBaseUrl(value)}
+        />
+        <TextEditRow
+          label="API Key"
+          value={apiKey}
+          secure
+          inputPlaceholder="sk-..."
+          onSave={(value) => setApiKey(value)}
+        />
+        <TextEditRow
+          label="Model"
+          value={model}
+          inputPlaceholder="claude-sonnet-4-6"
+          onSave={(value) => setModel(value)}
+        />
+        <ButtonRow
+          label="拉取模型列表"
+          onPress={() => handleFetchModels('chat')}
+          loading={fetching && !showModelPicker}
+          disabled={fetching}
+        />
+        <TextEditRow
+          label="Temperature"
+          value={temperature}
+          placeholder="服务默认"
+          keyboardType="decimal-pad"
+          dialogDescription="0 到 2 之间的数字，留空使用服务默认值"
+          validate={(text) => (parseOptionalTemperature(text) === null ? '必须是 0 到 2 之间的数字，或留空' : null)}
+          onSave={(value) => setTemperature(value.trim())}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="思维链"
+        footer="标准和 OpenRouter 使用 reasoning.effort；NanoGPT 额外发送 reasoning_effort。强度越高通常思考更充分，但可能更慢、消耗更多 reasoning tokens。"
+      >
+        <SwitchRow
+          label="让 AI 生成思维链"
+          sublabel="开启后，请求会按所选渠道附加 reasoning 参数"
           value={generateThinking}
           onValueChange={setGenerateThinking}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-      <Text style={styles.label}>Thinking 渠道</Text>
-      <View style={styles.segmentedRow}>
-        {THINKING_COMPATIBILITY_OPTIONS.map((item) => (
-          <Pressable
-            key={item.value}
-            style={[styles.segmentedButton, thinkingCompatibility === item.value && styles.segmentedButtonActive]}
-            onPress={() => setThinkingCompatibility(item.value)}
-          >
-            <Text style={[styles.segmentedText, thinkingCompatibility === item.value && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>标准和 OpenRouter 使用 reasoning.effort；NanoGPT 额外发送 reasoning_effort。</Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>返回原生思维链</Text>
-          <Text style={styles.hint}>开启后会显示兼容接口返回的 reasoning_content；关闭后忽略该字段。</Text>
-        </View>
-        <Switch
+        <SelectRow
+          label="Thinking 强度"
+          options={THINKING_EFFORT_OPTIONS}
+          value={thinkingEffort}
+          onSelect={(value) => setThinkingEffort(value as ThinkingEffort)}
+        />
+        <SelectRow
+          label="Thinking 渠道"
+          options={THINKING_COMPATIBILITY_OPTIONS}
+          value={thinkingCompatibility}
+          onSelect={(value) => setThinkingCompatibility(value as ThinkingCompatibility)}
+        />
+        <SwitchRow
+          label="返回原生思维链"
+          sublabel="开启后会显示兼容接口返回的 reasoning_content；关闭后忽略该字段"
           value={returnNativeThinking}
           onValueChange={setReturnNativeThinking}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-      <Text style={styles.label}>Prompt 缓存渠道</Text>
-      <View style={styles.segmentedRow}>
-        {PROMPT_CACHE_COMPATIBILITY_OPTIONS.map((item) => (
-          <Pressable
-            key={item.value}
-            style={[styles.segmentedButton, promptCacheCompatibility === item.value && styles.segmentedButtonActive]}
-            onPress={() => setPromptCacheCompatibility(item.value)}
-          >
-            <Text style={[styles.segmentedText, promptCacheCompatibility === item.value && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>OpenRouter 直接透传 inline cache_control；NanoGPT 会额外发送 promptCaching 与 1h beta header。</Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>启用 cache_control</Text>
-          <Text style={styles.hint}>开启后，请求会透传 session_id，并在稳定的 system prompt 与历史对话末尾添加 cache_control。仅在你的 API 中转支持该字段时开启。</Text>
-        </View>
-        <Switch
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="Prompt 缓存"
+        footer="OpenRouter 直接透传 inline cache_control；NanoGPT 会额外发送 promptCaching 与 1h beta header。5min 使用 Claude 默认短缓存；1h 会在 cache_control 中附加 ttl，并可配合对话设置里的远程保活。"
+      >
+        <SelectRow
+          label="缓存渠道"
+          options={PROMPT_CACHE_COMPATIBILITY_OPTIONS}
+          value={promptCacheCompatibility}
+          onSelect={(value) => setPromptCacheCompatibility(value as PromptCacheCompatibility)}
+        />
+        <SwitchRow
+          label="启用 cache_control"
+          sublabel="开启后请求会透传 session_id，并在稳定 system prompt 与历史对话末尾添加 cache_control。仅在你的 API 中转支持该字段时开启。"
           value={!!promptCacheConfig?.enabled}
           onValueChange={(value) => {
             setPromptCacheConfig({ enabled: value });
@@ -549,220 +513,107 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
             }
             showToast(value ? 'Prompt 缓存已开启' : 'Prompt 缓存已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-      <Text style={styles.label}>缓存时间</Text>
-      <View style={styles.segmentedRow}>
-        {PROMPT_CACHE_TTL_OPTIONS.map((item) => (
-          <Pressable
-            key={item.value}
-            style={[styles.segmentedButton, promptCacheTtl === item.value && styles.segmentedButtonActive]}
-            onPress={() => {
-              setPromptCacheConfig({ ttl: item.value });
-              if (item.value !== '1h' && conversationId) {
-                disablePromptCacheRemoteKeepalive(conversationId).catch(() => undefined);
-              }
-              showToast(`Prompt 缓存时间已设为 ${item.label}`);
-            }}
-          >
-            <Text style={[styles.segmentedText, promptCacheTtl === item.value && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>5min 使用 Claude 默认短缓存；1h 会在 cache_control 中附加 ttl，并可配合对话设置里的远程保活。</Text>
+        <SelectRow
+          label="缓存时间"
+          options={PROMPT_CACHE_TTL_OPTIONS}
+          value={promptCacheTtl}
+          onSelect={(value) => {
+            setPromptCacheConfig({ ttl: value as PromptCacheTtl });
+            if (value !== '1h' && conversationId) {
+              disablePromptCacheRemoteKeepalive(conversationId).catch(() => undefined);
+            }
+            showToast(`Prompt 缓存时间已设为 ${value}`);
+          }}
+        />
+      </SettingsGroup>
 
-      <View style={styles.actions}>
-        <Pressable style={styles.testButton} onPress={handleTest} disabled={testing}>
-          {testing ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.testButtonText}>测试连接</Text>}
-        </Pressable>
-        <Pressable style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>保存配置</Text>
-        </Pressable>
-      </View>
+      <SettingsGroup>
+        <ButtonRow label="测试连接" onPress={handleTest} loading={testing} />
+        <ButtonRow label="保存配置" onPress={handleSave} />
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>AI 生图 API</Text>
-      <Text style={styles.hint}>识别 AI 回复里的 [Pic:图片描述] 后调用 OpenAI 兼容生图接口；有参考图或锁脸图时会走 /images/edits。Base URL 和 Key 留空时会沿用当前聊天 API 配置。</Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>启用 AI 生图</Text>
-          <Text style={styles.hint}>关闭后 [Pic:...] 只按普通文本保留，不会生成图片。</Text>
-        </View>
-        <Switch
+      <SettingsGroup
+        header="AI 生图 API"
+        footer="识别 AI 回复里的 [Pic:图片描述] 后调用 OpenAI 兼容生图接口；有参考图或锁脸图时会走 /images/edits。Base URL 和 Key 留空时会沿用当前聊天 API 配置。"
+      >
+        <SwitchRow
+          label="启用 AI 生图"
+          sublabel="关闭后 [Pic:...] 只按普通文本保留，不会生成图片"
           value={imageEnabled}
           onValueChange={setImageEnabled}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Base URL</Text>
-        <TextInput
-          style={styles.input}
+        <TextEditRow
+          label="Base URL"
           value={imageBaseUrl}
-          onChangeText={setImageBaseUrl}
-          placeholder="留空沿用当前聊天 API"
-          placeholderTextColor={colors.textTertiary}
-          autoCapitalize="none"
+          placeholder="沿用聊天 API"
+          onSave={(value) => setImageBaseUrl(value)}
         />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>API Key</Text>
-        <TextInput
-          style={styles.input}
+        <TextEditRow
+          label="API Key"
           value={imageApiKey}
-          onChangeText={setImageApiKey}
-          placeholder="留空沿用当前聊天 API"
-          placeholderTextColor={colors.textTertiary}
-          secureTextEntry
-          autoCapitalize="none"
+          secure
+          placeholder="沿用聊天 API"
+          onSave={(value) => setImageApiKey(value)}
         />
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>生图模型</Text>
-        <View style={styles.modelRow}>
-          <TextInput
-            style={[styles.input, { flex: 1 }]}
-            value={imageModel}
-            onChangeText={setImageModel}
-            placeholder="gpt-image-2"
-            placeholderTextColor={colors.textTertiary}
-            autoCapitalize="none"
-          />
-          <Pressable style={styles.fetchButton} onPress={() => handleFetchModels('image')} disabled={fetching}>
-            {fetching ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.fetchButtonText}>拉取</Text>}
-          </Pressable>
-        </View>
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>图片尺寸</Text>
-        <Pressable style={styles.selectInput} onPress={() => setShowImageOptionPicker('size')}>
-          <Text style={styles.selectInputText}>{imageSize}</Text>
-          <Text style={styles.selectInputChevron}>⌄</Text>
-        </Pressable>
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>图片质量</Text>
-        <Pressable style={styles.selectInput} onPress={() => setShowImageOptionPicker('quality')}>
-          <Text style={styles.selectInputText}>{imageQuality}</Text>
-          <Text style={styles.selectInputChevron}>⌄</Text>
-        </Pressable>
-      </View>
-      <View style={styles.actions}>
-        <Pressable style={styles.testButton} onPress={handleUseCurrentChatAPIForImage}>
-          <Text style={styles.testButtonText}>沿用当前 API</Text>
-        </Pressable>
-        <Pressable style={styles.saveButton} onPress={handleSaveImageAPI}>
-          <Text style={styles.saveButtonText}>保存生图 API</Text>
-        </Pressable>
-      </View>
+        <TextEditRow
+          label="生图模型"
+          value={imageModel}
+          inputPlaceholder="gpt-image-2"
+          onSave={(value) => setImageModel(value)}
+        />
+        <ButtonRow
+          label="拉取生图模型列表"
+          onPress={() => handleFetchModels('image')}
+          disabled={fetching}
+        />
+        <SelectRow
+          label="图片尺寸"
+          options={IMAGE_SIZE_OPTIONS.map((item) => ({ value: item, label: item }))}
+          value={imageSize}
+          onSelect={(value) => setImageSize(value)}
+        />
+        <SelectRow
+          label="图片质量"
+          options={IMAGE_QUALITY_OPTIONS.map((item) => ({ value: item, label: item }))}
+          value={imageQuality}
+          onSelect={(value) => setImageQuality(value)}
+        />
+        <ButtonRow label="沿用当前聊天 API 的地址和 Key" onPress={handleUseCurrentChatAPIForImage} />
+        <ButtonRow label="保存生图 API" onPress={handleSaveImageAPI} />
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>数据备份</Text>
-      <View style={styles.backupPanel}>
-        <Text style={styles.hint}>
-          创建完整备份包后可分享到 Google Drive；恢复时从 Google Drive 选择备份 zip，并覆盖当前本地数据。
-        </Text>
-        <View style={styles.backupActions}>
-          <Pressable
-            style={[styles.backupPrimaryButton, (creatingBackup || restoringBackup) && styles.importButtonDisabled]}
-            onPress={handleCreateBackup}
-            disabled={creatingBackup || restoringBackup}
-          >
-            {creatingBackup ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.saveButtonText}>创建备份并分享</Text>
-            )}
-          </Pressable>
-          <Pressable
-            style={[styles.backupDangerButton, (creatingBackup || restoringBackup) && styles.importButtonDisabled]}
-            onPress={handlePickRestoreBackup}
-            disabled={creatingBackup || restoringBackup}
-          >
-            {restoringBackup ? (
-              <ActivityIndicator size="small" color={colors.danger} />
-            ) : (
-              <Text style={styles.backupDangerText}>从备份恢复</Text>
-            )}
-          </Pressable>
-        </View>
-        <Pressable
-          style={styles.diagnosticsButton}
-          onPress={() => router.push('/chat-diagnostics')}
-        >
-          <Text style={styles.diagnosticsButtonText}>打开聊天数据库诊断</Text>
-        </Pressable>
-        <Pressable
-          style={styles.diagnosticsButton}
-          onPress={() => router.push('/api-usage')}
-        >
-          <Text style={styles.diagnosticsButtonText}>打开 API 使用日志</Text>
-        </Pressable>
-        <Pressable
-          style={styles.diagnosticsButton}
-          onPress={() => router.push('/api-achievements')}
-        >
-          <Text style={styles.diagnosticsButtonText}>打开 API 成就徽章</Text>
-        </Pressable>
-      </View>
+      <SettingsGroup
+        header="数据备份"
+        footer="创建完整备份包后可分享到 Google Drive；恢复时从 Google Drive 选择备份 zip，并覆盖当前本地数据。"
+      >
+        <ButtonRow
+          label="创建备份并分享"
+          onPress={handleCreateBackup}
+          loading={creatingBackup}
+          disabled={creatingBackup || restoringBackup}
+        />
+        <ButtonRow
+          label="从备份恢复"
+          destructive
+          onPress={handlePickRestoreBackup}
+          loading={restoringBackup}
+          disabled={creatingBackup || restoringBackup}
+        />
+        <ButtonRow label="打开聊天数据库诊断" onPress={() => router.push('/chat-diagnostics')} />
+        <ButtonRow label="打开 API 使用日志" onPress={() => router.push('/api-usage')} />
+        <ButtonRow label="打开 API 成就徽章" onPress={() => router.push('/api-achievements')} />
+      </SettingsGroup>
 
-      {/* Model picker modal */}
-      <Modal visible={showModelPicker} transparent animationType="fade">
-        <Pressable style={styles.overlay} onPress={() => setShowModelPicker(false)}>
-          <View style={styles.modal} onStartShouldSetResponder={() => true}>
-            <Text style={styles.modalTitle}>
-              {modelPickerTarget === 'image' ? '选择生图模型' : '选择聊天模型'}
-            </Text>
-            <FlatList
-              data={models}
-              keyExtractor={(item) => item}
-              style={styles.modelList}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={[
-                    styles.modelItem,
-                    item === (modelPickerTarget === 'image' ? imageModel : model) && styles.modelItemActive,
-                  ]}
-                  onPress={() => handleSelectModel(item)}
-                >
-                  <Text
-                    style={[
-                      styles.modelItemText,
-                      item === (modelPickerTarget === 'image' ? imageModel : model) && styles.modelItemTextActive,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </Pressable>
-              )}
-            />
-          </View>
-        </Pressable>
-      </Modal>
-      <Modal visible={showImageOptionPicker !== null} transparent animationType="fade">
-        <Pressable style={styles.overlay} onPress={() => setShowImageOptionPicker(null)}>
-          <View style={styles.modal} onStartShouldSetResponder={() => true}>
-            <Text style={styles.modalTitle}>
-              {showImageOptionPicker === 'quality' ? '选择图片质量' : '选择图片尺寸'}
-            </Text>
-            {(showImageOptionPicker === 'quality' ? IMAGE_QUALITY_OPTIONS : IMAGE_SIZE_OPTIONS).map((item) => {
-              const active = item === (showImageOptionPicker === 'quality' ? imageQuality : imageSize);
-              return (
-                <Pressable
-                  key={item}
-                  style={[styles.modelItem, active && styles.modelItemActive]}
-                  onPress={() => handleSelectImageOption(item)}
-                >
-                  <Text style={[styles.modelItemText, active && styles.modelItemTextActive]}>{item}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Pressable>
-      </Modal>
+      {/* Model picker */}
+      <OptionListDialog
+        visible={showModelPicker}
+        title={modelPickerTarget === 'image' ? '选择生图模型' : '选择聊天模型'}
+        options={models.map((item) => ({ value: item, label: item }))}
+        value={modelPickerTarget === 'image' ? imageModel : model}
+        onCancel={() => setShowModelPicker(false)}
+        onSelect={handleSelectModel}
+      />
     </ScrollView>
   );
 }

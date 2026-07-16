@@ -7,6 +7,7 @@ import { uploadDiary } from '../../services/tools';
 import { formatDateOnly, formatFullTime } from '../../utils/time';
 import { type Diary } from '../../types';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, SettingsGroup, SettingsRow } from './ui';
 
 type SettingsTabProps = {
   showToast: (message: string) => void;
@@ -115,38 +116,31 @@ export function DiaryTab({ keyboardBottomInset }: SettingsTabProps) {
       keyboardShouldPersistTaps="handled"
     >
       {/* 我的日记 */}
-      <View style={styles.diaryHeaderRow}>
-        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>我的日记</Text>
-        <Pressable style={styles.diaryAddButton} onPress={handleOpenCreate}>
-          <Text style={styles.diaryAddText}>+ 新建</Text>
-        </Pressable>
-      </View>
-      {diaries.length === 0 ? (
-        <Text style={styles.hint}>暂无日记</Text>
-      ) : (
-        diaries.map((d) => (
-          <Pressable
+      <SettingsGroup header="我的日记" footer={diaries.length > 0 ? '点击编辑，长按删除' : undefined}>
+        <ButtonRow label="＋ 新建日记" onPress={handleOpenCreate} />
+        {diaries.map((d) => (
+          <SettingsRow
             key={d.id}
-            style={styles.diaryItem}
+            label={d.title || '无标题'}
+            sublabel={`${d.content ? `${d.content.slice(0, 60)}\n` : ''}${formatFullTime(d.createdAt)}`}
             onPress={() => handleOpenEdit(d)}
             onLongPress={() => handleDeleteDiary(d)}
-          >
-            <Pressable style={styles.diaryStar} onPress={() => toggleFavorite(d.id)} hitSlop={8}>
-              <Text style={[styles.diaryStarText, d.isFavorite && styles.diaryStarActive]}>
-                {d.isFavorite ? '★' : '☆'}
-              </Text>
-            </Pressable>
-            <View style={styles.diaryContent}>
-              <Text style={styles.diaryTitle} numberOfLines={1}>{d.title || '无标题'}</Text>
-              <Text style={styles.diaryPreview} numberOfLines={1}>{d.content}</Text>
-              <Text style={styles.diaryDate}>{formatFullTime(d.createdAt)}</Text>
-            </View>
-            <Pressable style={styles.diaryUpload} onPress={() => handleOpenUpload(d)} hitSlop={8}>
-              <Text style={styles.diaryUploadText}>上传</Text>
-            </Pressable>
-          </Pressable>
-        ))
-      )}
+            left={
+              <Pressable onPress={() => toggleFavorite(d.id)} hitSlop={8}>
+                <Text style={[styles.diaryStarText, d.isFavorite && styles.diaryStarActive]}>
+                  {d.isFavorite ? '★' : '☆'}
+                </Text>
+              </Pressable>
+            }
+            right={
+              <Pressable onPress={() => handleOpenUpload(d)} hitSlop={8}>
+                <Text style={styles.diaryUploadText}>上传</Text>
+              </Pressable>
+            }
+          />
+        ))}
+      </SettingsGroup>
+      {diaries.length === 0 && <Text style={styles.hint}>暂无日记</Text>}
 
       <View style={{ height: 40 }} />
 

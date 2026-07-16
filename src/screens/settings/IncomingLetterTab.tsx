@@ -7,6 +7,7 @@ import type { IncomingLetterOccasion } from '../../types';
 import { formatDateOnly } from '../../utils/time';
 import { generateImmediateIncomingLetter } from '../../services/incomingLetters';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, SettingsGroup, SettingsRow, SwitchRow } from './ui';
 
 type IncomingLetterTabProps = {
   showToast: (message: string) => void;
@@ -142,78 +143,60 @@ export function IncomingLetterTab({ showToast, keyboardBottomInset }: IncomingLe
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>启用来信</Text>
-          <Text style={styles.hint}>当天打开 App 或回到前台时，会为命中的收信日生成并保存一封信。</Text>
-        </View>
-        <Switch
+      <SettingsGroup footer="当天打开 App 或回到前台时，会为命中的收信日生成并保存一封信。">
+        <SwitchRow
+          label="启用来信"
           value={!!incomingLetterConfig?.enabled}
           onValueChange={(value) => {
             setIncomingLetterConfig({ enabled: value });
             showToast(value ? '来信已开启' : '来信已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
-          thumbColor="#FFFFFF"
         />
-      </View>
+      </SettingsGroup>
 
-      <View style={styles.diaryHeaderRow}>
-        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>自定义收信日</Text>
-        <Pressable style={styles.diaryAddButton} onPress={openCreate}>
-          <Text style={styles.diaryAddText}>+ 新建</Text>
-        </Pressable>
-      </View>
-
-      {occasions.length === 0 ? (
-        <View style={styles.customStickerEmpty}>
-          <Text style={styles.hint}>暂无收信日。可以添加生日、纪念日或任何你想收到信的日子。</Text>
-        </View>
-      ) : (
-        <View style={styles.rangeList}>
-          {occasions.map((occasion) => (
-            <Pressable
-              key={occasion.id}
-              style={styles.diaryItem}
-              onPress={() => openEdit(occasion)}
-            >
-              <View style={styles.diaryContent}>
-                <Text style={styles.diaryTitle}>{occasion.title || '收信日'}</Text>
-                <Text style={styles.diaryPreview} numberOfLines={2}>
-                  {occasion.date} · {occasion.repeatYearly ? '每年重复' : '仅此一次'} · {occasion.enabled ? '已开启' : '已关闭'}
-                </Text>
-                <Text style={styles.diaryDate} numberOfLines={1}>
-                  {occasion.systemPrompt ? '已设置专属 System Prompt' : '未设置 System Prompt'}
-                </Text>
+      <SettingsGroup
+        header="自定义收信日"
+        footer={
+          occasions.length === 0
+            ? '暂无收信日。可以添加生日、纪念日或任何你想收到信的日子。'
+            : '点击编辑收信日，右侧开关控制启用状态。'
+        }
+      >
+        <ButtonRow label="＋ 新建收信日" onPress={openCreate} />
+        {occasions.map((occasion) => (
+          <SettingsRow
+            key={occasion.id}
+            label={occasion.title || '收信日'}
+            sublabel={`${occasion.date} · ${occasion.repeatYearly ? '每年重复' : '仅此一次'} · ${occasion.systemPrompt ? '已设置专属 System Prompt' : '未设置 System Prompt'}`}
+            onPress={() => openEdit(occasion)}
+            onLongPress={() => handleDelete(occasion)}
+            right={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable
+                  style={[
+                    styles.smallActionButton,
+                    generatingOccasionId === occasion.id && styles.smallActionButtonDisabled,
+                  ]}
+                  onPress={() => handleGenerateNow(occasion)}
+                  disabled={!!generatingOccasionId}
+                >
+                  {generatingOccasionId === occasion.id ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={styles.smallActionText}>立即来信</Text>
+                  )}
+                </Pressable>
+                <Switch
+                  value={occasion.enabled}
+                  onValueChange={(enabled) => updateIncomingLetterOccasion(occasion.id, { enabled })}
+                  trackColor={{ false: colors.inputBorder, true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
               </View>
-              <Switch
-                value={occasion.enabled}
-                onValueChange={(enabled) => updateIncomingLetterOccasion(occasion.id, { enabled })}
-                trackColor={{ false: colors.inputBorder, true: colors.primary }}
-                thumbColor="#FFFFFF"
-              />
-              <Pressable
-                style={[
-                  styles.smallActionButton,
-                  styles.incomingLetterNowButton,
-                  generatingOccasionId === occasion.id && styles.smallActionButtonDisabled,
-                ]}
-                onPress={() => handleGenerateNow(occasion)}
-                disabled={!!generatingOccasionId}
-              >
-                {generatingOccasionId === occasion.id ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Text style={styles.smallActionText}>立即来信</Text>
-                )}
-              </Pressable>
-              <Pressable style={styles.deleteButton} onPress={() => handleDelete(occasion)}>
-                <Text style={styles.deleteIcon}>×</Text>
-              </Pressable>
-            </Pressable>
-          ))}
-        </View>
-      )}
+            }
+          />
+        ))}
+      </SettingsGroup>
 
       <Modal visible={creating} transparent animationType="fade" onRequestClose={closeEditor}>
         <View style={styles.overlay}>

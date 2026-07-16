@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
@@ -8,6 +8,7 @@ import { type CustomSticker, type StickerOwner, useSettingsStore } from '../../s
 import { buildStickerDefinitions, normalizeStickerName } from '../../utils/stickers';
 import { copyFileFromUri } from '../../utils/fileSystem';
 import { createSettingsStyles } from './styles';
+import { ButtonRow, SelectRow, SettingsGroup, SettingsRow, SwitchRow, TextEditRow, TextInputDialog } from './ui';
 
 type StickerTabProps = {
   showToast: (message: string) => void;
@@ -88,6 +89,7 @@ export function StickerTab({ showToast, keyboardBottomInset }: StickerTabProps) 
   const [stickerName, setStickerName] = useState('');
   const [bulkImportText, setBulkImportText] = useState('');
   const [pickingSticker, setPickingSticker] = useState<string | null>(null);
+  const [renamingSticker, setRenamingSticker] = useState<CustomSticker | null>(null);
   const userStickers = stickerConfig?.userStickers || [];
   const assistantStickers = stickerConfig?.assistantStickers || [];
   const stickerSuggestionsEnabled = stickerConfig?.stickerSuggestionsEnabled ?? true;
@@ -171,18 +173,15 @@ export function StickerTab({ showToast, keyboardBottomInset }: StickerTabProps) 
     }
   }
 
-  function handleRenameSticker(owner: StickerOwner, sticker: CustomSticker, value: string) {
-    updateSticker(owner, sticker.id, { name: value });
-  }
-
-  function handleBlurStickerName(owner: StickerOwner, sticker: CustomSticker) {
-    const normalizedName = normalizeStickerName(sticker.name);
+  function handleRenameStickerSave(owner: StickerOwner, sticker: CustomSticker, value: string) {
+    const normalizedName = normalizeStickerName(value);
     const nameError = validateStickerName(owner, normalizedName, sticker.id);
     if (nameError) {
       Alert.alert('表情包名称不可用', nameError);
       return;
     }
     updateSticker(owner, sticker.id, { name: normalizedName });
+    showToast('表情包名称已更新');
   }
 
   function handleRemoveSticker(owner: StickerOwner, sticker: CustomSticker) {
@@ -240,90 +239,73 @@ export function StickerTab({ showToast, keyboardBottomInset }: StickerTabProps) 
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.sectionTitle}>表情包管理</Text>
-      <Text style={styles.hint}>
-        表情包全部由用户自定义添加；上传图片或批量导入链接后才会显示。
-      </Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.label}>输入时推荐表情包</Text>
-          <Text style={styles.hint}>在聊天输入框上方显示和文字匹配的“我的表情包”。</Text>
-        </View>
-        <Switch
+      <SettingsGroup
+        header="表情包管理"
+        footer="表情包全部由用户自定义添加；上传图片或批量导入链接后才会显示。"
+      >
+        <SwitchRow
+          label="输入时推荐表情包"
+          sublabel="在聊天输入框上方显示和文字匹配的「我的表情包」"
           value={stickerSuggestionsEnabled}
           onValueChange={(value) => {
             setStickerSuggestionsEnabled(value);
             showToast(value ? '表情包推荐已开启' : '表情包推荐已关闭');
           }}
-          trackColor={{ false: colors.inputBorder, true: colors.primary }}
         />
-      </View>
-      <View style={styles.segmentedRow}>
-        {([
-          { key: 'user' as const, label: `我的表情包 ${userStickers.length}` },
-          { key: 'assistant' as const, label: `AI 表情包 ${assistantStickers.length}` },
-        ]).map((item) => (
-          <Pressable
-            key={item.key}
-            style={[styles.segmentedButton, stickerOwner === item.key && styles.segmentedButtonActive]}
-            onPress={() => setStickerOwner(item.key)}
-          >
-            <Text style={[styles.segmentedText, stickerOwner === item.key && styles.segmentedTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+        <SelectRow
+          label="当前分组"
+          options={[
+            { value: 'user', label: `我的表情包（${userStickers.length}）` },
+            { value: 'assistant', label: `AI 表情包（${assistantStickers.length}）` },
+          ]}
+          value={stickerOwner}
+          onSelect={(value) => setStickerOwner(value as StickerOwner)}
+        />
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>上传图片</Text>
-      <View style={styles.stickerAddRow}>
-        <TextInput
-          style={[styles.input, styles.stickerNameInput]}
+      <SettingsGroup
+        header="添加表情包"
+        footer="批量导入格式：「名称 链接」一行一个，名称和链接之间可用空格、中文冒号或英文冒号。"
+      >
+        <TextEditRow
+          label="表情包名称"
           value={stickerName}
-          onChangeText={setStickerName}
-          placeholder="表情包名称"
-          placeholderTextColor={colors.textTertiary}
-          returnKeyType="done"
+          placeholder="未填写"
+          dialogDescription="先填写名称，再点击「上传图片」选择图片"
+          onSave={(value) => setStickerName(value)}
         />
-        <Pressable
-          style={[styles.appearanceThemeSaveButton, pickingSticker !== null && styles.smallActionButtonDisabled]}
+        <ButtonRow
+          label="上传图片"
           onPress={handleAddSticker}
+          loading={pickingSticker === `${stickerOwner}-new`}
           disabled={pickingSticker !== null}
-        >
-          {pickingSticker === `${stickerOwner}-new` ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>上传</Text>
-          )}
-        </Pressable>
-      </View>
+        />
+        <TextEditRow
+          label="链接批量导入"
+          value={bulkImportText}
+          placeholder="未填写"
+          multiline
+          inputPlaceholder={'好喜欢 https://example.com/a.png\n得逞：https://example.com/b.webp\n哭哭: https://example.com/c.jpg'}
+          onSave={(value) => setBulkImportText(value)}
+        />
+        <ButtonRow label="导入链接" onPress={handleBulkImport} disabled={!bulkImportText.trim()} />
+      </SettingsGroup>
 
-      <Text style={styles.sectionTitle}>链接批量导入</Text>
-      <TextInput
-        style={[styles.input, styles.multilineInput, styles.bulkImportInput]}
-        value={bulkImportText}
-        onChangeText={setBulkImportText}
-        multiline
-        placeholder={'好喜欢 https://example.com/a.png\n得逞：https://example.com/b.webp\n哭哭: https://example.com/c.jpg'}
-        placeholderTextColor={colors.textTertiary}
-        autoCapitalize="none"
-      />
-      <Pressable style={styles.importButton} onPress={handleBulkImport}>
-        <Text style={styles.importButtonText}>导入链接</Text>
-      </Pressable>
-
-      <Text style={styles.sectionTitle}>当前清单</Text>
-      <View style={styles.customStickerList}>
-        {currentStickers.length === 0 ? (
-          <View style={styles.customStickerEmpty}>
-            <Text style={styles.emptyText}>这一组已经没有表情包了。</Text>
-          </View>
-        ) : (
-          currentStickers.map((sticker) => {
-            const isPicking = pickingSticker === sticker.id;
-            const definition = buildStickerDefinitions([sticker])[0];
-            return (
-              <View key={sticker.id} style={styles.customStickerRow}>
+      <SettingsGroup
+        header="当前清单"
+        footer={currentStickers.length === 0 ? '这一组已经没有表情包了。' : '点击名称可重命名。'}
+      >
+        {currentStickers.map((sticker) => {
+          const isPicking = pickingSticker === sticker.id;
+          const definition = buildStickerDefinitions([sticker])[0];
+          return (
+            <SettingsRow
+              key={sticker.id}
+              label={sticker.name || '未命名'}
+              onPress={() => {
+                setRenamingSticker(sticker);
+              }}
+              left={
                 <View style={styles.customStickerPreview}>
                   {definition ? (
                     <Image source={definition.image} style={styles.customStickerImage} resizeMode="contain" />
@@ -331,14 +313,8 @@ export function StickerTab({ showToast, keyboardBottomInset }: StickerTabProps) 
                     <Text style={styles.appearanceImagePlaceholder}>ST</Text>
                   )}
                 </View>
-                <TextInput
-                  style={[styles.input, styles.customStickerNameInput]}
-                  value={sticker.name}
-                  onChangeText={(value) => handleRenameSticker(stickerOwner, sticker, value)}
-                  onBlur={() => handleBlurStickerName(stickerOwner, sticker)}
-                  placeholder="表情包名称"
-                  placeholderTextColor={colors.textTertiary}
-                />
+              }
+              right={
                 <View style={styles.appearanceIconActions}>
                   <Pressable
                     style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}
@@ -354,11 +330,25 @@ export function StickerTab({ showToast, keyboardBottomInset }: StickerTabProps) 
                     <Text style={styles.smallActionText}>删除</Text>
                   </Pressable>
                 </View>
-              </View>
-            );
-          })
-        )}
-      </View>
+              }
+            />
+          );
+        })}
+      </SettingsGroup>
+
+      <TextInputDialog
+        visible={!!renamingSticker}
+        title="重命名表情包"
+        initialValue={renamingSticker?.name || ''}
+        placeholder="表情包名称"
+        onCancel={() => setRenamingSticker(null)}
+        onSave={(value) => {
+          if (renamingSticker) {
+            handleRenameStickerSave(stickerOwner, renamingSticker, value);
+          }
+          setRenamingSticker(null);
+        }}
+      />
     </ScrollView>
   );
 }
