@@ -19,8 +19,12 @@
 无论使用哪种方式，都需要先安装 [Node.js](https://nodejs.org/) LTS 版本，然后在项目根目录打开 PowerShell，安装依赖：
 
 ```powershell
-npm.cmd install
+npm.cmd install --legacy-peer-deps
 ```
+
+项目同时集成了 LiveKit Agents 和 ElevenLabs 两套通话渠道，两者依赖的 `@livekit/react-native-webrtc` 版本声明暂时不一致，直接执行 `npm.cmd install` 可能出现 `ERESOLVE could not resolve`。使用 `--legacy-peer-deps` 跳过 peer dependency 校验即可，不要为了消除提示随意降级 WebRTC。
+
+当前源码默认会同时编译两套通话能力，构建时不需要删除其中一套；在应用的语音设置中选择实际使用的通话引擎即可。如果需要从安装包中彻底移除某个渠道，不能只删除 npm 依赖，还要同步删除对应的代码引用后重新生成 Android 原生工程。
 
 ### EAS 云端构建
 
@@ -177,6 +181,7 @@ android\app\build\outputs\apk\release\app-release.apk
 - 语音通话：
   - LiveKit Agents通话：需要部署云端服务。效果见本人小红书笔记（AI流式通话：全双工语音/视频通话），实现详见https://github.com/winter-bit-cry/ysclaude-livekit-brain，目前只支持Aliyun+Cartesia
   - ElevenLabs通话：通话TTS和STT都选ElevenLabs时生效，未测试
+  - 两个通话引擎在应用内二选一使用，但源码默认同时包含两套依赖。安装项目依赖时请使用 `npm.cmd install --legacy-peer-deps`；不建议单独降级 `@livekit/react-native-webrtc`，否则可能影响 LiveKit Agents。
 
 ### 工具设置
 
