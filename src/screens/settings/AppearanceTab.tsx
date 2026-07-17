@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
 import { useSettingsPageColors } from '../../theme/colors';
@@ -25,6 +26,7 @@ const CUSTOM_TOP_BAR_ICON_MAX_BYTES = 2 * 1024 * 1024;
 const CUSTOM_TOP_BAR_ICON_MIN_SIDE = 48;
 const CUSTOM_TOP_BAR_ICON_MAX_SIDE = 2048;
 const CUSTOM_BACKGROUND_MAX_BYTES = 8 * 1024 * 1024;
+const CUSTOM_FONT_MAX_BYTES = 100 * 1024 * 1024;
 const CUSTOM_BACKGROUND_MIN_SIDE = 320;
 const CUSTOM_BACKGROUND_MAX_SIDE = 6000;
 const CHAT_INPUT_ICON_ITEMS: Array<{ key: ChatInputIconKey; label: string }> = [
@@ -74,6 +76,14 @@ async function copyAppearanceImage(
 
   const destination = new File(dir, `${prefix}-${randomUUID()}${appearanceImageExtension(asset)}`);
   await copyFileFromUri(asset.uri, destination);
+  return destination.uri;
+}
+
+async function copyGlobalFont(uri: string, extension: string): Promise<string> {
+  const dir = new Directory(Paths.document, 'custom-fonts');
+  dir.create({ intermediates: true, idempotent: true });
+  const destination = new File(dir, `global-${randomUUID()}${extension}`);
+  await copyFileFromUri(uri, destination);
   return destination.uri;
 }
 
@@ -140,6 +150,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
   const [pickingInputIconKey, setPickingInputIconKey] = useState<ChatInputIconKey | null>(null);
   const [pickingBackground, setPickingBackground] = useState<'chat' | 'input' | 'topBar' | null>(null);
   const [pickingAvatar, setPickingAvatar] = useState<'user' | 'assistant' | null>(null);
+  const [pickingFont, setPickingFont] = useState(false);
   const [appearanceThemeName, setAppearanceThemeName] = useState('');
   const [appearanceThemesExpanded, setAppearanceThemesExpanded] = useState(false);
   const [userBubbleColorInput, setUserBubbleColorInput] = useState(appearanceConfig?.userBubbleColor || colors.userBubble);
@@ -178,6 +189,45 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
   const userFontSize = appearanceConfig?.userFontSize ?? 16;
   const assistantFontSize = appearanceConfig?.assistantFontSize ?? 16;
   const assistantTextStrokeWidth = appearanceConfig?.assistantTextStrokeWidth ?? 0;
+
+  async function handlePickFont() {
+    if (pickingFont) return;
+    setPickingFont(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['font/ttf', 'font/otf', 'application/x-font-ttf', 'application/x-font-opentype'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const extension = asset.name.toLowerCase().endsWith('.otf')
+        ? '.otf'
+        : asset.name.toLowerCase().endsWith('.ttf')
+          ? '.ttf'
+          : '';
+      if (!extension) {
+        Alert.alert('字体格式不支持', '请选择 .ttf 或 .otf 字体文件');
+        return;
+      }
+      if (asset.size && asset.size > CUSTOM_FONT_MAX_BYTES) {
+        Alert.alert('字体文件过大', '字体文件不能超过 100MB');
+        return;
+      }
+      const uri = await copyGlobalFont(asset.uri, extension);
+      setAppearanceConfig({ globalFontUri: uri, globalFontName: asset.name });
+      showToast('全局字体已应用');
+    } catch (error: any) {
+      Alert.alert('字体上传失败', error?.message || '无法读取所选字体');
+    } finally {
+      setPickingFont(false);
+    }
+  }
+
+  function handleClearFont() {
+    setAppearanceConfig({ globalFontUri: undefined, globalFontName: undefined });
+    showToast('已恢复系统默认字体');
+  }
   useEffect(() => {
     setUserBubbleColorInput(appearanceConfig?.userBubbleColor || colors.userBubble);
     setAssistantBubbleColorInput(appearanceConfig?.assistantBubbleColor || colors.userBubble);
@@ -430,6 +480,33 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
       contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
       keyboardShouldPersistTaps="handled"
     >
+      <Text style={styles.sectionTitle}>全局字体</Text>
+      <Text style={styles.hint}>
+        上传 TTF 或 OTF 字体后将在整个应用中使用。此设置独立于美化主题，切换或恢复主题不会改变字体。
+      </Text>
+      <View style={styles.field}>
+        <Text style={styles.label}>当前字体</Text>
+        <Text style={styles.hint} numberOfLines={1}>
+          {appearanceConfig?.globalFontName || '系统默认字体'}
+        </Text>
+        <View style={styles.platformActions}>
+          <Pressable
+            style={styles.platformActionButton}
+            onPress={handlePickFont}
+            disabled={pickingFont}
+          >
+            <Text style={styles.platformActionText}>
+              {pickingFont ? '正在读取…' : appearanceConfig?.globalFontUri ? '更换字体' : '上传字体'}
+            </Text>
+          </Pressable>
+          {!!appearanceConfig?.globalFontUri && (
+            <Pressable style={styles.platformActionButton} onPress={handleClearFont}>
+              <Text style={styles.platformActionText}>恢复默认</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
       <Text style={styles.sectionTitle}>美化主题</Text>
       <Text style={styles.hint}>
         保存当前美化设置为主题，之后可以一键切换。背景图和自定义图标路径会一起保存。

@@ -32,6 +32,7 @@ import { cleanupExpiredVoiceFiles } from '../src/services/voiceFiles';
 import { syncTodayWidget } from '../src/services/todayWidget';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
 import { startIncomingCallRingtone, stopIncomingCallRingtone } from '../src/services/incomingCallRingtone';
+import { applyGlobalFont } from '../src/theme/globalFont';
 
 
 SplashScreen.preventAutoHideAsync();
@@ -49,6 +50,9 @@ export default function RootLayout() {
   const statusBarStyle = colors.background === '#12100D' ? 'light' : 'dark';
 
   const settingsHydrated = useSettingsStore((state) => state._hydrated);
+  const globalFontUri = useSettingsStore((state) => state.appearanceConfig?.globalFontUri);
+  const [fontReady, setFontReady] = useState(false);
+  const [fontRenderKey, setFontRenderKey] = useState(0);
   const floatingBallEnabled = useSettingsStore((state) => state.floatingBallConfig.enabled);
   const floatingBallNormalImageUrisKey = useSettingsStore((state) =>
     (state.floatingBallConfig.normalImageUris || []).join('|') || state.floatingBallConfig.normalImageUri || ''
@@ -70,8 +74,21 @@ export default function RootLayout() {
   const voiceCallMode = useVoiceCallStore((state) => state.mode);
 
   useEffect(() => {
-    SplashScreen.hideAsync();
-  }, []);
+    if (!settingsHydrated) return;
+    let active = true;
+    setFontReady(false);
+    applyGlobalFont(globalFontUri)
+      .catch(() => applyGlobalFont(undefined))
+      .finally(() => {
+        if (!active) return;
+        setFontRenderKey((key) => key + 1);
+        setFontReady(true);
+        SplashScreen.hideAsync();
+      });
+    return () => {
+      active = false;
+    };
+  }, [settingsHydrated, globalFontUri]);
 
   useEffect(() => {
     if (!settingsHydrated) return;
@@ -160,8 +177,10 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [settingsHydrated, todayWidgetConfigKey, widgetAppearanceKey]);
 
+  if (!settingsHydrated || !fontReady) return null;
+
   return (
-    <GestureHandlerRootView style={styles.gestureRoot}>
+    <GestureHandlerRootView key={fontRenderKey} style={styles.gestureRoot}>
       <StatusBar style={statusBarStyle} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />

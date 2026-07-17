@@ -456,6 +456,8 @@ export interface StickerConfig {
 export interface AppearanceConfig extends AppearanceThemeSnapshot {
   useDefaultGreetings?: boolean;
   defaultGreetingName?: string;
+  globalFontUri?: string;
+  globalFontName?: string;
   appearanceThemes?: AppearanceTheme[];
   activeAppearanceThemeId?: string;
 }
@@ -1439,6 +1441,8 @@ export const useSettingsStore = create<SettingsState>()(
               welcomeLogoImageUri: current.welcomeLogoImageUri,
               useDefaultGreetings: current.useDefaultGreetings,
               defaultGreetingName: current.defaultGreetingName,
+              globalFontUri: current.globalFontUri,
+              globalFontName: current.globalFontName,
               topBarIconUris: { ...(theme.config.topBarIconUris || {}) },
               inputIconUris: { ...(theme.config.inputIconUris || {}) },
               appearanceThemes: themes,
@@ -1469,6 +1473,8 @@ export const useSettingsStore = create<SettingsState>()(
               welcomeLogoImageUri: current.welcomeLogoImageUri,
               useDefaultGreetings: current.useDefaultGreetings ?? false,
               defaultGreetingName: current.defaultGreetingName || '',
+              globalFontUri: current.globalFontUri,
+              globalFontName: current.globalFontName,
               appearanceThemes: current.appearanceThemes || [],
               activeAppearanceThemeId: undefined,
             },
