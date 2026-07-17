@@ -1,5 +1,5 @@
 export const ANDROID_ACCESSIBILITY_CONTROL_MARKER = '[ANDROID_ACCESSIBILITY_CONTROL_SESSION]';
-export const ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX = 'Accessibility mode: captured screen from';
+export const ANDROID_ACCESSIBILITY_CAPTURE_NOTICE_PREFIX = 'Shizuku control mode: captured screen from';
 export const ANDROID_SCREENSHOT_CAPTURE_NOTICE_PREFIX = 'Screen share mode: captured screenshot';
 
 interface AccessibilityNodeLike {
@@ -151,7 +151,7 @@ export function buildAndroidAccessibilityElementSummary(screen: unknown, activeP
   }
 
   if (elements.length === 0) {
-    return 'No reliable interactive elements were found in the accessibility tree.';
+    return 'No reliable interactive elements were found in the uiautomator snapshot.';
   }
 
   return elements
@@ -197,13 +197,13 @@ export function buildAndroidAccessibilityRuntimeContext(
     ANDROID_ACCESSIBILITY_CONTROL_MARKER,
     `Current Android app package: ${activePackage || 'unknown'}`,
     'The user captured the current Android screen with the floating ball camera button.',
-    'Use the attached screenshot plus the compact accessibility summary for this API call only.',
-    'You may use Android accessibility tools to observe, click, or swipe if the user asks for action.',
+    'Use the attached Shizuku screenshot plus the compact uiautomator summary for this API call only.',
+    'You may use the Shizuku-backed Android tools to observe, click, swipe, press system keys, or enter text if requested.',
     'Do not estimate tap coordinates from the screenshot. Coordinate taps are often wrong on Android screenshots.',
     'First choose from the Interactive elements list and call click_android_node with that id.',
     'For visible editable/input elements, use set_android_text with the node id to replace field text.',
     'After tapping/clicking an input field and focusing it, use set_focused_android_text to write into the current focused field.',
-    'If an input is visible but missing from the accessibility tree, tap it first, then try ime_commit_android_text through YSClaude IME.',
+    'If an input is visible but missing from the uiautomator snapshot, tap it first, then use ime_commit_android_text through YSClaude IME.',
     'When ime_commit_android_text needs YSClaude IME, it will try to switch to YSClaude IME automatically if the IME has already been enabled in Android settings.',
     'If ime_commit_android_text says YSClaude IME is not enabled or no input connection is ready, first focus an input and call switch_android_input_method_to_ysclaude; only ask the user to enable YSClaude IME in settings if the picker cannot find it.',
     'If the target is visible but missing from the accessibility tree, use tap_android_relative with x_ratio/y_ratio from 0 to 1.',

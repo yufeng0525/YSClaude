@@ -167,6 +167,8 @@ dependencies {
     implementation("com.github.mwiede:jsch:0.2.24")
     implementation("org.bouncycastle:bcprov-jdk18on:1.84")
     implementation("com.github.bumptech.glide:glide:4.16.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

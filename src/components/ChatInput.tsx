@@ -28,6 +28,7 @@ import {
   Paperclip,
   Phone,
   Sparkles,
+  TerminalSquare,
   Wrench,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -63,6 +64,7 @@ import {
   readMcpResource,
 } from '../services/mcpHttpClient';
 import { copyFileFromUri } from '../utils/fileSystem';
+import { FloatingTerminal } from './FloatingTerminal';
 import {
   createCurrentLocationDraft,
   createLocationDraftFromSearchResult,
@@ -265,6 +267,7 @@ export function ChatInput({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [optionsMenuVisible, setOptionsMenuVisible] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState(false);
   const [optionsMenuPage, setOptionsMenuPage] = useState(0);
   const [cssEditorVisible, setCssEditorVisible] = useState(false);
   const [cssDraft, setCssDraft] = useState('');
@@ -980,6 +983,7 @@ export function ChatInput({
   };
 
   const primaryOptionActions = [
+    { key: 'terminal', label: '终端', Icon: TerminalSquare, onPress: () => { setOptionsMenuVisible(false); Keyboard.dismiss(); setTerminalVisible(true); } },
     ...(voiceCallAvailable ? [{
       key: 'voice-call',
       label: voiceCallActive ? '语音通话中' : '语音通话',
@@ -1041,6 +1045,7 @@ export function ChatInput({
         cssStyle('.input-wrapper', '.chat-input-wrapper'),
       ]}
     >
+      <FloatingTerminal visible={terminalVisible} onClose={() => setTerminalVisible(false)} />
       {suggestedStickers.length > 0 && (
         <View style={styles.suggestionPanel}>
           <ScrollView

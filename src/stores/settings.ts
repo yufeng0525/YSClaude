@@ -258,6 +258,10 @@ export interface NativeToolConfig {
   aiVoiceCallEnabled?: boolean;
   aiVoiceCallHangupEnabled?: boolean;
   accessibilityControlEnabled?: boolean;
+  shizukuShellEnabled?: boolean;
+  shellTimeoutMs?: number;
+  shellMaxOutputChars?: number;
+  shellMaxToolCalls?: number;
 }
 
 export interface CalendarAiSyncConfig {
@@ -990,6 +994,10 @@ export const useSettingsStore = create<SettingsState>()(
         aiVoiceCallEnabled: false,
         aiVoiceCallHangupEnabled: false,
         accessibilityControlEnabled: false,
+        shizukuShellEnabled: false,
+        shellTimeoutMs: 30000,
+        shellMaxOutputChars: 20000,
+        shellMaxToolCalls: 10,
       },
       calendarAiSyncConfig: {
         sendTodayTodosToAI: false,
@@ -1557,6 +1565,10 @@ export const useSettingsStore = create<SettingsState>()(
             aiVoiceCallEnabled: state?.nativeToolConfig?.aiVoiceCallEnabled ?? false,
             aiVoiceCallHangupEnabled: state?.nativeToolConfig?.aiVoiceCallHangupEnabled ?? false,
             accessibilityControlEnabled: state?.nativeToolConfig?.accessibilityControlEnabled ?? false,
+            shizukuShellEnabled: state?.nativeToolConfig?.shizukuShellEnabled ?? false,
+            shellTimeoutMs: state?.nativeToolConfig?.shellTimeoutMs ?? 30000,
+            shellMaxOutputChars: state?.nativeToolConfig?.shellMaxOutputChars ?? 20000,
+            shellMaxToolCalls: state?.nativeToolConfig?.shellMaxToolCalls ?? 10,
           },
           locationShareConfig: {
             enabled: state?.locationShareConfig?.enabled ?? false,

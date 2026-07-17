@@ -264,6 +264,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const [calendarEnabled, setCalendarEnabled] = useState(!!nativeToolConfig?.calendarEnabled);
   const [aiVoiceCallEnabled, setAiVoiceCallEnabled] = useState(!!nativeToolConfig?.aiVoiceCallEnabled);
   const [aiVoiceCallHangupEnabled, setAiVoiceCallHangupEnabled] = useState(!!nativeToolConfig?.aiVoiceCallHangupEnabled);
+  const [shizukuShellEnabled, setShizukuShellEnabled] = useState(!!nativeToolConfig?.shizukuShellEnabled);
+  const [shellTimeoutMs, setShellTimeoutMs] = useState(String(nativeToolConfig?.shellTimeoutMs || 30000));
+  const [shellMaxOutputChars, setShellMaxOutputChars] = useState(String(nativeToolConfig?.shellMaxOutputChars || 20000));
+  const [shellMaxToolCalls, setShellMaxToolCalls] = useState(String(nativeToolConfig?.shellMaxToolCalls || 10));
 
   useEffect(() => {
     setLocationEnabled(!!locationShareConfig?.enabled);
@@ -335,7 +339,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       | 'appUsageStatsEnabled'
       | 'calendarEnabled'
       | 'aiVoiceCallEnabled'
-      | 'aiVoiceCallHangupEnabled',
+      | 'aiVoiceCallHangupEnabled'
+      | 'shizukuShellEnabled',
     value: boolean
   ) {
     switch (key) {
@@ -359,6 +364,9 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         break;
       case 'aiVoiceCallHangupEnabled':
         setAiVoiceCallHangupEnabled(value);
+        break;
+      case 'shizukuShellEnabled':
+        setShizukuShellEnabled(value);
         break;
     }
     setNativeToolConfig({ [key]: value });
@@ -1623,6 +1631,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       calendarEnabled,
       aiVoiceCallEnabled,
       aiVoiceCallHangupEnabled,
+      shizukuShellEnabled,
+      shellTimeoutMs: Math.max(1000, Math.min(600000, parseInt(shellTimeoutMs, 10) || 30000)),
+      shellMaxOutputChars: Math.max(1000, Math.min(1000000, parseInt(shellMaxOutputChars, 10) || 20000)),
+      shellMaxToolCalls: Math.max(1, Math.min(100, parseInt(shellMaxToolCalls, 10) || 10)),
     });
     showToast('设备原生工具开关已保存');
   }
@@ -1646,6 +1658,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const otherFeatureCards = [dailyPaperSourcesCard, locationShareCard];
 
   const builtInToolCards = [
+    { key: 'shizukuShell', name: 'Shizuku 本机终端', intro: '允许 AI 以 Shizuku 身份在当前 Android 设备执行 Shell 命令。', enabled: shizukuShellEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('shizukuShellEnabled', value), meta: '超时 ' + shellTimeoutMs + ' ms' },
     { key: 'accounting', name: '记账管理', intro: '允许 AI 查看用户今日消费与收入，并新增或删除流水记录。', enabled: accountingEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('accountingEnabled', value), meta: '3 个工具' },
     { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
     { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: handleWebSearchEnabledChange, meta: '1 个工具' },
@@ -1879,6 +1892,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
               setAiVoiceCallHangupEnabled(false);
               setNativeToolConfig({ aiVoiceCallHangupEnabled: false });
               break;
+            case 'shizukuShell':
+              setShizukuShellEnabled(false);
+              setNativeToolConfig({ shizukuShellEnabled: false });
+              break;
           }
           setSelectedBuiltInToolKey(null);
           showToast('工具已关闭');
@@ -1903,6 +1920,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   function renderBuiltInToolEditor(toolKey: string) {
     switch (toolKey) {
+      case 'shizukuShell':
+        return (<><Text style={styles.toolModalDescription}>AI 可通过 Shizuku 在本机执行 /system/bin/sh 命令。终端入口始终由用户手动使用，此开关只控制 AI 工具。</Text><View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>允许 AI 执行本机 Shell</Text><Text style={styles.hint}>实际身份取决于 Shizuku 以 ADB shell 还是 Root 模式启动。</Text></View><Switch value={shizukuShellEnabled} onValueChange={(value) => handleNativeToolEnabledChange('shizukuShellEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>超时时间（毫秒）</Text><TextInput style={styles.input} value={shellTimeoutMs} onChangeText={setShellTimeoutMs} keyboardType="number-pad" placeholder="30000" placeholderTextColor={colors.textTertiary}/></View><View style={styles.field}><Text style={styles.label}>输出上限（字符）</Text><TextInput style={styles.input} value={shellMaxOutputChars} onChangeText={setShellMaxOutputChars} keyboardType="number-pad" placeholder="20000" placeholderTextColor={colors.textTertiary}/></View><View style={styles.field}><Text style={styles.label}>每轮最大调用次数</Text><TextInput style={styles.input} value={shellMaxToolCalls} onChangeText={setShellMaxToolCalls} keyboardType="number-pad" placeholder="10" placeholderTextColor={colors.textTertiary}/></View></>);
       case 'accounting':
         return (<><Text style={styles.toolModalDescription}>AI 可以读取今天的收入与支出、可用分类和付款方式，并新增或删除流水。新增和删除会同步更新付款方式余额。</Text><View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>启用记账管理</Text><Text style={styles.hint}>关闭后 AI 无法读取或修改任何记账数据。</Text></View><Switch value={accountingEnabled} onValueChange={(value) => handleNativeToolEnabledChange('accountingEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View></>);
       case 'memoryVault':

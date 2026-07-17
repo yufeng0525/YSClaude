@@ -14,7 +14,8 @@ class AndroidSystemToolsPackage : ReactPackage {
       AndroidFilePickerModule(reactContext),
       FloatingBallModule(reactContext),
       VoiceCallServiceModule(reactContext),
-      TodayTodoWidgetModule(reactContext)
+      TodayTodoWidgetModule(reactContext),
+      ShizukuShellModule(reactContext)
     )
   }
 

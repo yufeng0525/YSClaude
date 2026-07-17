@@ -12,10 +12,6 @@ import {
   showFloatingBallMessage,
 } from './floatingBall';
 import {
-  isAccessibilityControlEnabled,
-  openAccessibilitySettings,
-} from './nativeTools';
-import {
   capturePendingAndroidAccessibilityContext,
   capturePendingAndroidScreenshotContext,
 } from './androidAccessibilitySession';
@@ -69,13 +65,6 @@ async function insertUserMessage(content: string, imageUri?: string): Promise<Me
 }
 
 async function handleScreenShare(): Promise<void> {
-  const accessibilityEnabled = await isAccessibilityControlEnabled();
-  if (!accessibilityEnabled) {
-    showFloatingBallMessage('Enable YSClaude accessibility service first', { speak: false }).catch(() => {});
-    await openAccessibilitySettings();
-    return;
-  }
-
   const context = await capturePendingAndroidScreenshotContext();
   if (!context.imageUri) {
     showFloatingBallMessage('Screen capture cancelled', { speak: false }).catch(() => {});
@@ -96,13 +85,6 @@ async function handleScreenShare(): Promise<void> {
 }
 
 async function handleScreenControlShare(): Promise<void> {
-  const accessibilityEnabled = await isAccessibilityControlEnabled();
-  if (!accessibilityEnabled) {
-    showFloatingBallMessage('Enable YSClaude accessibility service first', { speak: false }).catch(() => {});
-    await openAccessibilitySettings();
-    return;
-  }
-
   const context = await capturePendingAndroidAccessibilityContext();
   await ensureLatestCreatedConversationLoaded();
   await useChatStore

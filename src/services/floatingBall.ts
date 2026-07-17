@@ -70,7 +70,6 @@ interface FloatingBallModule {
   showVideoCall?: (durationText: string, previewUri: string) => Promise<boolean>;
   hideVoiceCall?: () => Promise<boolean>;
   openApp: () => Promise<boolean>;
-  captureScreen: () => Promise<string | null>;
 }
 
 interface FloatingBallMessageOptions {

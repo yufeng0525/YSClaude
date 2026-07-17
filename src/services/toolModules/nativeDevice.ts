@@ -73,8 +73,8 @@ const OPEN_USAGE_ACCESS_SETTINGS_TOOL: ToolDefinition = {
 const OPEN_ACCESSIBILITY_SETTINGS_TOOL: ToolDefinition = {
   type: 'function',
   function: {
-    name: 'open_android_accessibility_settings',
-    description: 'Open Android Accessibility settings when the YSClaude accessibility service is not enabled and the user needs to grant permission.',
+    name: 'request_android_control_permission',
+    description: 'Request or verify Shizuku permission when Android screen observation or control is unavailable.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
 };
@@ -101,7 +101,7 @@ const SWITCH_TO_YSCLAUDE_INPUT_METHOD_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'switch_android_input_method_to_ysclaude',
-    description: 'Switch the current Android keyboard to YSClaude IME by opening the system input method picker and selecting YSClaude IME through the accessibility service. Use after focusing an input if ime_commit_android_text reports that no input connection is ready. If YSClaude IME is not enabled in system settings, ask the user to enable it once.',
+    description: 'Enable and switch to YSClaude IME through Shizuku. Use after focusing an input if ime_commit_android_text reports that no input connection is ready.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
 };
@@ -110,7 +110,7 @@ const OBSERVE_ANDROID_SCREEN_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'observe_android_screen',
-    description: 'Read the current Android screen state through the YSClaude accessibility service. Returns a compact screenSummary and an interactiveElements list with reliable node ids. Use interactiveElements ids for clicks.',
+    description: 'Capture the Android screen through Shizuku and read a uiautomator node snapshot. Returns a compact screenSummary and interactiveElements with snapshot node ids.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
 };
@@ -151,7 +151,7 @@ const SWIPE_ANDROID_SCREEN_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'swipe_android_screen',
-    description: 'Swipe from one absolute screen coordinate to another on Android. Use for scrolling or gesture navigation. Returns the updated accessibility screen tree.',
+    description: 'Swipe from one absolute screen coordinate to another through Shizuku. Use for scrolling or gesture navigation.',
     parameters: {
       type: 'object',
       properties: {
@@ -174,7 +174,7 @@ const CLICK_ANDROID_NODE_TOOL: ToolDefinition = {
     parameters: {
       type: 'object',
       properties: {
-        node_id: { type: 'string', description: 'Accessibility node id from the screen tree.' },
+        node_id: { type: 'string', description: 'Snapshot node id from observe_android_screen.' },
       },
       required: ['node_id'],
     },
@@ -185,11 +185,11 @@ const SCROLL_ANDROID_NODE_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'scroll_android_node',
-    description: 'Ask a scrollable node to scroll forward or backward through accessibility actions. Use swipe_android_screen if node scrolling fails.',
+    description: 'Swipe inside a scrollable node bounds from the latest uiautomator snapshot.',
     parameters: {
       type: 'object',
       properties: {
-        node_id: { type: 'string', description: 'Scrollable accessibility node id from the screen tree.' },
+        node_id: { type: 'string', description: 'Scrollable snapshot node id.' },
         direction: { type: 'string', enum: ['forward', 'backward', 'up', 'down', 'left', 'right'], description: 'Scroll direction.' },
       },
       required: ['node_id'],
@@ -201,11 +201,11 @@ const SET_ANDROID_TEXT_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'set_android_text',
-    description: 'Set text in an Android editable field by accessibility node id. Use after observe_android_screen returns an input/editable node, or a nearby container around the input. This replaces the field content; pass an empty string to clear. Do not use for passwords, verification codes, payment, banking, or publishing/sending content unless the user explicitly asked.',
+    description: 'Tap an editable field from the latest node snapshot, switch to YSClaude IME through Shizuku, and commit text. Do not use for passwords, verification codes, payment, banking, or publishing/sending content unless explicitly requested.',
     parameters: {
       type: 'object',
       properties: {
-        node_id: { type: 'string', description: 'Accessibility node id from observe_android_screen, for example w0.2.1. Prefer nodes with flags containing edit.' },
+        node_id: { type: 'string', description: 'Node id from observe_android_screen. Prefer nodes with flags containing edit.' },
         text: { type: 'string', description: 'Text to place into the input field. Replaces current field content.' },
       },
       required: ['node_id', 'text'],
@@ -278,7 +278,7 @@ const ANDROID_GLOBAL_ACTION_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'android_global_action',
-    description: 'Perform a safe Android global accessibility action: back, home, recents, notifications, or quick_settings. Returns the updated accessibility screen tree.',
+    description: 'Perform an Android system key action through Shizuku: back, home, recents, notifications, or quick_settings.',
     parameters: {
       type: 'object',
       properties: {
@@ -434,7 +434,7 @@ export const nativeDeviceTool: ToolModule = {
         return await readAppUsageStats(args);
       case 'open_usage_access_settings':
         return await openUsageAccessSettings();
-      case 'open_android_accessibility_settings':
+      case 'request_android_control_permission':
         return await openAccessibilitySettings();
       case 'open_android_input_method_settings':
         return await openInputMethodSettings();

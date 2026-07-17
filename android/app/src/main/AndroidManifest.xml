@@ -38,6 +38,7 @@
     <meta-data android:name="expo.modules.updates.ENABLE_BSDIFF_PATCH_SUPPORT" android:value="true"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
+    <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"/>
     <service android:name=".FloatingBallForegroundService" android:exported="false" android:foregroundServiceType="specialUse">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="floating_overlay"/>
     </service>
@@ -46,14 +47,7 @@
         <action android:name="androidx.media3.session.MediaSessionService"/>
       </intent-filter>
     </service>
-    <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection"/>
     <service android:name=".VoiceCallForegroundService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="microphone|camera|mediaPlayback"/>
-    <service android:name=".FloatingAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
-      <intent-filter>
-        <action android:name="android.accessibilityservice.AccessibilityService"/>
-      </intent-filter>
-      <meta-data android:name="android.accessibilityservice" android:resource="@xml/ysclaude_accessibility_service"/>
-    </service>
     <service android:name=".YSClaudeInputMethodService" android:permission="android.permission.BIND_INPUT_METHOD" android:exported="true">
       <intent-filter>
         <action android:name="android.view.InputMethod"/>
@@ -61,7 +55,6 @@
       <meta-data android:name="android.view.im" android:resource="@xml/ysclaude_input_method"/>
     </service>
     <service android:name=".TodayTodoWidgetService" android:permission="android.permission.BIND_REMOTEVIEWS" android:exported="true"/>
-    <activity android:name=".ScreenCapturePermissionActivity" android:theme="@style/Theme.App.Transparent" android:excludeFromRecents="true" android:noHistory="true" android:exported="false"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>

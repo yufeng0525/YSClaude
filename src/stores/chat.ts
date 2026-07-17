@@ -1729,6 +1729,7 @@ async function runToolLoop(
     htmlArtifactToolsEnabled ? settings.htmlArtifactToolConfig?.maxToolCalls || 8 : 0,
     settings.mcpToolConfig?.enabled ? settings.mcpToolConfig.maxToolCalls || 6 : 0,
     runCommandEnabled ? settings.runCommandConfig.maxToolCalls || 20 : 0,
+    settings.nativeToolConfig?.shizukuShellEnabled ? settings.nativeToolConfig.shellMaxToolCalls || 10 : 0,
     webCruiseEnabled ? 10 : 0,
     androidAccessibilityControlEnabled ? 10 : 0
   );

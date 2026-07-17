@@ -6,6 +6,19 @@ import {
   buildAndroidAccessibilityElementSummary,
   buildAndroidAccessibilityScreenSummary,
 } from '../utils/androidAccessibilityControl';
+import {
+  captureShizukuScreenContext,
+  ensureShizukuPermission,
+  shizukuClickNode,
+  shizukuCommitText,
+  shizukuDeleteText,
+  shizukuEditorAction,
+  shizukuGlobalAction,
+  shizukuScrollNode,
+  shizukuSwipe,
+  shizukuTap,
+  shizukuTapRelative,
+} from './shizukuDeviceControl';
 
 function toJson(data: unknown): string {
   return JSON.stringify(data, null, 2);
@@ -73,44 +86,6 @@ const AndroidSystemTools = NativeModules.AndroidSystemTools as
     }
   | undefined;
 
-const AccessibilityScreenContext = NativeModules.AccessibilityScreenContext as
-  | {
-      openAccessibilitySettings: () => Promise<boolean>;
-      openInputMethodSettings: () => Promise<boolean>;
-      showInputMethodPicker: () => Promise<boolean>;
-      switchToYSClaudeInputMethod: () => Promise<AccessibilityActionResult>;
-      isAccessibilityServiceEnabled: () => Promise<boolean>;
-      isInputMethodReady: () => Promise<boolean>;
-      captureScreenContext: () => Promise<{ imageUri?: string | null; nodeTree: string }>;
-      tap: (x: number, y: number) => Promise<AccessibilityActionResult>;
-      tapRelative: (xRatio: number, yRatio: number) => Promise<AccessibilityActionResult>;
-      swipe: (
-        startX: number,
-        startY: number,
-        endX: number,
-        endY: number,
-        durationMs: number
-      ) => Promise<AccessibilityActionResult>;
-      clickNode: (nodeId: string) => Promise<AccessibilityActionResult>;
-      scrollNode: (nodeId: string, direction: string) => Promise<AccessibilityActionResult>;
-      setNodeText: (nodeId: string, text: string) => Promise<AccessibilityActionResult>;
-      setFocusedText: (text: string) => Promise<AccessibilityActionResult>;
-      commitInputMethodText: (text: string) => Promise<AccessibilityActionResult>;
-      performInputMethodAction: (action: string) => Promise<AccessibilityActionResult>;
-      deleteInputMethodText: (beforeLength: number, afterLength: number) => Promise<AccessibilityActionResult>;
-      performGlobalAction: (action: string) => Promise<AccessibilityActionResult>;
-    }
-  | undefined;
-
-interface AccessibilityActionResult {
-  success: boolean;
-  message: string;
-  nodeTree?: string | null;
-}
-
-const ACCESSIBILITY_TOOL_TIMEOUT_MS = 4200;
-const INPUT_METHOD_READY_TIMEOUT_MS = 2600;
-const INPUT_METHOD_READY_POLL_MS = 120;
 
 function ensureAndroidSystemTools(): NonNullable<typeof AndroidSystemTools> {
   if (Platform.OS !== 'android') {
@@ -122,95 +97,9 @@ function ensureAndroidSystemTools(): NonNullable<typeof AndroidSystemTools> {
   return AndroidSystemTools;
 }
 
-function ensureAccessibilityScreenContext(): NonNullable<typeof AccessibilityScreenContext> {
-  if (Platform.OS !== 'android') {
-    throw new Error('This tool only supports Android');
-  }
-  if (!AccessibilityScreenContext) {
-    throw new Error('Accessibility native module is not loaded. Rebuild the Android development app.');
-  }
-  return AccessibilityScreenContext;
-}
-
-function parseMaybeJson(value: string | null | undefined): unknown {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
 function asNumber(value: unknown, fallback: number): number {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
-}
-
-function formatAccessibilityAction(result: AccessibilityActionResult): string {
-  const screen = parseMaybeJson(result.nodeTree);
-  return toJson({
-    success: result.success,
-    message: result.message,
-    interactiveElements: buildAndroidAccessibilityElementSummary(screen),
-    screenSummary: buildAndroidAccessibilityScreenSummary(screen),
-  });
-}
-
-async function withAccessibilityTimeout<T>(promise: Promise<T>, actionName: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error(`${actionName} timed out waiting for Android accessibility service`));
-        }, ACCESSIBILITY_TOOL_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForInputMethodReady(
-  module: NonNullable<typeof AccessibilityScreenContext>,
-  timeoutMs = INPUT_METHOD_READY_TIMEOUT_MS
-): Promise<boolean> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await module.isInputMethodReady()) return true;
-    await sleep(INPUT_METHOD_READY_POLL_MS);
-  }
-  return await module.isInputMethodReady();
-}
-
-async function ensureYSClaudeInputMethodReady(
-  module: NonNullable<typeof AccessibilityScreenContext>,
-  actionName: string
-): Promise<AccessibilityActionResult | null> {
-  if (await module.isInputMethodReady()) return null;
-
-  const switchResult = await withAccessibilityTimeout(
-    module.switchToYSClaudeInputMethod(),
-    `${actionName}:switch_to_ysclaude_ime`
-  );
-  if (!switchResult.success) return switchResult;
-
-  const ready = await waitForInputMethodReady(module);
-  if (!ready) {
-    return {
-      success: false,
-      message: 'YSClaude IME was selected, but no active input connection is ready. Tap or click an input field first.',
-      nodeTree: switchResult.nodeTree,
-    };
-  }
-  return null;
 }
 
 function getTimeRangeArgs(args: Record<string, any>, defaultDays: number): { startDate: Date; endDate: Date } {
@@ -324,36 +213,29 @@ export async function openUsageAccessSettings(): Promise<string> {
 }
 
 export async function openAccessibilitySettings(): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  await module.openAccessibilitySettings();
-  return toJson({ opened: true, target: 'accessibility_settings' });
+  await ensureShizukuPermission();
+  return toJson({ ready: true, target: 'shizuku' });
 }
 
 export async function openInputMethodSettings(): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  await module.openInputMethodSettings();
-  return toJson({ opened: true, target: 'input_method_settings' });
+  await shizukuCommitText('');
+  return toJson({ ready: true, target: 'ysclaude_input_method' });
 }
 
 export async function showInputMethodPicker(): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  await module.showInputMethodPicker();
-  return toJson({ opened: true, target: 'input_method_picker' });
+  await shizukuCommitText('');
+  return toJson({ ready: true, target: 'ysclaude_input_method' });
 }
 
 export async function switchToYSClaudeInputMethod(): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  const result = await withAccessibilityTimeout(
-    module.switchToYSClaudeInputMethod(),
-    'switch_android_input_method_to_ysclaude'
-  );
-  return formatAccessibilityAction(result);
+  await ensureShizukuPermission();
+  const result = await shizukuCommitText('');
+  return toJson(result);
 }
 
 export async function readAccessibilityScreenContext(options: { includeFullTree?: boolean } = {}): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  const context = await module.captureScreenContext();
-  const screen = parseMaybeJson(context.nodeTree);
+  const context = await captureShizukuScreenContext(true);
+  const screen = context.screen;
   const payload: Record<string, unknown> = {
     imageUri: context.imageUri || null,
     interactiveElements: buildAndroidAccessibilityElementSummary(screen),
@@ -366,126 +248,75 @@ export async function readAccessibilityScreenContext(options: { includeFullTree?
 }
 
 export async function captureAccessibilityScreenFrame(): Promise<string | null> {
-  const context = await ensureAccessibilityScreenContext().captureScreenContext();
-  return context.imageUri || null;
+  return (await captureShizukuScreenContext(false)).imageUri || null;
 }
 
 export async function isAccessibilityControlEnabled(): Promise<boolean> {
-  const module = ensureAccessibilityScreenContext();
-  return await module.isAccessibilityServiceEnabled();
+  try { await ensureShizukuPermission(); return true; } catch { return false; }
 }
 
 export async function tapAccessibilityScreen(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  const result = await withAccessibilityTimeout(
-    module.tap(
-      asNumber(getArg(args, 'x'), 0),
-      asNumber(getArg(args, 'y'), 0)
-    ),
-    'tap_android_screen'
-  );
-  return formatAccessibilityAction(result);
+  await shizukuTap(asNumber(getArg(args, 'x'), 0), asNumber(getArg(args, 'y'), 0));
+  return toJson({ success:true, message:'Tapped through Shizuku' });
 }
 
 export async function tapAccessibilityScreenRelative(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  const result = await withAccessibilityTimeout(
-    module.tapRelative(
-      asNumber(getArg(args, 'x_ratio', 'xRatio'), 0.5),
-      asNumber(getArg(args, 'y_ratio', 'yRatio'), 0.5)
-    ),
-    'tap_android_relative'
-  );
-  return formatAccessibilityAction(result);
+  await shizukuTapRelative(asNumber(getArg(args, 'x_ratio', 'xRatio'), 0.5), asNumber(getArg(args, 'y_ratio', 'yRatio'), 0.5));
+  return toJson({ success:true, message:'Tapped through Shizuku' });
 }
 
 export async function swipeAccessibilityScreen(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
-  const result = await withAccessibilityTimeout(
-    module.swipe(
-      asNumber(getArg(args, 'start_x', 'startX'), 0),
-      asNumber(getArg(args, 'start_y', 'startY'), 0),
-      asNumber(getArg(args, 'end_x', 'endX'), 0),
-      asNumber(getArg(args, 'end_y', 'endY'), 0),
-      asNumber(getArg(args, 'duration_ms', 'durationMs'), 360)
-    ),
-    'swipe_android_screen'
-  );
-  return formatAccessibilityAction(result);
+  await shizukuSwipe(asNumber(getArg(args,'start_x','startX'),0),asNumber(getArg(args,'start_y','startY'),0),asNumber(getArg(args,'end_x','endX'),0),asNumber(getArg(args,'end_y','endY'),0),asNumber(getArg(args,'duration_ms','durationMs'),360));
+  return toJson({ success:true, message:'Swiped through Shizuku' });
 }
 
 export async function clickAccessibilityNode(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const nodeId = String(getArg(args, 'node_id', 'nodeId', 'id') || '').trim();
   if (!nodeId) throw new Error('Missing node_id');
-  const result = await withAccessibilityTimeout(module.clickNode(nodeId), 'click_android_node');
-  return formatAccessibilityAction(result);
+  await shizukuClickNode(nodeId); return toJson({ success:true, message:'Node coordinates tapped through Shizuku' });
 }
 
 export async function scrollAccessibilityNode(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const nodeId = String(getArg(args, 'node_id', 'nodeId', 'id') || '').trim();
   if (!nodeId) throw new Error('Missing node_id');
   const direction = String(getArg(args, 'direction') || 'forward');
-  const result = await withAccessibilityTimeout(module.scrollNode(nodeId, direction), 'scroll_android_node');
-  return formatAccessibilityAction(result);
+  await shizukuScrollNode(nodeId, direction); return toJson({ success:true, message:'Node region scrolled through Shizuku' });
 }
 
 export async function setAccessibilityNodeText(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const nodeId = String(getArg(args, 'node_id', 'nodeId', 'id') || '').trim();
   if (!nodeId) throw new Error('Missing node_id');
   const textValue = getArg(args, 'text', 'value', 'content');
   if (typeof textValue !== 'string') throw new Error('Missing text');
-  const result = await withAccessibilityTimeout(module.setNodeText(nodeId, textValue), 'set_android_text');
-  return formatAccessibilityAction(result);
+  await shizukuClickNode(nodeId); const result = await shizukuCommitText(textValue); return toJson(result);
 }
 
 export async function setFocusedAccessibilityText(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const textValue = getArg(args, 'text', 'value', 'content');
   if (typeof textValue !== 'string') throw new Error('Missing text');
-  const result = await withAccessibilityTimeout(module.setFocusedText(textValue), 'set_focused_android_text');
-  return formatAccessibilityAction(result);
+  return toJson(await shizukuCommitText(textValue));
 }
 
 export async function commitInputMethodText(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const textValue = getArg(args, 'text', 'value', 'content');
   if (typeof textValue !== 'string') throw new Error('Missing text');
-  const switchResult = await ensureYSClaudeInputMethodReady(module, 'ime_commit_android_text');
-  if (switchResult) return formatAccessibilityAction(switchResult);
-  const result = await withAccessibilityTimeout(module.commitInputMethodText(textValue), 'ime_commit_android_text');
-  return formatAccessibilityAction(result);
+  return toJson(await shizukuCommitText(textValue));
 }
 
 export async function performInputMethodAction(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const action = String(getArg(args, 'action') || 'send');
-  const switchResult = await ensureYSClaudeInputMethodReady(module, 'ime_android_action');
-  if (switchResult) return formatAccessibilityAction(switchResult);
-  const result = await withAccessibilityTimeout(module.performInputMethodAction(action), 'ime_android_action');
-  return formatAccessibilityAction(result);
+  return toJson(await shizukuEditorAction(action));
 }
 
 export async function deleteInputMethodText(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const beforeLength = asNumber(getArg(args, 'before_length', 'beforeLength'), 1);
   const afterLength = asNumber(getArg(args, 'after_length', 'afterLength'), 0);
-  const switchResult = await ensureYSClaudeInputMethodReady(module, 'ime_delete_android_text');
-  if (switchResult) return formatAccessibilityAction(switchResult);
-  const result = await withAccessibilityTimeout(
-    module.deleteInputMethodText(beforeLength, afterLength),
-    'ime_delete_android_text'
-  );
-  return formatAccessibilityAction(result);
+  return toJson(await shizukuDeleteText(beforeLength, afterLength));
 }
 
 export async function performAccessibilityGlobalAction(args: Record<string, any>): Promise<string> {
-  const module = ensureAccessibilityScreenContext();
   const action = String(getArg(args, 'action') || 'back');
-  const result = await withAccessibilityTimeout(module.performGlobalAction(action), 'android_global_action');
-  return formatAccessibilityAction(result);
+  await shizukuGlobalAction(action); return toJson({ success:true, message:`Global action ${action} performed through Shizuku` });
 }
 
 export async function listCalendarEvents(args: Record<string, any>): Promise<string> {

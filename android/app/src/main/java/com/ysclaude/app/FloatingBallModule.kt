@@ -574,25 +574,6 @@ class FloatingBallModule(
     }
   }
 
-  @ReactMethod
-  fun captureScreen(promise: Promise) {
-    if (ScreenCaptureService.hasPendingCapture()) {
-      promise.reject("SCREEN_CAPTURE_BUSY", "Screen capture is already active")
-      return
-    }
-
-    ScreenCaptureService.setPendingPromise(promise)
-    val intent = Intent(reactContext, ScreenCapturePermissionActivity::class.java).apply {
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    try {
-      reactContext.startActivity(intent)
-    } catch (error: Exception) {
-      ScreenCaptureService.clearPendingPromise()
-      promise.reject("OPEN_SCREEN_CAPTURE_FAILED", error)
-    }
-  }
-
   private fun canDrawOverlays(): Boolean {
     return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(reactContext)
   }

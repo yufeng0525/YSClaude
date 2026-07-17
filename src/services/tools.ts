@@ -5,6 +5,7 @@ import { mcpRemoteTool } from './toolModules/mcpRemote';
 import { memoryVaultTool, uploadDiary } from './toolModules/memoryVault';
 import { nativeDeviceTool } from './toolModules/nativeDevice';
 import { runCommandTool } from './toolModules/runCommand';
+import { shizukuShellTool } from './toolModules/shizukuShell';
 import { sshArtifactTransferTool } from './toolModules/sshArtifactTransfer';
 import { voiceCallTool } from './toolModules/voiceCall';
 import { webSearchTool } from './toolModules/webSearch';
@@ -26,6 +27,7 @@ const TOOL_MODULES: ToolModule[] = [
   webSearchTool,
   hotboardTool,
   runCommandTool,
+  shizukuShellTool,
   sshArtifactTransferTool,
   mcpRemoteTool,
   webViewTool,
