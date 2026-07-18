@@ -47,7 +47,7 @@ function formatVoiceCallDuration(startedAt: number | null): string {
 
 export default function RootLayout() {
   const colors = useThemeColors();
-  const statusBarStyle = colors.background === '#12100D' ? 'light' : 'dark';
+  const statusBarStyle = colors.background === '#20201e' ? 'light' : 'dark';
 
   const settingsHydrated = useSettingsStore((state) => state._hydrated);
   const globalFontUri = useSettingsStore((state) => state.appearanceConfig?.globalFontUri);

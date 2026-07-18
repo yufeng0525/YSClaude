@@ -204,9 +204,10 @@ text-align
 }
 
 .input-bar {
-  background-color: rgba(255,255,255,0.72);
-  border-radius: 28px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  border-width: 0;
+  border-color: rgba(0,0,0,0.1);
+  border-radius: 20px;
+  box-shadow: 0 0 15px 0 rgba(0,0,0,0.05);
 }
 
 .top-bar-button {

@@ -472,8 +472,8 @@ export const createSettingsStyles = (colors: ThemeColors) => StyleSheet.create({
     opacity: 0.88,
   },
   topBarPreviewButton: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,

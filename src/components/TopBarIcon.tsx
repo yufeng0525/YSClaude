@@ -18,7 +18,7 @@ type IconComponent = React.ComponentType<{
   strokeWidth?: number;
 }>;
 
-const TOP_BAR_ICON_COMPONENTS: Record<TopBarIconKey, IconComponent> = {
+const TOP_BAR_ICON_COMPONENTS: Partial<Record<TopBarIconKey, IconComponent>> = {
   history: History,
   reading: BookOpen,
   web: Globe,
@@ -60,7 +60,18 @@ export function TopBarIcon({
     );
   }
 
+  if (iconKey === 'clawd') {
+    return (
+      <Image
+        source={require('../../assets/clawd.png')}
+        style={[styles.customIcon, { width: size, height: size }]}
+        resizeMode="contain"
+      />
+    );
+  }
+
   const Icon = TOP_BAR_ICON_COMPONENTS[iconKey];
+  if (!Icon) return null;
   return <Icon color={color} size={size} strokeWidth={strokeWidth} />;
 }
 

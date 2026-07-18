@@ -41,6 +41,7 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import Svg, { Rect } from 'react-native-svg';
 import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
@@ -87,6 +88,13 @@ const CUSTOM_CSS_MAX_LENGTH = 12000;
 const CUSTOM_CSS_PLACEHOLDER = `.user-bubble {
   background-color: rgba(255,255,255,0.72);
   border-radius: 22px;
+}
+
+.input-bar {
+  border-width: 0;
+  border-color: rgba(0,0,0,0.1);
+  border-radius: 20px;
+  box-shadow: 0 0 15px 0 rgba(0,0,0,0.05);
 }
 
 .assistant-bubble {
@@ -259,7 +267,7 @@ export function ChatInput({
     () => createStyles(colors, windowDimensions.width, windowDimensions.height),
     [colors, windowDimensions.height, windowDimensions.width]
   );
-  const isDarkTheme = colors.background === '#12100D';
+  const isDarkTheme = colors.background === '#20201e';
 
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -323,7 +331,7 @@ export function ChatInput({
   );
   const cssStyle = (...selectors: string[]) => getAppearanceCssStyle(customCssStyles, ...selectors);
   const inputPlaceholderStyle = cssStyle('.input-placeholder', '.chat-input-placeholder');
-  const inputPlaceholderTextColor = getAppearancePlaceholderTextColor(inputPlaceholderStyle, colors.textTertiary);
+  const inputPlaceholderTextColor = getAppearancePlaceholderTextColor(inputPlaceholderStyle, colors.conversationMuted);
   const current = apiConfigs[activeConfigIndex];
   const currentModel = current?.name || current?.model || '未配置';
   const locationMapHtml = useMemo(() => {
@@ -376,7 +384,7 @@ export function ChatInput({
   const inputStyle = appearanceConfig?.inputStyle === 'compact' ? 'compact' : 'default';
   const inputBackgroundImageUri = appearanceConfig?.inputBackgroundImageUri;
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
-  const inputBorderRadius = clampNumber(appearanceConfig?.inputBorderRadius, 24, 0, 36);
+  const inputBorderRadius = clampNumber(appearanceConfig?.inputBorderRadius, 20, 0, 36);
   const inputPanelRadius = typeof customCssStyles.inputBar?.borderRadius === 'number'
     ? customCssStyles.inputBar.borderRadius
     : inputBorderRadius;
@@ -387,8 +395,8 @@ export function ChatInput({
     : colors.inputBackground;
   const inputOverlayBackground = inputBackgroundTransparent
     ? 'transparent'
-    : colors.background === '#12100D'
-        ? 'rgba(18,16,13,0.08)'
+    : isDarkTheme
+        ? 'rgba(32,32,30,0.08)'
         : 'rgba(255,255,255,0.08)';
 
   const pickImage = async () => {
@@ -963,8 +971,41 @@ export function ChatInput({
     if (isInputFocused) {
       return inputIconUris.sendFocused ? { uri: inputIconUris.sendFocused } : require('../../assets/getresponse2.png');
     }
-    return inputIconUris.sendIdle ? { uri: inputIconUris.sendIdle } : require('../../assets/getresponse1.png');
+    return inputIconUris.sendIdle ? { uri: inputIconUris.sendIdle } : null;
   };
+
+  const renderResponseIcon = () => {
+    const responseIcon = getResponseIcon();
+    if (!responseIcon) {
+      return (
+        <Svg width={20} height={20} viewBox="0 0 21.2 21.2">
+          <Rect x={0} y={7.6} width={1.2} height={6} rx={0.6} fill={colors.idleResponseIcon} />
+          <Rect x={4} y={5.6} width={1.2} height={10} rx={0.6} fill={colors.idleResponseIcon} />
+          <Rect x={8} y={2.6} width={1.2} height={16} rx={0.6} fill={colors.idleResponseIcon} />
+          <Rect x={12} y={5.6} width={1.2} height={10} rx={0.6} fill={colors.idleResponseIcon} />
+          <Rect x={16} y={2.6} width={1.2} height={16} rx={0.6} fill={colors.idleResponseIcon} />
+          <Rect x={20} y={7.6} width={1.2} height={6} rx={0.6} fill={colors.idleResponseIcon} />
+        </Svg>
+      );
+    }
+    return (
+      <Image
+        source={responseIcon}
+        style={[
+          styles.sendImage,
+          isInputFocused && !isStreaming && styles.focusedResponseImage,
+          shouldInvertResponseIcon && styles.invertedImageIcon,
+        ]}
+        resizeMode="contain"
+      />
+    );
+  };
+
+  const responseButtonStateStyle = isStreaming
+    ? styles.responseUtilityButton
+    : isInputFocused
+      ? styles.responseFocusedButton
+      : styles.responseIdleButton;
 
   const handleOpenCssEditor = () => {
     setCssDraft((appearanceConfig?.customCss || '').slice(0, CUSTOM_CSS_MAX_LENGTH));
@@ -1041,7 +1082,7 @@ export function ChatInput({
     <View
       style={[
         styles.wrapper,
-        { paddingBottom: Math.max(insets.bottom, 12) },
+        { paddingBottom: Math.max(insets.bottom, 18) },
         cssStyle('.input-wrapper', '.chat-input-wrapper'),
       ]}
     >
@@ -1182,15 +1223,11 @@ export function ChatInput({
                 />
               </Pressable>
               <Pressable
-                style={[styles.sendButton, cssStyle('.send-button')]}
+                style={[styles.sendButton, responseButtonStateStyle, cssStyle('.send-button')]}
                 onPressIn={() => void handleGetResponsePressIn()}
                 onPress={() => void handleGetResponsePress()}
               >
-                <Image
-                  source={getResponseIcon()}
-                  style={[styles.sendImage, shouldInvertResponseIcon && styles.invertedImageIcon]}
-                  resizeMode="contain"
-                />
+                {renderResponseIcon()}
               </Pressable>
             </View>
           </View>
@@ -1247,15 +1284,11 @@ export function ChatInput({
               />
             </Pressable>
             <Pressable
-              style={[styles.sendButton, cssStyle('.send-button')]}
+              style={[styles.sendButton, responseButtonStateStyle, cssStyle('.send-button')]}
               onPressIn={() => void handleGetResponsePressIn()}
               onPress={() => void handleGetResponsePress()}
             >
-              <Image
-                source={getResponseIcon()}
-                style={[styles.sendImage, shouldInvertResponseIcon && styles.invertedImageIcon]}
-                resizeMode="contain"
-              />
+              {renderResponseIcon()}
             </Pressable>
           </View>
             </View>
@@ -1786,11 +1819,19 @@ const createStyles = (
     backgroundColor: 'transparent',
   },
   container: {
+    minHeight: 110,
     backgroundColor: colors.inputBackground,
     borderRadius: 24,
-    paddingTop: 12,
-    paddingBottom: 8,
+    borderWidth: colors.inputPanelBorderWidth,
+    borderColor: colors.inputPanelBorder,
+    paddingTop: 18,
+    paddingBottom: 16,
     paddingHorizontal: 16,
+    shadowColor: '#000000',
+    shadowOpacity: colors.inputPanelShadowOpacity,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: colors.inputPanelElevation,
   },
   customContainer: {
     overflow: 'hidden',
@@ -1946,23 +1987,26 @@ const createStyles = (
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 14,
   },
   optionsButton: {
     width: 32,
     height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.inputControlBackground,
     justifyContent: 'center',
     alignItems: 'center',
   },
   optionsImage: {
-    width: 28,
-    height: 28,
+    width: 20,
+    height: 20,
+    tintColor: colors.inputControlIcon,
   },
   modelPill: {
-    backgroundColor: colors.surfaceHover,
-    borderRadius: 14,
+    backgroundColor: colors.inputControlBackground,
+    borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     marginLeft: 8,
     maxWidth: 180,
     minWidth: 0,
@@ -1982,24 +2026,40 @@ const createStyles = (
     gap: 8,
   },
   stickerButton: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.inputControlBackground,
     justifyContent: 'center',
     alignItems: 'center',
   },
   stickerButtonImage: {
-    width: 30,
-    height: 30,
+    width: 20,
+    height: 20,
+    tintColor: colors.inputControlIcon,
   },
   sendButton: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  responseUtilityButton: {
+    backgroundColor: colors.inputControlBackground,
+  },
+  responseFocusedButton: {
+    backgroundColor: '#c96342',
+  },
+  responseIdleButton: {
+    backgroundColor: colors.idleResponseBackground,
+  },
   sendImage: {
-    width: 30,
-    height: 30,
+    width: 20,
+    height: 20,
+  },
+  focusedResponseImage: {
+    tintColor: '#FFFFFF',
   },
   compactPreviewWrap: {
     width: 34,

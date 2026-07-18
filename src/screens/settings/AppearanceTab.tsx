@@ -158,16 +158,17 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
   const [userTextColorInput, setUserTextColorInput] = useState(appearanceConfig?.userTextColor || colors.text);
   const [assistantTextColorInput, setAssistantTextColorInput] = useState(appearanceConfig?.assistantTextColor || colors.text);
   const [assistantTextStrokeColorInput, setAssistantTextStrokeColorInput] = useState(appearanceConfig?.assistantTextStrokeColor || colors.background);
-  const [assistantFooterColorInput, setAssistantFooterColorInput] = useState(appearanceConfig?.assistantFooterColor || colors.textTertiary);
+  const [assistantFooterColorInput, setAssistantFooterColorInput] = useState(appearanceConfig?.assistantFooterColor || colors.conversationMuted);
   const appearanceThemes = appearanceConfig?.appearanceThemes || [];
   const activeAppearanceThemeId = appearanceConfig?.activeAppearanceThemeId;
   const topBarIconUris = appearanceConfig?.topBarIconUris || {};
+  const topBarIconHidden = appearanceConfig?.topBarIconHidden || {};
   const topBarIconsHidden = !!appearanceConfig?.topBarIconsHidden;
   const topBarFadeHidden = !!appearanceConfig?.topBarFadeHidden;
   const topBarBackgroundImageUri = appearanceConfig?.topBarBackgroundImageUri;
   const inputIconUris = appearanceConfig?.inputIconUris || {};
   const inputStyle = appearanceConfig?.inputStyle === 'compact' ? 'compact' : 'default';
-  const inputBorderRadius = appearanceConfig?.inputBorderRadius ?? 24;
+  const inputBorderRadius = appearanceConfig?.inputBorderRadius ?? 20;
   const inputBackgroundTransparent = !!appearanceConfig?.inputBackgroundTransparent;
   const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
   const userBubbleWidthPercent = appearanceConfig?.userBubbleWidthPercent ?? 75;
@@ -234,7 +235,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
     setUserTextColorInput(appearanceConfig?.userTextColor || colors.text);
     setAssistantTextColorInput(appearanceConfig?.assistantTextColor || colors.text);
     setAssistantTextStrokeColorInput(appearanceConfig?.assistantTextStrokeColor || colors.background);
-    setAssistantFooterColorInput(appearanceConfig?.assistantFooterColor || colors.textTertiary);
+    setAssistantFooterColorInput(appearanceConfig?.assistantFooterColor || colors.conversationMuted);
   }, [
     appearanceConfig?.assistantFooterColor,
     appearanceConfig?.assistantBubbleColor,
@@ -616,12 +617,14 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
         )}
         {TOP_BAR_ICON_ITEMS.map((item) => (
           <View key={item.key} style={styles.topBarPreviewButton}>
-            <TopBarIcon
-              iconKey={item.key}
-              color={colors.text}
-              customUri={topBarIconUris[item.key]}
-              size={22}
-            />
+            {!topBarIconsHidden && !topBarIconHidden[item.key] && (
+              <TopBarIcon
+                iconKey={item.key}
+                color={colors.text}
+                customUri={topBarIconUris[item.key]}
+                size={22}
+              />
+            )}
           </View>
         ))}
       </View>
@@ -691,6 +694,7 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
 
       {TOP_BAR_ICON_ITEMS.map((item) => {
         const customUri = topBarIconUris[item.key];
+        const isVisible = !topBarIconHidden[item.key];
         const isPicking = pickingKey === item.key;
         return (
           <View key={item.key} style={styles.appearanceIconRow}>
@@ -704,8 +708,23 @@ export function AppearanceTab({ showToast, keyboardBottomInset }: AppearanceTabP
             </View>
             <View style={styles.appearanceIconText}>
               <Text style={styles.label}>{item.label}</Text>
-              <Text style={styles.hint}>{customUri ? '已使用自定义图片' : '使用默认 SVG 图标'}</Text>
+              <Text style={styles.hint}>
+                {isVisible ? (customUri ? '显示 · 自定义图片' : '显示 · 默认 SVG 图标') : '已单独隐藏'}
+              </Text>
             </View>
+            <Switch
+              value={isVisible}
+              onValueChange={(value) => {
+                setAppearanceConfig({
+                  topBarIconHidden: {
+                    ...topBarIconHidden,
+                    [item.key]: !value,
+                  },
+                });
+                showToast(value ? `${item.label}图标已显示` : `${item.label}图标已隐藏`);
+              }}
+              trackColor={{ false: colors.inputBorder, true: colors.primary }}
+            />
             <View style={styles.appearanceIconActions}>
               <Pressable
                 style={[styles.smallActionButton, isPicking && styles.smallActionButtonDisabled]}

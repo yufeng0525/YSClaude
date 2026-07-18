@@ -18,6 +18,7 @@ export type MessageAvatarLayout = 'header' | 'side';
 
 export interface AppearanceThemeSnapshot {
   topBarIconUris: Partial<Record<TopBarIconKey, string>>;
+  topBarIconHidden?: Partial<Record<TopBarIconKey, boolean>>;
   topBarIconsHidden?: boolean;
   topBarFadeHidden?: boolean;
   topBarBackgroundImageUri?: string;
@@ -697,6 +698,7 @@ function normalizeDailyPaperConfig(config?: Partial<DailyPaperConfig>): DailyPap
 
 const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
   topBarIconUris: {},
+  topBarIconHidden: {},
   topBarIconsHidden: false,
   customGreetings: '',
   welcomeLogoImageUri: undefined,
@@ -714,7 +716,7 @@ const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
   assistantActionsHidden: false,
   inputIconUris: {},
   inputStyle: 'default',
-  inputBorderRadius: 24,
+  inputBorderRadius: 20,
   customCss: '',
   appearanceThemes: [],
 };
@@ -723,6 +725,7 @@ function createDefaultAppearanceConfig(): AppearanceConfig {
   return {
     ...DEFAULT_APPEARANCE_CONFIG,
     topBarIconUris: {},
+    topBarIconHidden: {},
     inputIconUris: {},
     appearanceThemes: [],
     activeAppearanceThemeId: undefined,
@@ -737,6 +740,7 @@ function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSna
   const source = config || DEFAULT_APPEARANCE_CONFIG;
   return {
     topBarIconUris: { ...(source.topBarIconUris || {}) },
+    topBarIconHidden: { ...(source.topBarIconHidden || {}) },
     topBarIconsHidden: source.topBarIconsHidden,
     topBarFadeHidden: source.topBarFadeHidden,
     topBarBackgroundImageUri: source.topBarBackgroundImageUri,
@@ -1338,6 +1342,10 @@ export const useSettingsStore = create<SettingsState>()(
             topBarIconUris: {
               ...(state.appearanceConfig?.topBarIconUris || {}),
               ...(config.topBarIconUris || {}),
+            },
+            topBarIconHidden: {
+              ...(state.appearanceConfig?.topBarIconHidden || {}),
+              ...(config.topBarIconHidden || {}),
             },
             inputIconUris: {
               ...(state.appearanceConfig?.inputIconUris || {}),

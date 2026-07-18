@@ -6,7 +6,8 @@ export type TopBarIconKey =
   | 'focus'
   | 'calendar'
   | 'music'
-  | 'settings';
+  | 'settings'
+  | 'clawd';
 
 export const TOP_BAR_ICON_LABELS: Record<TopBarIconKey, string> = {
   history: '历史',
@@ -17,6 +18,7 @@ export const TOP_BAR_ICON_LABELS: Record<TopBarIconKey, string> = {
   calendar: '日历',
   music: '音乐',
   settings: '设置',
+  clawd: '中间 Claude',
 };
 
 export const TOP_BAR_ICON_KEYS: TopBarIconKey[] = [
@@ -28,4 +30,5 @@ export const TOP_BAR_ICON_KEYS: TopBarIconKey[] = [
   'calendar',
   'music',
   'settings',
+  'clawd',
 ];

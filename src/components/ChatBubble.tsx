@@ -637,6 +637,11 @@ function buildAssistantBubbleFlowParts(
   ));
 }
 
+function endsWithStickerContent(content: string, stickers: StickerDefinition[]): boolean {
+  const match = content.match(/\[Sticker:([^\]\r\n]+)\]\s*$/);
+  return !!match && !!getStickerByName(match[1], stickers);
+}
+
 function isRemoteActivityMessage(message: Message): boolean {
   return message.role === 'assistant' && message.id.startsWith('remote-activity-');
 }
@@ -837,7 +842,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   const assistantBubbleWidthPercent = numberOrDefault(appearanceConfig?.assistantBubbleWidthPercent, 75, 45, 100);
   const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
   const assistantActionsHidden = !!appearanceConfig?.assistantActionsHidden;
-  const assistantFooterColor = appearanceConfig?.assistantFooterColor || colors.textTertiary;
+  const assistantFooterColor = appearanceConfig?.assistantFooterColor || colors.conversationMuted;
   const userFontSize = numberOrDefault(appearanceConfig?.userFontSize, 16, 12, 24);
   const assistantFontSize = numberOrDefault(appearanceConfig?.assistantFontSize, 16, 12, 24);
   const userTextColor = appearanceConfig?.userTextColor || colors.text;
@@ -951,6 +956,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   );
   const messageHasSticker = hasStickerToken(message.content, messageStickers);
   const messageIsStickerOnly = isStickerOnlyContent(message.content, messageStickers);
+  const messageEndsWithSticker = endsWithStickerContent(message.content, messageStickers);
   const sharedLinkUrl = isUser ? getSingleHttpUrlMessage(message.content) : null;
   const dailyPaperCard = isUser ? parseDailyPaperCardMessage(message.content) : null;
   const editMessage = useChatStore((state) => state.editMessage);
@@ -1252,6 +1258,8 @@ export const ChatBubble = React.memo(function ChatBubble({
           ? 'rgba(255,255,255,0.28)'
           : userBubbleTransparent ? 'transparent' : userBubbleColor,
         borderRadius: userBubbleRadius,
+        borderWidth: userBubbleTransparent || userBubbleGlass.enabled ? 0 : colors.bubbleBorderWidth,
+        borderColor: colors.bubbleBorder,
       },
       messageHasSticker && styles.userBubbleWithSticker,
       withoutAppearanceGlassProps(userBubbleCssStyle),
@@ -1642,6 +1650,8 @@ export const ChatBubble = React.memo(function ChatBubble({
         ? 'rgba(255,255,255,0.24)'
         : assistantBubbleTransparent ? 'transparent' : assistantBubbleColor,
       borderRadius: assistantBubbleRadius,
+      borderWidth: assistantBubbleTransparent || assistantBubbleGlass.enabled ? 0 : colors.bubbleBorderWidth,
+      borderColor: colors.bubbleBorder,
     },
     withoutAppearanceGlassProps(assistantBubbleCssStyle),
   ];
@@ -1958,7 +1968,13 @@ export const ChatBubble = React.memo(function ChatBubble({
       {message.content.length > 0 && !remoteActivityCardVisible && (
         <>
           {!assistantActionsHidden && (
-            <View style={styles.actions}>
+            <View
+              style={[
+                styles.actions,
+                { marginLeft: assistantBubbleEnabled ? 10 : -6 },
+                messageEndsWithSticker && styles.actionsAfterSticker,
+              ]}
+            >
               {chatIcons.map((icon, i) => (
                 <Pressable key={i} style={styles.actionButton} onPress={() => handleAction(i)}>
                   <Image source={icon} style={[styles.actionImage, { tintColor: assistantFooterColor }]} resizeMode="contain" />
@@ -2645,14 +2661,14 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   remoteActivityEyebrow: {
     fontSize: 11,
     lineHeight: 15,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
     fontWeight: '700',
   },
   remoteActivityTime: {
     flexShrink: 0,
     fontSize: 11,
     lineHeight: 15,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
     fontFamily: fonts.mono,
   },
   remoteActivityTitle: {
@@ -2664,7 +2680,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   remoteActivitySummary: {
     fontSize: 14,
     lineHeight: 21,
-    color: colors.textSecondary,
+    color: colors.conversationMuted,
   },
   remoteActivityTools: {
     gap: 6,
@@ -2688,12 +2704,12 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     marginTop: 3,
     fontSize: 12,
     lineHeight: 17,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
   },
   remoteActivityMoreTools: {
     fontSize: 12,
     lineHeight: 16,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
   },
   assistantFlow: {
     width: '100%',
@@ -2718,16 +2734,17 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     width: 13,
     height: 13,
     marginRight: 8,
+    tintColor: colors.conversationMuted,
   },
   toolText: {
     flexShrink: 1,
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.conversationMuted,
   },
   toolChevron: {
     marginLeft: 6,
     fontSize: 13,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
   },
   toolDetailBox: {
     marginLeft: 21,
@@ -2742,13 +2759,13 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   toolDetailLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
     marginBottom: 4,
   },
   toolDetailText: {
     fontSize: 12,
     lineHeight: 17,
-    color: colors.textSecondary,
+    color: colors.conversationMuted,
     marginBottom: 8,
     fontFamily: fonts.mono,
   },
@@ -2756,6 +2773,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     width: 11,
     height: 11,
     marginLeft: 4,
+    tintColor: colors.conversationMuted,
   },
   // 思维链：胶囊 + 展开内容
   thinkingWrap: {
@@ -2796,6 +2814,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     marginTop: -4,
     gap: 2,
   },
+  actionsAfterSticker: {
+    marginTop: 6,
+  },
   actionButton: {
     width: 28,
     height: 28,
@@ -2819,7 +2840,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   disclaimerText: {
     fontSize: 11,
-    color: colors.textTertiary,
+    color: colors.conversationMuted,
     textAlign: 'right',
     lineHeight: 16,
   },
