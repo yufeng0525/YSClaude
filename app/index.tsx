@@ -34,7 +34,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
 
-import { fonts } from '../src/theme/fonts';
+import { TIKTOK_SANS_REGULAR } from '../src/theme/interfaceFonts';
 import { TopBarIcon } from '../src/components/TopBarIcon';
 import type { TopBarIconKey } from '../src/utils/topBarIconTypes';
 import { useChatStore } from '../src/stores/chat';
@@ -2629,7 +2629,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   emptyText: {
     fontSize: 22,
     color: colors.text,
-    fontFamily: fonts.serifBold,
+    fontFamily: TIKTOK_SANS_REGULAR,
+    fontWeight: 'normal',
   },
 });
 

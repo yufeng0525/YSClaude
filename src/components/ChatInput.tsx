@@ -1039,7 +1039,7 @@ export function ChatInput({
     const responseIcon = getResponseIcon();
     if (!responseIcon) {
       return (
-        <Svg width={20} height={20} viewBox="0 0 21.2 21.2">
+        <Svg width={18} height={18} viewBox="0 0 21.2 21.2">
           <Rect x={0} y={7.6} width={1.2} height={6} rx={0.6} fill={colors.idleResponseIcon} />
           <Rect x={4} y={5.6} width={1.2} height={10} rx={0.6} fill={colors.idleResponseIcon} />
           <Rect x={8} y={2.6} width={1.2} height={16} rx={0.6} fill={colors.idleResponseIcon} />
@@ -2040,7 +2040,7 @@ const createStyles = (
   inputPlaceholder: {
     position: 'absolute',
     top: 3,
-    left: 0,
+    left: 3,
     zIndex: 1,
     fontSize: 16,
     lineHeight: 22,
@@ -2061,7 +2061,7 @@ const createStyles = (
   },
   compactInputPlaceholder: {
     top: 7,
-    left: 6,
+    left: 9,
   },
   voiceRecordingBar: {
     minHeight: 34,
