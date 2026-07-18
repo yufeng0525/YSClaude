@@ -1586,18 +1586,20 @@ export const ChatBubble = React.memo(function ChatBubble({
 
   function renderToolInvocation(inv: ToolInvocation, invocationIndex: number) {
     return (
-      <Pressable
+      <View
         key={`tool-${invocationIndex}`}
         style={styles.toolInlineItem}
-        onPress={() => setExpandedTools((state) => ({ ...state, [invocationIndex]: !state[invocationIndex] }))}
-        onLongPress={() => {
-          Alert.alert('删除', '确定删除该工具调用记录？', [
-            { text: '取消', style: 'cancel' },
-            { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, invocationIndex) },
-          ]);
-        }}
       >
-        <View style={styles.toolRow}>
+        <Pressable
+          style={styles.toolRow}
+          onPress={() => setExpandedTools((state) => ({ ...state, [invocationIndex]: !state[invocationIndex] }))}
+          onLongPress={() => {
+            Alert.alert('删除', '确定删除该工具调用记录？', [
+              { text: '取消', style: 'cancel' },
+              { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, invocationIndex) },
+            ]);
+          }}
+        >
           <Image
             source={require('../../assets/tool.png')}
             style={styles.toolIconLeft}
@@ -1613,16 +1615,23 @@ export const ChatBubble = React.memo(function ChatBubble({
             style={styles.toolIconRight}
             resizeMode="contain"
           />
-        </View>
+        </Pressable>
         {expandedTools[invocationIndex] && (
           <View style={styles.toolDetailBox}>
-            <Text style={styles.toolDetailLabel}>参数</Text>
-            <Text style={styles.toolDetailText} selectable>{formatDebugJson(inv.args)}</Text>
-            <Text style={styles.toolDetailLabel}>结果</Text>
-            <Text style={styles.toolDetailText} selectable>{inv.result || '尚未返回结果'}</Text>
+            <ScrollView
+              style={styles.toolDetailScroll}
+              contentContainerStyle={styles.toolDetailScrollContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
+              <Text style={styles.toolDetailLabel}>参数</Text>
+              <Text style={styles.toolDetailText} selectable>{formatDebugJson(inv.args)}</Text>
+              <Text style={styles.toolDetailLabel}>结果</Text>
+              <Text style={styles.toolDetailText} selectable>{inv.result || '尚未返回结果'}</Text>
+            </ScrollView>
           </View>
         )}
-      </Pressable>
+      </View>
     );
   }
 
@@ -2777,14 +2786,22 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontFamily: TIKTOK_SANS_REGULAR,
   },
   toolDetailBox: {
+    height: 240,
     marginLeft: 21,
     marginTop: 6,
     marginBottom: 2,
-    padding: 10,
     borderRadius: 10,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  toolDetailScroll: {
+    flex: 1,
+  },
+  toolDetailScrollContent: {
+    padding: 10,
+    paddingBottom: 2,
   },
   toolDetailLabel: {
     fontSize: 11,
