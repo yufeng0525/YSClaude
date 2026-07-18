@@ -8,7 +8,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Message, type GeneratedPicture, type LocationAttachment, type ToolInvocation, type VoiceAttachment } from '../types';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts, fontWeights } from '../theme/fonts';
-import { ANTHROPIC_SANS_REGULAR } from '../theme/anthropicFonts';
+import { INTER_MEDIUM } from '../theme/interfaceFonts';
 import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
 import { getTTSConfigMissingMessage, isTTSConfigReady, playTTS } from '../services/tts';
@@ -2756,7 +2756,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flexShrink: 1,
     fontSize: 13,
     color: colors.conversationMuted,
-    fontFamily: ANTHROPIC_SANS_REGULAR,
+    fontFamily: INTER_MEDIUM,
   },
   toolDetailBox: {
     marginLeft: 21,
@@ -2825,7 +2825,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     color: colors.conversationMuted,
     textAlign: 'right',
     lineHeight: 16,
-    fontFamily: ANTHROPIC_SANS_REGULAR,
+    fontFamily: INTER_MEDIUM,
   },
   overlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.3)',

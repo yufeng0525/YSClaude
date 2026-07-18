@@ -1,7 +1,7 @@
 import * as Font from 'expo-font';
 import { Text } from 'react-native';
 import { fonts, fontWeights } from './fonts';
-import { ensureAnthropicSansLoaded } from './anthropicFonts';
+import { ensureInterfaceFontsLoaded } from './interfaceFonts';
 
 export const GLOBAL_FONT_REGULAR_FAMILY = 'YSClaudeGlobalFontRegular';
 export const GLOBAL_FONT_BOLD_FAMILY = 'YSClaudeGlobalFontBold';
@@ -44,7 +44,7 @@ async function unloadFont(fontFamily: string): Promise<void> {
 }
 
 export async function applyGlobalFont(regularUri?: string, boldUri?: string): Promise<void> {
-  await ensureAnthropicSansLoaded();
+  await ensureInterfaceFontsLoaded();
   if (loadedRegularFontUri === regularUri && loadedBoldFontUri === boldUri) return;
 
   await Promise.all([

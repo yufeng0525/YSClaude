@@ -46,7 +46,7 @@ import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
-import { ANTHROPIC_SANS_REGULAR } from '../theme/anthropicFonts';
+import { INTER_MEDIUM } from '../theme/interfaceFonts';
 
 import { useSettingsStore } from '../stores/settings';
 import { useChatStore } from '../stores/chat';
@@ -1972,7 +1972,7 @@ const createStyles = (
     zIndex: 1,
     fontSize: 16,
     lineHeight: 22,
-    fontFamily: ANTHROPIC_SANS_REGULAR,
+    fontFamily: INTER_MEDIUM,
   },
   compactInput: {
     flex: 1,
