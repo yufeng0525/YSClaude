@@ -1,5 +1,6 @@
 import {
   ConversationArtifactToolConfig,
+  ConversationWindowToolConfig,
   HotboardConfig,
   HtmlArtifactToolConfig,
   McpToolConfig,
@@ -28,6 +29,7 @@ export interface ToolDefinitionConfig {
   webSearch: boolean;
   webInteraction?: boolean;
   conversationArtifacts?: boolean;
+  conversationWindows?: boolean;
   htmlArtifacts?: boolean;
   hotboard?: boolean;
   runCommand?: RunCommandConfig;
@@ -42,6 +44,7 @@ export interface ToolExecutionContext {
   webSearchConfig: WebSearchConfig;
   webInteractionConfig: WebInteractionConfig;
   conversationArtifactToolConfig: ConversationArtifactToolConfig;
+  conversationWindowToolConfig: ConversationWindowToolConfig;
   htmlArtifactToolConfig: HtmlArtifactToolConfig;
   hotboardConfig: HotboardConfig;
   runCommandConfig: RunCommandConfig;

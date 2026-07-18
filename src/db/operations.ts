@@ -84,6 +84,22 @@ export interface ChatSearchResult {
   createdAt: number;
 }
 
+export interface ConversationGlobalSearchResult {
+  messageId: string;
+  conversationId: string;
+  conversationTitle: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+  floorNumber: number;
+}
+
+export interface ConversationGlobalSearchPage {
+  totalMatches: number;
+  results: ConversationGlobalSearchResult[];
+  hasMore: boolean;
+}
+
 export interface GeneratedPictureGalleryItem {
   id: string;
   conversationId: string;
@@ -239,6 +255,50 @@ export async function createConversation(conv: Conversation): Promise<void> {
       JSON.stringify(conv.hiddenMessageIds ?? []),
     ]
   );
+}
+
+export async function importConversation(
+  conv: Conversation,
+  messages: Message[]
+): Promise<void> {
+  const db = await getDatabase();
+  const maxAttempts = 6;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      // 使用主连接上的普通事务。独占事务会额外打开连接，容易与后台同步、
+      // 小组件等数据库使用者互相抢锁。
+      await db.withTransactionAsync(async () => {
+        await db.runAsync(
+          `INSERT INTO conversations (id, title, system_prompt, model, created_at, updated_at, hidden_ranges, hidden_message_ids)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            conv.id,
+            conv.title,
+            conv.systemPrompt,
+            conv.model,
+            conv.createdAt,
+            conv.updatedAt,
+            JSON.stringify(conv.hiddenRanges ?? []),
+            JSON.stringify(conv.hiddenMessageIds ?? []),
+          ]
+        );
+
+        for (const msg of messages) {
+          await db.runAsync(
+            `INSERT INTO messages (id, conversation_id, role, content, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+            [msg.id, conv.id, msg.role, msg.content, msg.createdAt]
+          );
+        }
+      });
+      return;
+    } catch (error: any) {
+      const isLocked = /database\s+is\s+locked|sqlite_busy/i.test(String(error?.message || error));
+      if (!isLocked || attempt === maxAttempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+    }
+  }
 }
 
 export async function updateConversation(id: string, updates: Partial<Pick<Conversation, 'title' | 'updatedAt'>>): Promise<void> {
@@ -1380,6 +1440,97 @@ export async function searchMessages(
     content: row.content,
     createdAt: row.created_at,
   }));
+}
+
+export async function searchConversationFloorsGlobally(
+  query: string,
+  options: { limit: number; beforeCreatedAt?: number; beforeMessageId?: string }
+): Promise<ConversationGlobalSearchPage> {
+  const keyword = query.trim();
+  if (!keyword) return { totalMatches: 0, results: [], hasMore: false };
+  return searchConversationFloorsByKeywordsGlobally([keyword], 'intersection', options);
+}
+
+export async function searchConversationFloorsByKeywordsGlobally(
+  keywords: string[],
+  mode: 'intersection' | 'union',
+  options: { limit: number; beforeCreatedAt?: number; beforeMessageId?: string }
+): Promise<ConversationGlobalSearchPage> {
+  const normalizedKeywords = keywords.map((item) => item.trim()).filter(Boolean);
+  if (normalizedKeywords.length === 0) {
+    return { totalMatches: 0, results: [], hasMore: false };
+  }
+  const db = await getDatabase();
+  const patterns = normalizedKeywords.map(likePattern);
+  const keywordOperator = mode === 'union' ? ' OR ' : ' AND ';
+  const countKeywordWhere = patterns.map(() => `content LIKE ? ESCAPE '\\'`).join(keywordOperator);
+  const countRow = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count
+       FROM messages
+      WHERE role IN ('user', 'assistant')
+        AND (${countKeywordWhere})`,
+    patterns
+  );
+
+  const searchKeywordWhere = patterns.map(() => `m.content LIKE ? ESCAPE '\\'`).join(keywordOperator);
+  const params: any[] = [...patterns];
+  let cursorWhere = '';
+  if (options.beforeCreatedAt !== undefined && options.beforeMessageId) {
+    cursorWhere = 'AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))';
+    params.push(options.beforeCreatedAt, options.beforeCreatedAt, options.beforeMessageId);
+  }
+  const limit = Math.max(1, options.limit);
+  params.push(limit + 1);
+
+  const rows = await db.getAllAsync<{
+    message_id: string;
+    conversation_id: string;
+    conversation_title: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: number;
+    floor_number: number;
+  }>(
+    `SELECT
+        m.id AS message_id,
+        m.conversation_id AS conversation_id,
+        c.title AS conversation_title,
+        m.role AS role,
+        m.content AS content,
+        m.created_at AS created_at,
+        (
+          SELECT COUNT(*)
+            FROM messages prior
+           WHERE prior.conversation_id = m.conversation_id
+             AND prior.role IN ('user', 'assistant')
+             AND (
+               prior.created_at < m.created_at
+               OR (prior.created_at = m.created_at AND prior.id <= m.id)
+             )
+        ) AS floor_number
+       FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.role IN ('user', 'assistant')
+        AND (${searchKeywordWhere})
+        ${cursorWhere}
+      ORDER BY m.created_at DESC, m.id DESC
+      LIMIT ?`,
+    params
+  );
+
+  return {
+    totalMatches: countRow?.count ?? 0,
+    hasMore: rows.length > limit,
+    results: rows.slice(0, limit).map((row) => ({
+      messageId: row.message_id,
+      conversationId: row.conversation_id,
+      conversationTitle: row.conversation_title,
+      role: row.role,
+      content: row.content,
+      createdAt: row.created_at,
+      floorNumber: row.floor_number,
+    })),
+  };
 }
 
 export async function getGeneratedPictureGalleryItems(): Promise<GeneratedPictureGalleryItem[]> {

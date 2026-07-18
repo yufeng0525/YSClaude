@@ -1704,6 +1704,7 @@ async function runToolLoop(
     webSearch: webEnabled,
     webInteraction: webInteractionEnabled,
     conversationArtifacts: conversationArtifactToolsEnabled,
+    conversationWindows: !!settings.conversationWindowToolConfig?.enabled,
     htmlArtifacts: htmlArtifactToolsEnabled,
     hotboard: webCruiseEnabled,
     runCommand: runCommandEnabled ? settings.runCommandConfig : undefined,
@@ -1825,6 +1826,7 @@ async function runToolLoop(
           ...settings.conversationArtifactToolConfig,
           enabled: conversationArtifactToolsEnabled,
         },
+        conversationWindowToolConfig: settings.conversationWindowToolConfig,
         htmlArtifactToolConfig: {
           ...settings.htmlArtifactToolConfig,
           enabled: htmlArtifactToolsEnabled,

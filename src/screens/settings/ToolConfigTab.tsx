@@ -63,6 +63,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     webSearchConfig,
     webInteractionConfig,
     conversationArtifactToolConfig,
+    conversationWindowToolConfig,
     htmlArtifactToolConfig,
     hotboardConfig,
     dailyPaperConfig,
@@ -76,6 +77,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     setWebSearchConfig,
     setWebInteractionConfig,
     setConversationArtifactToolConfig,
+    setConversationWindowToolConfig,
     setHtmlArtifactToolConfig,
     setHotboardConfig,
     setDailyPaperConfig,
@@ -106,6 +108,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const [wiEnabled, setWiEnabled] = useState(!!webInteractionConfig?.enabled);
   const [wiMaxCalls, setWiMaxCalls] = useState(String(webInteractionConfig?.maxToolCalls || 8));
   const [conversationArtifactEnabled, setConversationArtifactEnabled] = useState(!!conversationArtifactToolConfig?.enabled);
+  const [conversationWindowEnabled, setConversationWindowEnabled] = useState(!!conversationWindowToolConfig?.enabled);
   const [conversationArtifactMaxCalls, setConversationArtifactMaxCalls] = useState(String(conversationArtifactToolConfig?.maxToolCalls || 8));
   const [htmlArtifactEnabled, setHtmlArtifactEnabled] = useState(!!htmlArtifactToolConfig?.enabled);
   const [htmlArtifactMaxCalls, setHtmlArtifactMaxCalls] = useState(String(htmlArtifactToolConfig?.maxToolCalls || 8));
@@ -326,6 +329,12 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     setConversationArtifactEnabled(value);
     setConversationArtifactToolConfig({ enabled: value });
     showToast(value ? '对话文件工具已开启' : '对话文件工具已关闭');
+  }
+
+  function handleConversationWindowEnabledChange(value: boolean) {
+    setConversationWindowEnabled(value);
+    setConversationWindowToolConfig({ enabled: value });
+    showToast(value ? '对话窗口查看工具已开启' : '对话窗口查看工具已关闭');
   }
 
   function handleHtmlArtifactEnabledChange(value: boolean) {
@@ -1709,6 +1718,7 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     { key: 'qqBot', name: 'QQ 机器人', intro: '把 QQ 官方机器人消息接入独立后端，由 YSClaude 生成回复。', enabled: qqEnabled, onValueChange: handleQqBotEnabledChange, meta: qqBackendStatus === '尚未检测' ? '官方 Bot' : qqBackendStatus },
     { key: 'webInteraction', name: '网页交互', intro: '允许 AI 打开、观察并操作应用内网页面板。', enabled: wiEnabled, onValueChange: handleWebInteractionEnabledChange, meta: '最多 ' + (wiMaxCalls || '8') + ' 次' },
     { key: 'conversationArtifact', name: '对话文件', intro: '允许 AI 读取、创建、修改、删除当前对话绑定的文本文件，并显式显示文件卡片。与「远程命令」同时开启时，自动激活对话文件与服务器互传工具。', enabled: conversationArtifactEnabled, onValueChange: handleConversationArtifactEnabledChange, meta: '7 个工具' },
+    { key: 'conversationWindow', name: '对话窗口查看', intro: '允许 AI 查看所有对话窗口、读取指定楼层，并在单个或全部窗口内进行单关键词、多关键词分页搜索。读取不受隐藏楼层影响。', enabled: conversationWindowEnabled, onValueChange: handleConversationWindowEnabledChange, meta: '7 个工具' },
     { key: 'htmlArtifact', name: 'HTML 预览交互', intro: '允许 AI 打开、观察、点击和编辑当前对话中的 HTML 文件预览。', enabled: htmlArtifactEnabled, onValueChange: handleHtmlArtifactEnabledChange, meta: '11 个工具' },
     { key: 'deviceInfo', name: '设备信息', intro: '读取设备品牌、型号、系统版本和运行状态。', enabled: deviceInfoEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('deviceInfoEnabled', value), meta: '设备原生' },
     { key: 'batteryStatus', name: '电池状态', intro: '读取电量、充电状态和省电模式。', enabled: batteryStatusEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('batteryStatusEnabled', value), meta: '设备原生' },
@@ -1841,6 +1851,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       case 'conversationArtifact':
         handleSaveConversationArtifactTools();
         break;
+      case 'conversationWindow':
+        setConversationWindowToolConfig({ enabled: conversationWindowEnabled });
+        showToast(conversationWindowEnabled ? '对话窗口查看工具已保存' : '对话窗口查看工具已关闭');
+        break;
       case 'htmlArtifact':
         handleSaveHtmlArtifactTools();
         break;
@@ -1901,6 +1915,10 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
             case 'conversationArtifact':
               setConversationArtifactEnabled(false);
               setConversationArtifactToolConfig({ enabled: false });
+              break;
+            case 'conversationWindow':
+              setConversationWindowEnabled(false);
+              setConversationWindowToolConfig({ enabled: false });
               break;
             case 'htmlArtifact':
               setHtmlArtifactEnabled(false);
@@ -2353,6 +2371,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         return (<><Text style={styles.toolModalDescription}>AI 可以在网页面板中打开、观察、点击和等待。</Text><View style={styles.switchRow}><Text style={styles.label}>启用网页交互</Text><Switch value={wiEnabled} onValueChange={handleWebInteractionEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={wiMaxCalls} onChangeText={setWiMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
       case 'conversationArtifact':
         return (<><Text style={styles.toolModalDescription}>AI 可以访问当前对话绑定的文本文件，创建、读取、替换、按文本修改、删除文件，或把文件显式显示成聊天卡片。文件不会跨对话暴露。与「远程命令」同时开启时，会自动激活两个互传工具：把对话文件上传到服务器、把服务器文本文件拉取为对话文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用对话文件工具</Text><Switch value={conversationArtifactEnabled} onValueChange={handleConversationArtifactEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={conversationArtifactMaxCalls} onChangeText={setConversationArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
+      case 'conversationWindow':
+        return (<><Text style={styles.toolModalDescription}>AI 可以列出全部对话窗口、统计楼层、读取指定楼层范围，并在单个或全部窗口内搜索。全窗口搜索使用分页摘要，需要时再读取完整楼层。该工具直接读取原始消息，因此隐藏楼层仍可被 AI 查看。</Text><View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>启用对话窗口查看</Text><Text style={styles.hint}>这是跨对话读取权限，关闭后不会向模型提供相关工具。</Text></View><Switch value={conversationWindowEnabled} onValueChange={handleConversationWindowEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View></>);
       case 'htmlArtifact':
         return (<><Text style={styles.toolModalDescription}>AI 可以把当前对话中的 HTML 文件打开到预览窗口，观察页面、点击元素或坐标、等待、截图，也可以修改源码或 DOM 并保存回文件。</Text><View style={styles.switchRow}><Text style={styles.label}>启用 HTML 预览交互</Text><Switch value={htmlArtifactEnabled} onValueChange={handleHtmlArtifactEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>每轮最大操作次数</Text><TextInput style={styles.input} value={htmlArtifactMaxCalls} onChangeText={setHtmlArtifactMaxCalls} keyboardType="number-pad" placeholder="8" placeholderTextColor={colors.textTertiary} /></View></>);
       default: {

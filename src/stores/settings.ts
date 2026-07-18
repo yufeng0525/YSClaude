@@ -166,6 +166,10 @@ export interface ConversationArtifactToolConfig {
   maxToolCalls: number;
 }
 
+export interface ConversationWindowToolConfig {
+  enabled: boolean;
+}
+
 export interface HotboardConfig {
   enabled: boolean;
   apiKey: string;
@@ -793,6 +797,7 @@ interface SettingsState {
   webSearchConfig: WebSearchConfig;
   webInteractionConfig: WebInteractionConfig;
   conversationArtifactToolConfig: ConversationArtifactToolConfig;
+  conversationWindowToolConfig: ConversationWindowToolConfig;
   htmlArtifactToolConfig: HtmlArtifactToolConfig;
   hotboardConfig: HotboardConfig;
   runCommandConfig: RunCommandConfig;
@@ -834,6 +839,7 @@ interface SettingsState {
   setWebSearchConfig: (config: Partial<WebSearchConfig>) => void;
   setWebInteractionConfig: (config: Partial<WebInteractionConfig>) => void;
   setConversationArtifactToolConfig: (config: Partial<ConversationArtifactToolConfig>) => void;
+  setConversationWindowToolConfig: (config: Partial<ConversationWindowToolConfig>) => void;
   setHtmlArtifactToolConfig: (config: Partial<HtmlArtifactToolConfig>) => void;
   setHotboardConfig: (config: Partial<HotboardConfig>) => void;
   setRunCommandConfig: (config: Partial<RunCommandConfig>) => void;
@@ -914,6 +920,9 @@ export const useSettingsStore = create<SettingsState>()(
       conversationArtifactToolConfig: {
         enabled: false,
         maxToolCalls: 8,
+      },
+      conversationWindowToolConfig: {
+        enabled: false,
       },
       htmlArtifactToolConfig: {
         enabled: false,
@@ -1139,6 +1148,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ webInteractionConfig: { ...state.webInteractionConfig, ...config } })),
       setConversationArtifactToolConfig: (config) =>
         set((state) => ({ conversationArtifactToolConfig: { ...state.conversationArtifactToolConfig, ...config } })),
+      setConversationWindowToolConfig: (config) =>
+        set((state) => ({ conversationWindowToolConfig: { ...state.conversationWindowToolConfig, ...config } })),
       setHtmlArtifactToolConfig: (config) =>
         set((state) => ({ htmlArtifactToolConfig: { ...state.htmlArtifactToolConfig, ...config } })),
       setHotboardConfig: (config) =>
@@ -1516,6 +1527,7 @@ export const useSettingsStore = create<SettingsState>()(
         webSearchConfig: state.webSearchConfig,
         webInteractionConfig: state.webInteractionConfig,
         conversationArtifactToolConfig: state.conversationArtifactToolConfig,
+        conversationWindowToolConfig: state.conversationWindowToolConfig,
         htmlArtifactToolConfig: state.htmlArtifactToolConfig,
         hotboardConfig: state.hotboardConfig,
         runCommandConfig: state.runCommandConfig,
@@ -1546,6 +1558,9 @@ export const useSettingsStore = create<SettingsState>()(
               enabled: false,
               maxToolCalls: 8,
             },
+          conversationWindowToolConfig: {
+            enabled: state?.conversationWindowToolConfig?.enabled ?? false,
+          },
           stickerConfig: normalizeStickerConfig(state?.stickerConfig),
           floatingBallConfig: normalizeFloatingBallConfig(state?.floatingBallConfig),
           calendarAiSyncConfig: {

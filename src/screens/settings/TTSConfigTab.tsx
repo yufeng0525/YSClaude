@@ -12,6 +12,7 @@ import {
 import { getTTSConfigMissingMessage, isTTSConfigReady, playTTS } from '../../services/tts';
 import {
   ButtonRow,
+  OptionListDialog,
   SelectRow,
   SettingsGroup,
   SettingsRow,
@@ -60,6 +61,23 @@ const FISH_MODELS = ['s2-pro', 's1'].map((value) => ({ value, label: value }));
 const CARTESIA_MODELS = ['sonic-3.5', 'sonic-3', 'sonic-latest'].map((value) => ({ value, label: value }));
 const FISH_FORMATS = ['mp3', 'wav', 'pcm'].map((value) => ({ value, label: value.toUpperCase() }));
 
+type SpeechModelTarget = 'tts' | 'stt';
+
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.trim().replace(/\/+$/, '')}${path}`;
+}
+
+function uniqueModelIds(values: unknown[]): string[] {
+  return [...new Set(values
+    .filter((value): value is string => typeof value === 'string' && !!value.trim())
+    .map((value) => value.trim()))].sort((a, b) => a.localeCompare(b));
+}
+
+function modelIdsFromOpenAIResponse(data: any): string[] {
+  const items = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+  return uniqueModelIds(items.map((item: any) => typeof item === 'string' ? item : item?.id || item?.model || item?.name));
+}
+
 function positiveNumber(text: string): string | null {
   const value = Number(text);
   return Number.isFinite(value) && value > 0 ? null : '请输入有效的正数';
@@ -99,9 +117,102 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
   const [editingSTTProvider, setEditingSTTProvider] = useState<STTProvider>(sttConfig.provider);
   const [testing, setTesting] = useState(false);
   const [pickingBackground, setPickingBackground] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState<SpeechModelTarget | null>(null);
+  const [speechModels, setSpeechModels] = useState<string[]>([]);
+  const [modelPickerTarget, setModelPickerTarget] = useState<SpeechModelTarget>('tts');
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   const patchTTS = (patch: Partial<TTSConfig>) => setTTSConfig(patch);
   const activeApi = apiConfigs[activeConfigIndex];
+
+  async function handleFetchModels(target: SpeechModelTarget) {
+    setFetchingModels(target);
+    try {
+      let endpoint = '';
+      let headers: Record<string, string> = {};
+      let extractModels = modelIdsFromOpenAIResponse;
+
+      if (target === 'tts') {
+        if (editingTTSProvider === 'minimax') {
+          if (!ttsConfig.apiKey.trim()) throw new Error('请先填写 MiniMax API Key');
+          endpoint = 'https://api.minimax.chat/v1/models';
+          headers = { Authorization: `Bearer ${ttsConfig.apiKey.trim()}` };
+          extractModels = (data) => modelIdsFromOpenAIResponse(data).filter((id) => /speech|tts/i.test(id));
+        } else if (editingTTSProvider === 'fish') {
+          if (!ttsConfig.fishApiKey.trim()) throw new Error('请先填写 Fish Audio API Key');
+          endpoint = joinUrl(ttsConfig.fishBaseUrl || 'https://api.fish.audio', '/v1/models');
+          headers = { Authorization: `Bearer ${ttsConfig.fishApiKey.trim()}` };
+        } else if (editingTTSProvider === 'deepgram') {
+          endpoint = joinUrl(ttsConfig.deepgramBaseUrl || 'https://api.deepgram.com/v1', '/models');
+          headers = ttsConfig.deepgramApiKey.trim()
+            ? { Authorization: `Token ${ttsConfig.deepgramApiKey.trim()}` }
+            : {};
+          extractModels = (data) => uniqueModelIds((data?.tts || []).flatMap((item: any) => [item?.canonical_name, item?.name]));
+        } else if (editingTTSProvider === 'cartesia') {
+          if (!ttsConfig.cartesiaApiKey.trim()) throw new Error('请先填写 Cartesia API Key');
+          endpoint = joinUrl(ttsConfig.cartesiaBaseUrl || 'https://api.cartesia.ai', '/models');
+          headers = {
+            Authorization: `Bearer ${ttsConfig.cartesiaApiKey.trim()}`,
+            'Cartesia-Version': '2026-03-01',
+          };
+        }
+      } else if (editingSTTProvider === 'openai') {
+        const baseUrl = sttConfig.openAiBaseUrl.trim() || activeApi?.baseUrl?.trim() || '';
+        const apiKey = sttConfig.openAiApiKey.trim() || activeApi?.apiKey?.trim() || '';
+        if (!baseUrl || !apiKey) throw new Error('请先填写 STT Base URL 和 API Key，或配置当前聊天 API');
+        endpoint = joinUrl(baseUrl, '/models');
+        headers = { Authorization: `Bearer ${apiKey}` };
+      } else if (editingSTTProvider === 'deepgram') {
+        endpoint = joinUrl(sttConfig.deepgramBaseUrl || 'https://api.deepgram.com/v1', '/models');
+        headers = sttConfig.deepgramApiKey.trim()
+          ? { Authorization: `Token ${sttConfig.deepgramApiKey.trim()}` }
+          : {};
+        extractModels = (data) => uniqueModelIds((data?.stt || []).flatMap((item: any) => [item?.canonical_name, item?.name]));
+      } else if (editingSTTProvider === 'aliyun') {
+        if (!sttConfig.aliyunApiKey.trim()) throw new Error('请先填写 Aliyun API Key');
+        const wsUrl = new URL(sttConfig.aliyunBaseUrl || 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime');
+        endpoint = `https://${wsUrl.host}/api/v1/deployments/models?page_no=1&page_size=100&version=v1.0&model_source=base`;
+        headers = { Authorization: `Bearer ${sttConfig.aliyunApiKey.trim()}` };
+        extractModels = (data) => {
+          const items = data?.models || data?.data?.models || [];
+          return uniqueModelIds(items.map((item: any) => item?.model_name || item?.model || item?.name || item?.id))
+            .filter((id) => /asr|paraformer|speech|realtime/i.test(id));
+        };
+      } else {
+        throw new Error('该服务商的 STT 接口不需要选择模型');
+      }
+
+      if (!endpoint) throw new Error('该服务商暂未提供模型列表接口');
+      const response = await fetch(endpoint, { headers });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`HTTP ${response.status}: ${detail.slice(0, 160)}`);
+      }
+      const ids = extractModels(await response.json());
+      if (ids.length === 0) throw new Error('接口未返回可用的语音模型');
+      setSpeechModels(ids);
+      setModelPickerTarget(target);
+      setShowModelPicker(true);
+    } catch (error: any) {
+      Alert.alert('获取模型失败', error?.message || '无法获取模型列表');
+    } finally {
+      setFetchingModels(null);
+    }
+  }
+
+  function handleSelectSpeechModel(value: string) {
+    if (modelPickerTarget === 'tts') {
+      if (editingTTSProvider === 'minimax') patchTTS({ model: value });
+      else if (editingTTSProvider === 'fish') patchTTS({ fishModel: value });
+      else if (editingTTSProvider === 'deepgram') patchTTS({ deepgramModel: value });
+      else if (editingTTSProvider === 'cartesia') patchTTS({ cartesiaModel: value });
+    } else {
+      if (editingSTTProvider === 'openai') setSTTConfig({ openAiModel: value });
+      else if (editingSTTProvider === 'deepgram') setSTTConfig({ deepgramModel: value });
+      else if (editingSTTProvider === 'aliyun') setSTTConfig({ aliyunModel: value });
+    }
+    setShowModelPicker(false);
+  }
 
   async function pickCallBackground() {
     if (pickingBackground) return;
@@ -331,6 +442,12 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       )}
 
       <SettingsGroup>
+        <ButtonRow
+          label="拉取 TTS 模型列表"
+          onPress={() => void handleFetchModels('tts')}
+          loading={fetchingModels === 'tts'}
+          disabled={fetchingModels !== null}
+        />
         <ButtonRow label="测试当前 TTS 配置" onPress={() => void handleTest()} loading={testing} />
       </SettingsGroup>
 
@@ -383,12 +500,34 @@ export function TTSConfigTab({ showToast, keyboardBottomInset }: TTSConfigTabPro
       )}
 
       <SettingsGroup>
+        <ButtonRow
+          label="拉取 STT 模型列表"
+          onPress={() => void handleFetchModels('stt')}
+          loading={fetchingModels === 'stt'}
+          disabled={fetchingModels !== null}
+        />
         <SettingsRow
           label="配置状态"
           value="已自动保存"
           sublabel="所有行的修改会在弹窗确认后立即持久化"
         />
       </SettingsGroup>
+
+      <OptionListDialog
+        visible={showModelPicker}
+        title={modelPickerTarget === 'tts' ? '选择 TTS 模型' : '选择 STT 模型'}
+        options={speechModels.map((item) => ({ value: item, label: item }))}
+        value={modelPickerTarget === 'tts'
+          ? (editingTTSProvider === 'minimax' ? ttsConfig.model
+            : editingTTSProvider === 'fish' ? ttsConfig.fishModel
+              : editingTTSProvider === 'deepgram' ? ttsConfig.deepgramModel
+                : ttsConfig.cartesiaModel)
+          : (editingSTTProvider === 'openai' ? sttConfig.openAiModel
+            : editingSTTProvider === 'deepgram' ? sttConfig.deepgramModel
+              : sttConfig.aliyunModel)}
+        onCancel={() => setShowModelPicker(false)}
+        onSelect={handleSelectSpeechModel}
+      />
     </ScrollView>
   );
 }

@@ -1,6 +1,7 @@
 import { hotboardTool } from './toolModules/hotboard';
 import { accountingTool } from './toolModules/accounting';
 import { conversationArtifactsTool } from './toolModules/conversationArtifacts';
+import { conversationWindowsTool } from './toolModules/conversationWindows';
 import { mcpRemoteTool } from './toolModules/mcpRemote';
 import { memoryVaultTool, uploadDiary } from './toolModules/memoryVault';
 import { nativeDeviceTool } from './toolModules/nativeDevice';
@@ -22,6 +23,7 @@ export type { ToolDefinition, ToolDefinitionConfig, ToolExecutionContext, ToolEx
 export { uploadDiary };
 
 const TOOL_MODULES: ToolModule[] = [
+  conversationWindowsTool,
   accountingTool,
   memoryVaultTool,
   webSearchTool,

@@ -27,6 +27,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react-native';
 import { lightColors, useThemeColors, type ThemeColors } from '../src/theme/colors';
@@ -61,6 +62,7 @@ import {
   readConversationArtifact,
   replaceConversationArtifactContent,
 } from '../src/services/conversationArtifacts';
+import { pickAndImportSillyTavernChats } from '../src/services/sillyTavernImport';
 
 let colors = lightColors;
 
@@ -127,6 +129,7 @@ export default function HistoryScreen() {
   const [deletingGalleryItemId, setDeletingGalleryItemId] = useState<string | null>(null);
   const [letters, setLetters] = useState<IncomingLetter[]>([]);
   const [lettersLoading, setLettersLoading] = useState(false);
+  const [importingSillyTavern, setImportingSillyTavern] = useState(false);
   const [previewLetter, setPreviewLetter] = useState<IncomingLetter | null>(null);
 
   const {
@@ -317,6 +320,25 @@ export default function HistoryScreen() {
   function handleNewChat() {
     newConversation();
     router.back();
+  }
+
+  async function handleImportSillyTavern() {
+    if (importingSillyTavern) return;
+    setImportingSillyTavern(true);
+    try {
+      const imported = await pickAndImportSillyTavernChats();
+      if (imported.length === 0) return;
+      await loadList();
+      const totalMessages = imported.reduce((sum, item) => sum + item.messageCount, 0);
+      Alert.alert(
+        '导入完成',
+        `已导入 ${imported.length} 个聊天窗口，共 ${totalMessages} 条消息。`
+      );
+    } catch (error: any) {
+      Alert.alert('导入失败', error?.message || '无法导入 SillyTavern 聊天记录');
+    } finally {
+      setImportingSillyTavern(false);
+    }
   }
 
   function handleLongPress(conv: Conversation) {
@@ -604,7 +626,21 @@ export default function HistoryScreen() {
   function renderChats() {
     return (
       <View style={styles.screen}>
-        {renderSectionHeader('Chats')}
+        {renderSectionHeader(
+          'Chats',
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={handleImportSillyTavern}
+            disabled={importingSillyTavern}
+            accessibilityLabel="导入 SillyTavern 聊天"
+          >
+            {importingSillyTavern ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Upload size={22} color={colors.text} strokeWidth={2.1} />
+            )}
+          </Pressable>
+        )}
         <View style={styles.searchPanel}>
           <Search size={19} color={colors.textTertiary} strokeWidth={2} />
           <TextInput
