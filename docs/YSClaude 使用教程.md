@@ -152,12 +152,15 @@ android\app\build\outputs\apk\release\app-release.apk
 
 ## 设置页
 
-### API配置
+### 对话设置
 
-- API配置：目前仅支持OpenAI格式
+- 对话 API：目前仅支持 OpenAI 格式
 - Thinking强度和Thinking渠道：开启后AI会返回`<Thinking>`思维链，不同渠道思维链结构可能不同；对话设置tab下可选`不发送思维链`~~（玩酒馆的user应该很熟悉，就是那个意思）~~，思维链每次返回但不会再发给AI，可省token
 - Promot缓存：cache_control位置见上图，Claude缓存支持5min/1h，不同渠道缓存方式可能不同
-- AI生图API：目前仅支持OpenAI接口（GPT-image生图），支持文生图和图生图；对话设置tab下可设置生图提示词和锁脸参考图
+- System Prompt 预设：可保存多段提示词，每段可独立命名、启用/停用、调整顺序，并选择 system/user/assistant 发送身份。所有启用段会按列表顺序放在聊天记录最前面；建议用于身份设定、长期记忆等。API 渠道选 system 效果更好，Claude Code 渠道用 system 可能会被原生 system prompt 覆盖，建议选 user。
+- 当前对话加载消息数：只加载最新20条，手动向上翻阅可加载更多
+- 隐藏消息：隐藏后的消息仍保留在对话记录中，但不发送给AI，可用于节省token。对话内长按消息可隐藏单条，这里可范围隐藏。在对话窗口内点按消息显示楼层号
+- Prompt缓存远程保活：详见https://github.com/winter-bit-cry/YSClaude-keepalive-server，让AI解读吧，保活功能通用，AI自主活动范围自行更改
 - 数据管理：
   - 数据导出备份：可保存到网盘、手机文件等，不仅是Google Drive
   - 数据导入恢复
@@ -165,13 +168,11 @@ android\app\build\outputs\apk\release\app-release.apk
   - 打开API使用日志：使用记录可视化，总token数/日token数/调用次数/按功能按渠道统计/token热力图等
   - 打开API成就徽章：一些徽章，如陪伴天数、token使用量、周年纪念（日期自行更改源码）等
 
-### 对话设置
+### 生图配置
 
-- System Prompt：放在最前面的提示词，建议填写身份设定、长期记忆等。可选发送身份system/user/assistant，API渠道选system效果更好，Claude Code渠道用system可能会被原生system prompt覆盖，建议选user。
-- 生图设置：生图提示词和锁脸图
-- 当前对话加载消息数：只加载最新20条，手动向上翻阅可加载更多
-- 隐藏消息：隐藏后的消息仍保留在对话记录中，但不发送给AI，可用于节省token。对话内长按消息可隐藏单条，这里可范围隐藏。在对话窗口内点按消息显示楼层号
-- Prompt缓存远程保活：详见https://github.com/winter-bit-cry/YSClaude-keepalive-server，让AI解读吧，保活功能通用，AI自主活动范围自行更改
+- AI 生图 API：目前支持 OpenAI 兼容接口（GPT Image），支持文生图和图生图
+- 生图基础提示词：与 AI 回复中的 `[Pic:图片描述]` 组合后发送给生图 API
+- 锁脸参考图：可保存并独立启用参考图，生成图片时自动附带
 
 ### 语音配置
 

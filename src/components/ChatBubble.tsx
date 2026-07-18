@@ -375,9 +375,23 @@ function formatVoiceDuration(durationMs: number): string {
 }
 
 // 思维链记录与工具调用保持同一行样式，点击展开/收起内容。
+function getThinkingPreview(thinking: string): string {
+  const plainText = thinking
+    .replace(/<\/?thinking>/gi, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}(?:#{1,6}|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plainText) return 'Thinking';
+
+  return (plainText.match(/^.*?[。！？.!?]/)?.[0] || plainText).trim();
+}
+
 function ThinkingBlock({ thinking }: { thinking: string }) {
   const [expanded, setExpanded] = useState(false);
   const thinkingRules = createMarkdownRules();
+  const preview = getThinkingPreview(thinking);
   return (
     <View style={styles.thinkingWrap}>
       <Pressable style={styles.toolInlineItem} onPress={() => setExpanded((v) => !v)}>
@@ -387,7 +401,9 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
             style={styles.toolIconLeft}
             resizeMode="contain"
           />
-          <Text style={styles.toolText} numberOfLines={1}>Thought process</Text>
+          <Text style={styles.toolText} numberOfLines={1} ellipsizeMode="tail">
+            {preview}
+          </Text>
           <Image
             source={expanded
               ? require('../../assets/arrow-down.png')
@@ -2540,8 +2556,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     lineHeight: 22,
-    fontFamily: fonts.serifBold,
-    fontWeight: fontWeights.serifBold,
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
   },
   voiceBubble: {
     minWidth: 164,
@@ -2751,9 +2767,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     height: 13,
     marginRight: 8,
     tintColor: colors.conversationMuted,
+    opacity: 1,
   },
   toolText: {
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
     fontSize: 13,
     color: colors.conversationMuted,
     fontFamily: INTER_MEDIUM,
@@ -2786,6 +2804,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     height: 11,
     marginLeft: 6,
     tintColor: colors.conversationMuted,
+    opacity: 1,
   },
   // 思维链记录沿用工具调用行与展开内容样式。
   thinkingWrap: {
@@ -2854,7 +2873,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
 });
 
 const createThinkingMarkdownStyles = (colors: ThemeColors) => StyleSheet.create({
-  body: { width: '100%', fontSize: 14, color: colors.textSecondary, lineHeight: 21, fontFamily: fonts.serifBold, fontWeight: fontWeights.serifBold },
+  body: { width: '100%', fontSize: 14, color: colors.textSecondary, lineHeight: 21, fontFamily: fonts.serif, fontWeight: 'normal' },
   hr: createMarkdownDividerStyle(colors.textSecondary, true),
   strong: { fontFamily: fonts.serifStrong, fontWeight: fontWeights.serifStrong, color: colors.textSecondary },
   markdownStrongText: { fontStyle: 'normal' },
@@ -3045,8 +3064,8 @@ const createUserMarkdownStyles = (
     fontSize,
     color: textColor,
     lineHeight: Math.round(fontSize * 1.38),
-    fontFamily: fonts.serifBold,
-    fontWeight: fontWeights.serifBold,
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
     ...customTextStyleWithoutFontWeight,
   },
   paragraph: {
@@ -3112,8 +3131,8 @@ const createMarkdownStyles = (
     fontSize,
     color: textColor,
     lineHeight,
-    fontFamily: fonts.serifBold,
-    fontWeight: fontWeights.serifBold,
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
     ...strokeStyle,
     ...customTextStyleWithoutFontWeight,
   },

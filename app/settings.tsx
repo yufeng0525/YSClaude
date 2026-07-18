@@ -10,8 +10,7 @@ import { FloatingBallTab } from '../src/screens/settings/FloatingBallTab';
 import { IncomingLetterTab } from '../src/screens/settings/IncomingLetterTab';
 import { StickerTab } from '../src/screens/settings/StickerTab';
 import { AppearanceTab } from '../src/screens/settings/AppearanceTab';
-import { APIConfigTab } from '../src/screens/settings/APIConfigTab';
-import { ChatSettingsTab } from '../src/screens/settings/ChatSettingsTab';
+import { ScenarioSettingsTab } from '../src/screens/settings/ScenarioSettingsTab';
 import { DiaryTab } from '../src/screens/settings/DiaryTab';
 import { ToolConfigTab } from '../src/screens/settings/ToolConfigTab';
 import { TodayWidgetTab } from '../src/screens/settings/TodayWidgetTab';
@@ -21,7 +20,7 @@ import { useKeyboardHeight } from '../src/hooks/useKeyboardHeight';
 
 
 let colors = settingsPageColors;
-const TABS = ['API 配置', '对话设置', '语音配置', '工具设置', '日记', '来信', '悬浮球', '表情包', '欢迎页', '美化'] as const;
+const TABS = ['对话设置', '生图配置', '语音配置', '工具设置', '日记', '来信', '悬浮球', '表情包', '欢迎页', '美化'] as const;
 
 const SETTINGS_TABS = [...TABS.slice(0, 7), '小组件', ...TABS.slice(7)] as const;
 
@@ -82,8 +81,8 @@ export default function SettingsScreen() {
         ))}
       </ScrollView>
 
-      {activeTab === 0 && <APIConfigTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
-      {activeTab === 1 && <ChatSettingsTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
+      {activeTab === 0 && <ScenarioSettingsTab scenario="chat" showToast={showToast} keyboardBottomInset={keyboardHeight} />}
+      {activeTab === 1 && <ScenarioSettingsTab scenario="image" showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 2 && <TTSConfigTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 3 && <ToolConfigTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}
       {activeTab === 4 && <DiaryTab showToast={showToast} keyboardBottomInset={keyboardHeight} />}

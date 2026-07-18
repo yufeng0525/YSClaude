@@ -17,7 +17,7 @@ import {
   syncPromptCacheRemoteSnapshot,
   type PromptCacheRemoteActivityEntry,
 } from '../services/promptCacheKeepalive';
-import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheTtl, type RunCommandConfig, type StablePromptRole, type ThinkingCompatibility, type ThinkingEffort } from './settings';
+import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheTtl, type RunCommandConfig, type ThinkingCompatibility, type ThinkingEffort } from './settings';
 import { getToolDefinitions, executeTool, getToolLabel, ToolExecutionResult } from '../services/tools';
 import { observeActiveWebView } from '../services/webviewController';
 import { formatWebViewObservation } from '../services/toolModules/webView';
@@ -1154,15 +1154,14 @@ function markPromptCacheBreakpoint(
 }
 
 function buildRequestMessages(
-  systemPrompt: string,
-  stablePromptRole: StablePromptRole,
+  stablePromptMessages: ChatMessage[],
   historyMessages: ChatMessage[],
   suffixMessages: ChatMessage[],
   promptCacheEnabled: boolean,
   promptCacheTtl: PromptCacheTtl
 ): ChatMessage[] {
   const cacheablePrefix = [
-    { role: stablePromptRole, content: systemPrompt },
+    ...stablePromptMessages,
     ...historyMessages,
   ];
   const prefix = promptCacheEnabled
@@ -1411,13 +1410,24 @@ async function syncPromptCacheRemoteInboxImpl(
   }
 }
 
-async function buildStableSystemPrompt(
+async function buildStablePromptMessages(
   settings: ReturnType<typeof useSettingsStore.getState>,
   options: ChatTriggerResponseOptions = {}
-): Promise<string> {
-  const stableSystemSections = [
-    settings.systemPrompt.trim() || 'You are a helpful assistant.',
-  ];
+): Promise<ChatMessage[]> {
+  const configuredBlocks = Array.isArray(settings.systemPromptBlocks)
+    ? settings.systemPromptBlocks
+    : [{
+        content: settings.systemPrompt.trim() || 'You are a helpful assistant.',
+        role: settings.stablePromptRole || 'system',
+        enabled: true,
+      }];
+  const promptMessages: ChatMessage[] = configuredBlocks
+    .filter((block) => block.enabled && block.content.trim())
+    .map((block) => ({
+      role: block.role || 'system',
+      content: block.content.trim(),
+    }));
+  const stableSystemSections: string[] = [];
   const runCommandRuntimeContext = buildRunCommandRuntimeContext(settings.runCommandConfig);
   if (runCommandRuntimeContext) {
     stableSystemSections.push(runCommandRuntimeContext);
@@ -1454,7 +1464,13 @@ async function buildStableSystemPrompt(
     );
   }
 
-  return stableSystemSections.join('\n\n---\n\n');
+  if (stableSystemSections.length > 0) {
+    promptMessages.push({
+      role: settings.stablePromptRole || 'system',
+      content: stableSystemSections.join('\n\n---\n\n'),
+    });
+  }
+  return promptMessages;
 }
 
 function findPendingInputStartIndex(
@@ -1612,7 +1628,7 @@ async function buildPromptCacheKeepaliveRequest(
     return { role: m.role, content: textContent };
   }));
 
-  const fullSystemPrompt = await buildStableSystemPrompt(settings);
+  const stablePromptMessages = await buildStablePromptMessages(settings);
   const promptCacheTtl: PromptCacheTtl = settings.promptCacheConfig?.ttl === '1h' ? '1h' : '5m';
   const promptCacheCompatibility = config.promptCacheCompatibility || 'standard';
   const suffixMessages: ChatMessage[] = [{
@@ -1625,8 +1641,7 @@ async function buildPromptCacheKeepaliveRequest(
     apiKey: config.apiKey,
     model: config.model,
     messages: buildRequestMessages(
-      fullSystemPrompt,
-      settings.stablePromptRole || 'system',
+      stablePromptMessages,
       apiMessages,
       suffixMessages,
       true,
@@ -2108,7 +2123,7 @@ async function streamAssistantResponse(
     }
   }
 
-  const fullSystemPrompt = await buildStableSystemPrompt(settings, options);
+  const stablePromptMessages = await buildStablePromptMessages(settings, options);
   const promptCacheEnabled = !!settings.promptCacheConfig?.enabled;
   const promptCacheTtl: PromptCacheTtl = settings.promptCacheConfig?.ttl === '1h' ? '1h' : '5m';
   const promptCacheCompatibility = config.promptCacheCompatibility || 'standard';
@@ -2231,8 +2246,7 @@ async function streamAssistantResponse(
 
   // 流式路径要发送的完整消息：稳定提示词 + 历史对话用于缓存，运行时上下文与最新输入放在后缀。
   const outgoingMessages = buildRequestMessages(
-    fullSystemPrompt,
-    settings.stablePromptRole || 'system',
+    stablePromptMessages,
     historyApiMessages,
     suffixMessages,
     promptCacheEnabled,

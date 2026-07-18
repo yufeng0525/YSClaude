@@ -30,6 +30,8 @@ import { ButtonRow, SelectRow, SettingsGroup, SettingsRow, SwitchRow, TextEditRo
 type SettingsTabProps = {
   showToast: (message: string) => void;
   keyboardBottomInset: number;
+  section?: 'all' | 'chat' | 'image';
+  embedded?: boolean;
 };
 
 const IMAGE_GENERATION_FACE_REFERENCE_MAX_BYTES = 8 * 1024 * 1024;
@@ -147,20 +149,23 @@ function deleteLocalImageIfExists(uri?: string) {
   }
 }
 
-export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
+export function ChatSettingsTab({
+  showToast,
+  keyboardBottomInset,
+  section = 'all',
+  embedded = false,
+}: SettingsTabProps) {
   const colors = useSettingsPageColors();
   const styles = useMemo(() => createSettingsStyles(colors), [colors]);
   const {
     maxOutputTokens,
     tokenWarningThreshold,
-    systemPrompt,
-    stablePromptRole,
+    systemPromptBlocks,
     stripThinking,
     promptCacheConfig,
     imageGenerationConfig,
     imageGenerationPrompt,
-    setSystemPrompt,
-    setStablePromptRole,
+    setSystemPromptBlocks,
     setMaxOutputTokens,
     setTokenWarningThreshold,
     setStripThinking,
@@ -185,7 +190,6 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
   const [tokenWarningStr, setTokenWarningStr] = useState(
     tokenWarningThreshold ? String(tokenWarningThreshold) : ''
   );
-  const [promptText, setPromptText] = useState(systemPrompt);
   const [imagePromptText, setImagePromptText] = useState(imageGenerationPrompt || '');
   const [pickingFaceReferences, setPickingFaceReferences] = useState(false);
   const [quietStartText, setQuietStartText] = useState(formatClockMinutes(promptCacheConfig?.quietStartMinutes ?? 23 * 60));
@@ -295,6 +299,53 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
   const hasHiddenMessages = mergedHiddenRanges.length > 0 || hiddenContextRows.length > 0;
   const faceReferences = imageGenerationConfig?.faceReferences || [];
   const enabledFaceReferenceCount = faceReferences.filter((item) => item.enabled !== false).length;
+  const selectedPushChannel = promptCacheConfig?.pushChannel || 'dingtalk';
+
+  function updateSystemPromptBlock(
+    id: string,
+    patch: Partial<(typeof systemPromptBlocks)[number]>
+  ) {
+    setSystemPromptBlocks(systemPromptBlocks.map((block) =>
+      block.id === id ? { ...block, ...patch } : block
+    ));
+  }
+
+  function addSystemPromptBlock() {
+    const nextNumber = systemPromptBlocks.length + 1;
+    setSystemPromptBlocks([
+      ...systemPromptBlocks,
+      {
+        id: `system-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: `Prompt ${nextNumber}`,
+        content: '',
+        role: 'system',
+        enabled: true,
+      },
+    ]);
+    showToast('已添加 Prompt 段');
+  }
+
+  function removeSystemPromptBlock(id: string) {
+    Alert.alert('删除 Prompt', '确定删除这一段 Prompt 吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          setSystemPromptBlocks(systemPromptBlocks.filter((block) => block.id !== id));
+          showToast('Prompt 已删除');
+        },
+      },
+    ]);
+  }
+
+  function moveSystemPromptBlock(index: number, offset: -1 | 1) {
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= systemPromptBlocks.length) return;
+    const nextBlocks = [...systemPromptBlocks];
+    [nextBlocks[index], nextBlocks[targetIndex]] = [nextBlocks[targetIndex], nextBlocks[index]];
+    setSystemPromptBlocks(nextBlocks);
+  }
 
   function handleAddRange() {
     const range = parseInputRange();
@@ -640,42 +691,92 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
   const loadedFloorFrom = messageCount > 0 ? messageFloorOffset + 1 : 0;
   const loadedFloorTo = messageFloorOffset + messageCount;
 
-  return (
-    <ScrollView
-      style={styles.content}
-      contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
-      keyboardShouldPersistTaps="handled"
-    >
-      {/* System Prompt */}
+  const content = (
+    <>
+      {section !== 'image' && (
+        <>
+      {/* System Prompt presets */}
       <SettingsGroup
-        header="System Prompt"
-        footer="使用 Claude Code OAuth 反代且开启 cloak 时，发送身份建议选 User，避免稳定提示词和收藏日记被上游 system cloaking 清洗。"
+        header="System Prompt 预设"
+        footer="所有已启用的 Prompt 会按此处顺序放在聊天记录之前。Claude Code OAuth 反代开启 cloak 时，发送身份建议选 User。"
       >
-        <TextEditRow
-          label="System Prompt"
-          sublabel="此内容会放在所有消息最前面发送给 AI"
-          value={promptText}
-          placeholder="未设置"
-          multiline
-          inputPlaceholder="You are a helpful assistant."
-          onSave={(value) => {
-            setPromptText(value);
-            setSystemPrompt(value.trim());
-            showToast('System Prompt 已保存');
-          }}
-        />
-        <SelectRow
-          label="发送身份"
-          options={STABLE_PROMPT_ROLE_OPTIONS}
-          value={stablePromptRole || 'system'}
-          onSelect={(value) => {
-            setStablePromptRole(value as StablePromptRole);
-            const label = STABLE_PROMPT_ROLE_OPTIONS.find((item) => item.value === value)?.label;
-            showToast(`System Prompt 将以 ${label} 身份发送`);
-          }}
-        />
+        {systemPromptBlocks.length === 0 ? (
+          <SettingsRow label="暂无 Prompt" sublabel="点击下方按钮添加第一段 Prompt" />
+        ) : systemPromptBlocks.map((block, index) => (
+          <View key={block.id} style={styles.systemPromptCard}>
+            <View style={styles.systemPromptCardHeader}>
+              <View style={styles.systemPromptCardTitle}>
+                <Text style={styles.systemPromptIndex}>{index + 1}</Text>
+                <Text style={styles.systemPromptName} numberOfLines={1}>{block.name}</Text>
+              </View>
+              <View style={styles.systemPromptOrderButtons}>
+                <Pressable
+                  disabled={index === 0}
+                  style={[styles.systemPromptOrderButton, index === 0 && styles.systemPromptOrderButtonDisabled]}
+                  onPress={() => moveSystemPromptBlock(index, -1)}
+                >
+                  <Text style={styles.systemPromptOrderText}>↑</Text>
+                </Pressable>
+                <Pressable
+                  disabled={index === systemPromptBlocks.length - 1}
+                  style={[
+                    styles.systemPromptOrderButton,
+                    index === systemPromptBlocks.length - 1 && styles.systemPromptOrderButtonDisabled,
+                  ]}
+                  onPress={() => moveSystemPromptBlock(index, 1)}
+                >
+                  <Text style={styles.systemPromptOrderText}>↓</Text>
+                </Pressable>
+              </View>
+              <Switch
+                value={block.enabled}
+                onValueChange={(enabled) => updateSystemPromptBlock(block.id, { enabled })}
+                trackColor={{ false: colors.border, true: colors.primary }}
+              />
+            </View>
+            <TextEditRow
+              label="名称"
+              value={block.name}
+              placeholder={`Prompt ${index + 1}`}
+              inputPlaceholder="例如：角色设定"
+              onSave={(value) => updateSystemPromptBlock(block.id, {
+                name: value.trim() || `Prompt ${index + 1}`,
+              })}
+            />
+            <TextEditRow
+              label="Prompt 内容"
+              value={block.content}
+              placeholder={block.content.trim() ? undefined : '未设置'}
+              multiline
+              inputPlaceholder="输入要放在对话最前面的提示词"
+              onSave={(value) => {
+                updateSystemPromptBlock(block.id, { content: value.trim() });
+                showToast('Prompt 已保存');
+              }}
+            />
+            <SelectRow
+              label="发送身份"
+              options={STABLE_PROMPT_ROLE_OPTIONS}
+              value={block.role}
+              onSelect={(value) => updateSystemPromptBlock(block.id, {
+                role: value as StablePromptRole,
+              })}
+            />
+            <Pressable
+              style={styles.systemPromptDeleteButton}
+              onPress={() => removeSystemPromptBlock(block.id)}
+            >
+              <Text style={styles.systemPromptDeleteText}>删除此段</Text>
+            </Pressable>
+          </View>
+        ))}
+        <ButtonRow label="添加 Prompt 段" onPress={addSystemPromptBlock} />
       </SettingsGroup>
+        </>
+      )}
 
+      {section !== 'chat' && (
+        <>
       <SettingsGroup
         header="生图配置"
         footer="AI 回复中的 [Pic:图片描述] 会与基础提示词组合后发送给生图 API；这里不会作为真实图片发回给聊天 AI。"
@@ -740,7 +841,11 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
           </View>
         )}
       </SettingsGroup>
+        </>
+      )}
 
+      {section !== 'image' && (
+        <>
       {/* 消息条数 */}
       <SettingsGroup header="当前对话">
         <SettingsRow
@@ -954,21 +1059,33 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
       </SettingsGroup>
 
       <SettingsGroup header="主动推送">
-        <SelectRow
-          label="推送渠道"
-          options={PROMPT_CACHE_PUSH_CHANNEL_OPTIONS}
-          value={promptCacheConfig?.pushChannel || 'dingtalk'}
-          onSelect={(value) => {
-            setPromptCacheConfig({ pushChannel: value as PromptCacheConfig['pushChannel'] });
-            pushRemotePushConfig({
-              ...currentPushConfig(),
-              pushChannel: value as PromptCacheConfig['pushChannel'],
-            }).catch(() => undefined);
-          }}
-        />
+        <Text style={styles.label}>推送渠道</Text>
+        <View style={styles.segmentedRow}>
+          {PROMPT_CACHE_PUSH_CHANNEL_OPTIONS.map((option) => {
+            const selected = selectedPushChannel === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                style={[styles.segmentedButton, selected && styles.segmentedButtonActive]}
+                onPress={() => {
+                  setPromptCacheConfig({ pushChannel: option.value });
+                  pushRemotePushConfig({
+                    ...currentPushConfig(),
+                    pushChannel: option.value,
+                  }).catch(() => undefined);
+                  showToast(`已选择 ${option.label} 推送`);
+                }}
+              >
+                <Text style={[styles.segmentedText, selected && styles.segmentedTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </SettingsGroup>
 
-      <SettingsGroup
+      {selectedPushChannel === 'dingtalk' && <SettingsGroup
         header="钉钉推送"
         footer="AI 主动留言时通过钉钉群机器人发送到钉钉 App。建议在钉钉里建一个只给自己的提醒群，机器人安全设置使用加签。"
       >
@@ -1003,9 +1120,9 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
           }}
         />
         <ButtonRow label="测试钉钉推送" onPress={handleTestDingTalkPush} loading={testingDingTalkPush} />
-      </SettingsGroup>
+      </SettingsGroup>}
 
-      <SettingsGroup
+      {selectedPushChannel === 'wxpusher' && <SettingsGroup
         header="WxPusher 推送"
         footer="适合在一加等杀后台严格的手机上作为稳定回退；通知来自 WxPusher/微信，点击后可跳转到 YSClaude 对话。"
       >
@@ -1039,7 +1156,7 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
           }}
         />
         <ButtonRow label="测试 WxPusher 推送" onPress={handleTestWxPusherPush} loading={testingWxPusherPush} />
-      </SettingsGroup>
+      </SettingsGroup>}
 
       <SettingsGroup
         header="非保活时段"
@@ -1080,7 +1197,21 @@ export function ChatSettingsTab({ showToast, keyboardBottomInset }: SettingsTabP
           />
         )}
       </SettingsGroup>
+        </>
+      )}
 
+    </>
+  );
+
+  if (embedded) return <View>{content}</View>;
+
+  return (
+    <ScrollView
+      style={styles.content}
+      contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      {content}
     </ScrollView>
   );
 }

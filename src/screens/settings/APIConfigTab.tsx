@@ -21,6 +21,8 @@ import { ButtonRow, OptionListDialog, SelectRow, SettingsGroup, SwitchRow, TextE
 type SettingsTabProps = {
   showToast: (message: string) => void;
   keyboardBottomInset: number;
+  section?: 'all' | 'chat' | 'image' | 'backup';
+  embedded?: boolean;
 };
 
 const IMAGE_SIZE_OPTIONS = ['auto', '1024x1024', '1536x1024', '1024x1536'] as const;
@@ -46,7 +48,12 @@ const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string }> =
 ];
 type ModelPickerTarget = 'chat' | 'image';
 
-export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProps) {
+export function APIConfigTab({
+  showToast,
+  keyboardBottomInset,
+  section = 'all',
+  embedded = false,
+}: SettingsTabProps) {
   const colors = useSettingsPageColors();
   const styles = useMemo(() => createSettingsStyles(colors), [colors]);
   const router = useRouter();
@@ -390,12 +397,10 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
     );
   }
 
-  return (
-    <ScrollView
-      style={styles.content}
-      contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
-      keyboardShouldPersistTaps="handled"
-    >
+  const content = (
+    <>
+      {(section === 'all' || section === 'chat') && (
+        <>
       {apiConfigs.length > 0 && (
         <>
           <Text style={styles.sectionTitle}>已保存配置</Text>
@@ -532,8 +537,10 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
         <ButtonRow label="测试连接" onPress={handleTest} loading={testing} />
         <ButtonRow label="保存配置" onPress={handleSave} />
       </SettingsGroup>
+        </>
+      )}
 
-      <SettingsGroup
+      {(section === 'all' || section === 'image') && <SettingsGroup
         header="AI 生图 API"
         footer="识别 AI 回复里的 [Pic:图片描述] 后调用 OpenAI 兼容生图接口；有参考图或锁脸图时会走 /images/edits。Base URL 和 Key 留空时会沿用当前聊天 API 配置。"
       >
@@ -581,9 +588,9 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
         />
         <ButtonRow label="沿用当前聊天 API 的地址和 Key" onPress={handleUseCurrentChatAPIForImage} />
         <ButtonRow label="保存生图 API" onPress={handleSaveImageAPI} />
-      </SettingsGroup>
+      </SettingsGroup>}
 
-      <SettingsGroup
+      {(section === 'all' || section === 'backup') && <SettingsGroup
         header="数据备份"
         footer="创建完整备份包后可分享到 Google Drive；恢复时从 Google Drive 选择备份 zip，并覆盖当前本地数据。"
       >
@@ -603,7 +610,7 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
         <ButtonRow label="打开聊天数据库诊断" onPress={() => router.push('/chat-diagnostics')} />
         <ButtonRow label="打开 API 使用日志" onPress={() => router.push('/api-usage')} />
         <ButtonRow label="打开 API 成就徽章" onPress={() => router.push('/api-achievements')} />
-      </SettingsGroup>
+      </SettingsGroup>}
 
       {/* Model picker */}
       <OptionListDialog
@@ -614,6 +621,18 @@ export function APIConfigTab({ showToast, keyboardBottomInset }: SettingsTabProp
         onCancel={() => setShowModelPicker(false)}
         onSelect={handleSelectModel}
       />
+    </>
+  );
+
+  if (embedded) return <View>{content}</View>;
+
+  return (
+    <ScrollView
+      style={styles.content}
+      contentContainerStyle={{ paddingBottom: keyboardBottomInset + 20 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      {content}
     </ScrollView>
   );
 }

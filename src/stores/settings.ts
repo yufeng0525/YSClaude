@@ -782,6 +782,14 @@ function snapshotAppearanceConfig(config?: AppearanceConfig): AppearanceThemeSna
   };
 }
 
+export interface SystemPromptBlock {
+  id: string;
+  name: string;
+  content: string;
+  role: StablePromptRole;
+  enabled: boolean;
+}
+
 interface SettingsState {
   _hydrated: boolean;
   apiConfigs: NamedAPIConfig[];
@@ -789,6 +797,7 @@ interface SettingsState {
   systemPrompt: string;
   stablePromptRole: StablePromptRole;
   systemPrompts: { name: string; content: string }[];
+  systemPromptBlocks: SystemPromptBlock[];
   maxOutputTokens: number | null;
   tokenWarningThreshold: number | null;
   stripThinking: boolean;
@@ -831,6 +840,7 @@ interface SettingsState {
   setSystemPrompt: (prompt: string) => void;
   setStablePromptRole: (role: StablePromptRole) => void;
   setSystemPrompts: (prompts: { name: string; content: string }[]) => void;
+  setSystemPromptBlocks: (blocks: SystemPromptBlock[]) => void;
   setMaxOutputTokens: (tokens: number | null) => void;
   setTokenWarningThreshold: (tokens: number | null) => void;
   setStripThinking: (value: boolean) => void;
@@ -896,6 +906,13 @@ export const useSettingsStore = create<SettingsState>()(
       systemPrompts: [
         { name: '默认', content: 'You are a helpful assistant.' },
       ],
+      systemPromptBlocks: [{
+        id: 'default-system-prompt',
+        name: '默认',
+        content: 'You are a helpful assistant.',
+        role: 'system',
+        enabled: true,
+      }],
       maxOutputTokens: null,
       tokenWarningThreshold: null,
       stripThinking: false,
@@ -1132,6 +1149,13 @@ export const useSettingsStore = create<SettingsState>()(
       setSystemPrompt: (prompt) => set({ systemPrompt: prompt }),
       setStablePromptRole: (role) => set({ stablePromptRole: role }),
       setSystemPrompts: (prompts) => set({ systemPrompts: prompts }),
+      setSystemPromptBlocks: (blocks) => set({
+        systemPromptBlocks: blocks,
+        systemPrompt: blocks
+          .filter((block) => block.enabled && block.content.trim())
+          .map((block) => block.content.trim())
+          .join('\n\n---\n\n'),
+      }),
 
       setMaxOutputTokens: (tokens) => set({ maxOutputTokens: tokens }),
       setTokenWarningThreshold: (tokens) => set({ tokenWarningThreshold: tokens }),
@@ -1511,6 +1535,24 @@ export const useSettingsStore = create<SettingsState>()(
       storage: createJSONStorage(() => sqliteStorage),
       merge: (persistedState, currentState) => {
         const saved = (persistedState || {}) as Partial<SettingsState>;
+        const savedBlocks = Array.isArray(saved.systemPromptBlocks)
+          ? saved.systemPromptBlocks.filter((block) => block && typeof block.content === 'string')
+          : [];
+        const migratedBlocks: SystemPromptBlock[] = savedBlocks.length > 0
+          ? savedBlocks.map((block, index) => ({
+              id: block.id || `migrated-system-prompt-${index}`,
+              name: block.name || `Prompt ${index + 1}`,
+              content: block.content || '',
+              role: block.role === 'user' || block.role === 'assistant' ? block.role : 'system',
+              enabled: block.enabled !== false,
+            }))
+          : [{
+              id: 'migrated-system-prompt',
+              name: '默认',
+              content: saved.systemPrompt || currentState.systemPrompt,
+              role: saved.stablePromptRole || currentState.stablePromptRole,
+              enabled: true,
+            }];
         return {
           ...currentState,
           ...saved,
@@ -1519,6 +1561,7 @@ export const useSettingsStore = create<SettingsState>()(
           voiceCallSTTProvider: saved.voiceCallSTTProvider || saved.sttConfig?.provider || currentState.voiceCallSTTProvider,
           voiceCallEngine: saved.voiceCallEngine || currentState.voiceCallEngine,
           liveKitVoiceCallConfig: { ...currentState.liveKitVoiceCallConfig, ...saved.liveKitVoiceCallConfig },
+          systemPromptBlocks: migratedBlocks,
         };
       },
       partialize: (state) => ({
@@ -1527,6 +1570,7 @@ export const useSettingsStore = create<SettingsState>()(
         systemPrompt: state.systemPrompt,
         stablePromptRole: state.stablePromptRole,
         systemPrompts: state.systemPrompts,
+        systemPromptBlocks: state.systemPromptBlocks,
         maxOutputTokens: state.maxOutputTokens,
         tokenWarningThreshold: state.tokenWarningThreshold,
         stripThinking: state.stripThinking,
