@@ -50,6 +50,13 @@ interface MusicState {
   lastFinishedTrackId: string | null;
   desktopLyricsEnabled: boolean;
   desktopLyricBackgroundUri: string;
+  togetherBackgroundUri: string;
+  togetherUserAvatarUri: string;
+  togetherAiAvatarUri: string;
+  togetherRingUri: string;
+  togetherRingEnabled: boolean;
+  togetherRecordBorderEnabled: boolean;
+  togetherBackgroundOverlayEnabled: boolean;
   currentTimeMs: number;
   durationMs: number;
   currentLyricIndex: number;
@@ -69,6 +76,13 @@ interface MusicState {
   setAutoAdvanceEnabled: (enabled: boolean) => void;
   setDesktopLyricsEnabled: (enabled: boolean) => void;
   setDesktopLyricBackgroundUri: (uri: string) => void;
+  setTogetherBackgroundUri: (uri: string) => void;
+  setTogetherUserAvatarUri: (uri: string) => void;
+  setTogetherAiAvatarUri: (uri: string) => void;
+  setTogetherRingUri: (uri: string) => void;
+  setTogetherRingEnabled: (enabled: boolean) => void;
+  setTogetherRecordBorderEnabled: (enabled: boolean) => void;
+  setTogetherBackgroundOverlayEnabled: (enabled: boolean) => void;
   replaceTracks: (tracks: MusicTrack[]) => void;
   getListeningContextPrompt: () => string | null;
   preloadTrackWindow: (centerIndex: number) => Promise<void>;
@@ -292,6 +306,13 @@ export const useMusicStore = create<MusicState>()(
   lastFinishedTrackId: null,
   desktopLyricsEnabled: false,
   desktopLyricBackgroundUri: '',
+  togetherBackgroundUri: '',
+  togetherUserAvatarUri: '',
+  togetherAiAvatarUri: '',
+  togetherRingUri: '',
+  togetherRingEnabled: true,
+  togetherRecordBorderEnabled: true,
+  togetherBackgroundOverlayEnabled: false,
   currentTimeMs: 0,
   durationMs: DEMO_TRACKS[0].durationMs ?? 0,
   currentLyricIndex: 0,
@@ -417,6 +438,34 @@ export const useMusicStore = create<MusicState>()(
     set({ desktopLyricBackgroundUri: uri });
   },
 
+  setTogetherBackgroundUri: (uri: string) => {
+    set({ togetherBackgroundUri: uri });
+  },
+
+  setTogetherUserAvatarUri: (uri: string) => {
+    set({ togetherUserAvatarUri: uri });
+  },
+
+  setTogetherAiAvatarUri: (uri: string) => {
+    set({ togetherAiAvatarUri: uri });
+  },
+
+  setTogetherRingUri: (uri: string) => {
+    set({ togetherRingUri: uri });
+  },
+
+  setTogetherRingEnabled: (enabled: boolean) => {
+    set({ togetherRingEnabled: enabled });
+  },
+
+  setTogetherRecordBorderEnabled: (enabled: boolean) => {
+    set({ togetherRecordBorderEnabled: enabled });
+  },
+
+  setTogetherBackgroundOverlayEnabled: (enabled: boolean) => {
+    set({ togetherBackgroundOverlayEnabled: enabled });
+  },
+
   replaceTracks: (tracks: MusicTrack[]) => {
     releasePlayer();
     const playableTracks = tracks.filter((track) => track.sourceUrl);
@@ -501,6 +550,13 @@ export const useMusicStore = create<MusicState>()(
         order: state.order,
         desktopLyricsEnabled: state.desktopLyricsEnabled,
         desktopLyricBackgroundUri: state.desktopLyricBackgroundUri,
+        togetherBackgroundUri: state.togetherBackgroundUri,
+        togetherUserAvatarUri: state.togetherUserAvatarUri,
+        togetherAiAvatarUri: state.togetherAiAvatarUri,
+        togetherRingUri: state.togetherRingUri,
+        togetherRingEnabled: state.togetherRingEnabled,
+        togetherRecordBorderEnabled: state.togetherRecordBorderEnabled,
+        togetherBackgroundOverlayEnabled: state.togetherBackgroundOverlayEnabled,
       }),
       merge: (persisted, current) => {
         const persistedState = persisted as Partial<MusicState> | undefined;
@@ -522,6 +578,20 @@ export const useMusicStore = create<MusicState>()(
             persistedState?.desktopLyricsEnabled ?? current.desktopLyricsEnabled,
           desktopLyricBackgroundUri:
             persistedState?.desktopLyricBackgroundUri ?? current.desktopLyricBackgroundUri,
+          togetherBackgroundUri:
+            persistedState?.togetherBackgroundUri ?? current.togetherBackgroundUri,
+          togetherUserAvatarUri:
+            persistedState?.togetherUserAvatarUri ?? current.togetherUserAvatarUri,
+          togetherAiAvatarUri:
+            persistedState?.togetherAiAvatarUri ?? current.togetherAiAvatarUri,
+          togetherRingUri:
+            persistedState?.togetherRingUri ?? current.togetherRingUri,
+          togetherRingEnabled:
+            persistedState?.togetherRingEnabled ?? current.togetherRingEnabled,
+          togetherRecordBorderEnabled:
+            persistedState?.togetherRecordBorderEnabled ?? current.togetherRecordBorderEnabled,
+          togetherBackgroundOverlayEnabled:
+            persistedState?.togetherBackgroundOverlayEnabled ?? current.togetherBackgroundOverlayEnabled,
           isOpen: false,
           isMinimized: false,
           isPlaying: false,

@@ -43,6 +43,7 @@ import {
   getAllIncomingLetters,
   getChatGroupsWithConversations,
   getGeneratedPictureGalleryItems,
+  getFavoriteMessages,
   getMessageByConversationAndId,
   removeConversationFromChatGroup,
   searchMessages,
@@ -53,6 +54,7 @@ import {
   type ChatSearchResult,
   type ConversationArtifactListItem,
   type GeneratedPictureGalleryItem,
+  type FavoriteMessageResult,
 } from '../src/db/operations';
 import { useChatStore } from '../src/stores/chat';
 import { deleteGeneratedImageFile } from '../src/services/imageGeneration';
@@ -66,7 +68,7 @@ import { pickAndImportSillyTavernChats } from '../src/services/sillyTavernImport
 
 let colors = lightColors;
 
-type HistorySection = 'menu' | 'chats' | 'groups' | 'artifacts' | 'pictures' | 'letters';
+type HistorySection = 'menu' | 'chats' | 'groups' | 'artifacts' | 'pictures' | 'letters' | 'favorites';
 type GroupEditorMode = 'create' | 'edit';
 type SearchScope = 'global' | 'current';
 
@@ -85,6 +87,7 @@ const MENU_ITEMS: Array<{
   { key: 'artifacts', label: 'Artifacts', icon: require('../assets/artifacts.png') },
   { key: 'pictures', label: 'Pictures', icon: require('../assets/pictures.png') },
   { key: 'letters', label: 'Letters', icon: require('../assets/letters.png') },
+  { key: 'favorites', label: 'Favorites', icon: require('../assets/favorite.png') },
 ];
 
 export default function HistoryScreen() {
@@ -105,6 +108,7 @@ export default function HistoryScreen() {
   const [section, setSection] = useState<HistorySection>('menu');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [recentMenuConv, setRecentMenuConv] = useState<Conversation | null>(null);
+  const [recentMenuAnchor, setRecentMenuAnchor] = useState({ x: 20, y: 160 });
   const [editingConv, setEditingConv] = useState<Conversation | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [searchText, setSearchText] = useState('');
@@ -130,6 +134,9 @@ export default function HistoryScreen() {
   const [deletingGalleryItemId, setDeletingGalleryItemId] = useState<string | null>(null);
   const [letters, setLetters] = useState<IncomingLetter[]>([]);
   const [lettersLoading, setLettersLoading] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteMessageResult[]>([]);
+  const [favoriteSearch, setFavoriteSearch] = useState('');
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [importingSillyTavern, setImportingSillyTavern] = useState(false);
   const [previewLetter, setPreviewLetter] = useState<IncomingLetter | null>(null);
 
@@ -206,6 +213,7 @@ export default function HistoryScreen() {
       loadArtifacts(),
       loadGallery(),
       loadLetters(),
+      loadFavorites(''),
     ]);
   }
 
@@ -243,6 +251,21 @@ export default function HistoryScreen() {
       setLettersLoading(false);
     }
   }
+
+  async function loadFavorites(keyword: string) {
+    setFavoritesLoading(true);
+    try {
+      setFavorites(await getFavoriteMessages(keyword));
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (section !== 'favorites') return;
+    const timer = setTimeout(() => loadFavorites(favoriteSearch), 220);
+    return () => clearTimeout(timer);
+  }, [favoriteSearch, section]);
 
   async function handleOpen(conv: Conversation) {
     await loadConversation(conv.id);
@@ -347,7 +370,13 @@ export default function HistoryScreen() {
     setEditTitle(conv.title);
   }
 
-  function handleRecentLongPress(conv: Conversation) {
+  function handleRecentLongPress(conv: Conversation, event: any) {
+    const pageX = Number(event?.nativeEvent?.pageX) || 20;
+    const pageY = Number(event?.nativeEvent?.pageY) || 160;
+    setRecentMenuAnchor({
+      x: Math.max(12, Math.min(pageX, drawerWidth - 180)),
+      y: Math.max(insets.top + 8, Math.min(pageY + 8, window.height - 190)),
+    });
     setRecentMenuConv(conv);
   }
 
@@ -574,7 +603,7 @@ export default function HistoryScreen() {
               <Pressable
                 key={item.id}
                 onPress={() => handleOpen(item)}
-                onLongPress={() => handleRecentLongPress(item)}
+                onLongPress={(event) => handleRecentLongPress(item, event)}
                 style={styles.recentItem}
               >
                 <Text style={styles.recentText} numberOfLines={1}>
@@ -909,28 +938,75 @@ export default function HistoryScreen() {
     );
   }
 
+  function renderFavorites() {
+    return (
+      <View style={styles.screen}>
+        {renderSectionHeader('Favorites')}
+        <View style={styles.searchPanel}>
+          <Search size={19} color={colors.textTertiary} strokeWidth={2} />
+          <TextInput
+            style={styles.searchInput}
+            value={favoriteSearch}
+            onChangeText={setFavoriteSearch}
+            placeholder="搜索收藏内容"
+            placeholderTextColor={colors.textTertiary}
+            returnKeyType="search"
+          />
+          {!!favoriteSearch && (
+            <Pressable onPress={() => setFavoriteSearch('')}>
+              <X size={18} color={colors.textTertiary} />
+            </Pressable>
+          )}
+        </View>
+        <FlatList
+          data={favorites}
+          keyExtractor={(item) => item.messageId}
+          renderItem={({ item }) => (
+            <Pressable style={styles.listItem} onPress={() => handleOpenSearchResult(item)}>
+              <Image
+                source={require('../assets/favorite.png')}
+                style={{ width: 22, height: 22 }}
+                resizeMode="contain"
+              />
+              <View style={styles.itemContent}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.itemTitle} numberOfLines={1}>
+                    {item.conversationTitle || '新对话'}
+                  </Text>
+                  <Text style={styles.itemMeta}>{formatTime(item.createdAt)}</Text>
+                </View>
+                <Text style={styles.itemSnippet} numberOfLines={4}>{snippet(item.content)}</Text>
+              </View>
+            </Pressable>
+          )}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={<EmptyState text={favoritesLoading ? '正在加载...' : '暂无收藏内容'} />}
+        />
+      </View>
+    );
+  }
+
   function renderActiveSection() {
     if (section === 'menu') return renderMenu();
     if (section === 'chats') return renderChats();
     if (section === 'groups') return renderGroups();
     if (section === 'artifacts') return renderArtifacts();
     if (section === 'pictures') return renderPictures();
-    return renderLetters();
+    if (section === 'letters') return renderLetters();
+    return renderFavorites();
   }
 
   return (
     <View style={styles.container}>
       <Pressable style={styles.dimLayer} onPress={() => router.back()} />
-      <View style={styles.drawer}>{renderActiveSection()}</View>
-
-      <Modal
-        visible={!!recentMenuConv}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setRecentMenuConv(null)}
-      >
-        <Pressable style={styles.recentMenuOverlay} onPress={() => setRecentMenuConv(null)}>
-          <View style={styles.recentMenu} onStartShouldSetResponder={() => true}>
+      <View style={styles.drawer}>
+        {renderActiveSection()}
+        {!!recentMenuConv && (
+          <Pressable style={styles.recentMenuOverlay} onPress={() => setRecentMenuConv(null)}>
+            <View
+              style={[styles.recentMenu, { left: recentMenuAnchor.x, top: recentMenuAnchor.y }]}
+              onStartShouldSetResponder={() => true}
+            >
             <Pressable
               style={({ pressed }) => [styles.recentMenuAction, pressed && styles.recentMenuActionPressed]}
               onPress={() => {
@@ -957,15 +1033,10 @@ export default function HistoryScreen() {
             >
               <Text style={[styles.recentMenuActionText, styles.recentMenuDeleteText]}>删除</Text>
             </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.recentMenuAction, pressed && styles.recentMenuActionPressed]}
-              onPress={() => setRecentMenuConv(null)}
-            >
-              <Text style={styles.recentMenuCancelText}>取消</Text>
-            </Pressable>
           </View>
-        </Pressable>
-      </Modal>
+          </Pressable>
+        )}
+      </View>
 
       <Modal visible={!!editingConv} transparent animationType="fade">
         <Pressable style={styles.overlay} onPress={() => setEditingConv(null)}>
@@ -1612,46 +1683,44 @@ const createStyles = (
     paddingHorizontal: 22,
   },
   recentMenuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(20,20,19,0.18)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 20,
   },
   recentMenu: {
-    width: '100%',
-    maxWidth: 360,
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    borderRadius: 28,
+    position: 'absolute',
+    width: 168,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    borderRadius: 14,
     backgroundColor: colors.background,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
     elevation: 10,
   },
   recentMenuAction: {
-    minHeight: 64,
+    minHeight: 46,
     justifyContent: 'center',
-    paddingHorizontal: 28,
-    borderRadius: 14,
+    paddingHorizontal: 16,
+    borderRadius: 9,
   },
   recentMenuActionPressed: {
     backgroundColor: colors.inputBackground,
   },
   recentMenuActionText: {
-    fontSize: 22,
-    lineHeight: 30,
+    fontSize: 17,
+    lineHeight: 23,
     color: colors.text,
   },
   recentMenuDeleteText: {
     color: colors.danger,
-  },
-  recentMenuCancelText: {
-    fontSize: 22,
-    lineHeight: 30,
-    color: colors.textSecondary,
   },
   modal: {
     backgroundColor: colors.background,

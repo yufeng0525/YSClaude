@@ -12,6 +12,7 @@ import { voiceCallTool } from './toolModules/voiceCall';
 import { webSearchTool } from './toolModules/webSearch';
 import { webViewTool } from './toolModules/webView';
 import { botMessagingTool } from './toolModules/botMessaging';
+import { messageReactionTool } from './toolModules/messageReaction';
 import {
   ToolDefinition,
   ToolDefinitionConfig,
@@ -24,6 +25,7 @@ export type { ToolDefinition, ToolDefinitionConfig, ToolExecutionContext, ToolEx
 export { uploadDiary };
 
 const TOOL_MODULES: ToolModule[] = [
+  messageReactionTool,
   conversationWindowsTool,
   accountingTool,
   memoryVaultTool,

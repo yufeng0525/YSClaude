@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dime
 import { NativeViewGestureHandler, ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { BlurView } from 'expo-blur';
+import * as Clipboard from 'expo-clipboard';
 import { createAudioPlayer, type AudioStatus } from 'expo-audio';
 import Svg, { Path } from 'react-native-svg';
 import { Message, type GeneratedPicture, type LocationAttachment, type ToolInvocation, type VoiceAttachment } from '../types';
@@ -27,6 +28,8 @@ import {
   withoutAppearanceGlassProps,
 } from '../utils/appearanceCss';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
+import { isMessageFavorite, setMessageFavorite } from '../db/operations';
+import { buildReactionMap } from '../services/messageReactions';
 
 
 let colors = lightColors;
@@ -326,6 +329,8 @@ const chatIcons = [
   require('../../assets/chat5.png'),
   require('../../assets/chat6.png'),
 ];
+const POSITIVE_REACTIONS = ['❤️', '👍', '😂', '🥰', '🎉'];
+const NEGATIVE_REACTIONS = ['😕', '👎', '😢', '😠', '💔'];
 
 interface Props {
   message: Message;
@@ -338,6 +343,7 @@ interface Props {
   showAvatarHeader?: boolean;
   showBubbleTail?: boolean;
   onBubblePress?: (messageId: string) => void;
+  onToolDetailScrollActiveChange?: (active: boolean) => void;
 }
 
 // 把一次工具调用格式化成「动作描述 + 参数」的单行文字。
@@ -799,6 +805,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   showAvatarHeader = true,
   showBubbleTail = true,
   onBubblePress,
+  onToolDetailScrollActiveChange,
 }: Props) {
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
@@ -995,6 +1002,11 @@ export const ChatBubble = React.memo(function ChatBubble({
   const addHiddenRange = useChatStore((state) => state.addHiddenRange);
   const restoreHiddenRange = useChatStore((state) => state.restoreHiddenRange);
   const setMessageHidden = useChatStore((state) => state.setMessageHidden);
+  const allMessages = useChatStore((state) => state.messages);
+  const setMessageReaction = useChatStore((state) => state.setMessageReaction);
+  const reactionMap = useMemo(() => buildReactionMap(allMessages), [allMessages]);
+  const userReaction = reactionMap.get(`${message.id}:user`);
+  const assistantReaction = reactionMap.get(`${message.id}:assistant`);
   const regenerate = useChatStore((state) => state.regenerate);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editText, setEditText] = useState('');
@@ -1003,10 +1015,12 @@ export const ChatBubble = React.memo(function ChatBubble({
   // 用户气泡长按浮出的操作菜单是否显示
   const [menuVisible, setMenuVisible] = useState(false);
   const [assistantMenuVisible, setAssistantMenuVisible] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
   const [pictureActionTarget, setPictureActionTarget] = useState<GeneratedPicture | null>(null);
   const [pictureActionBusy, setPictureActionBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ uri: string; title?: string } | null>(null);
   const [dailyPaperVisible, setDailyPaperVisible] = useState(false);
+  const [reactionPicker, setReactionPicker] = useState<'positive' | 'negative' | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   // 长按时测量得到的气泡屏幕坐标，用于把菜单锚定到气泡上方
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -1029,6 +1043,14 @@ export const ChatBubble = React.memo(function ChatBubble({
     setPlayingVoiceId(null);
   }, []);
   useEffect(() => stopVoicePlayback, [stopVoicePlayback]);
+  useEffect(() => {
+    if (message.role !== 'assistant') return;
+    let active = true;
+    isMessageFavorite(message.id)
+      .then((favorite) => active && setIsFavorite(favorite))
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [message.id, message.role]);
   const handleVoicePress = useCallback(() => {
     const voice = message.voiceAttachment;
     if (!voice) return;
@@ -1261,6 +1283,31 @@ export const ChatBubble = React.memo(function ChatBubble({
       </Pressable>
     </Modal>
   );
+  const reactionPickerModal = (
+    <Modal
+      transparent
+      visible={reactionPicker !== null}
+      animationType="fade"
+      onRequestClose={() => setReactionPicker(null)}
+    >
+      <Pressable style={styles.reactionPickerOverlay} onPress={() => setReactionPicker(null)}>
+        <View style={styles.reactionPicker} onStartShouldSetResponder={() => true}>
+          {(reactionPicker === 'negative' ? NEGATIVE_REACTIONS : POSITIVE_REACTIONS).map((emoji) => (
+            <Pressable
+              key={emoji}
+              style={styles.reactionPickerButton}
+              onPress={() => {
+                setReactionPicker(null);
+                void setMessageReaction(message.id, 'user', emoji);
+              }}
+            >
+              <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
 
   if (isUser) {
     // 菜单宽度估算，用于让菜单右对齐气泡右缘
@@ -1316,6 +1363,11 @@ export const ChatBubble = React.memo(function ChatBubble({
           cssStyle('.user-message', '.chat-user-message', '.chat-user-column'),
         ]}
       >
+          {assistantReaction && (
+            <View pointerEvents="none" style={styles.userReactionBadge}>
+              <Text style={styles.reactionBadgeEmoji}>{assistantReaction.emoji}</Text>
+            </View>
+          )}
           {avatarHeader}
           {floorLabel && <Text style={styles.floorLabelRight}>{floorLabel}</Text>}
           {isHidden && <Text style={styles.hiddenLabelRight}>已隐藏</Text>}
@@ -1517,18 +1569,24 @@ export const ChatBubble = React.memo(function ChatBubble({
   );
   const remoteActivityCardVisible = isRemoteActivityMessage(message);
 
-  function handleAction(index: number) {
+  async function handleAction(index: number) {
     switch (index) {
-      case 0: // 编辑 AI 消息
-        setEditTargetId(message.id);
-        setEditText(message.content);
-        setEditModalVisible(true);
+      case 0: // 复制 AI 完整回复
+        try {
+          await Clipboard.setStringAsync(message.content);
+          Alert.alert('已复制', '已复制 AI 的完整回复');
+        } catch (error: any) {
+          Alert.alert('复制失败', error?.message || '无法复制这条回复');
+        }
         break;
-      case 1: // 删除 AI 消息
-        Alert.alert('删除', '确定删除该 AI 消息？', [
-          { text: '取消', style: 'cancel' },
-          { text: '删除', style: 'destructive', onPress: () => removeMessage(message.id) },
-        ]);
+      case 1: // 收藏
+        try {
+          const nextFavorite = !isFavorite;
+          await setMessageFavorite(message.id, nextFavorite);
+          setIsFavorite(nextFavorite);
+        } catch (error: any) {
+          Alert.alert('收藏失败', error?.message || '无法更新收藏');
+        }
         break;
       case 2: // TTS 播放
         const ttsConfig = useSettingsStore.getState().ttsConfig;
@@ -1540,20 +1598,11 @@ export const ChatBubble = React.memo(function ChatBubble({
           );
         }
         break;
-      case 3: // 编辑用户消息
-        if (userMsgBefore) {
-          setEditTargetId(userMsgBefore.id);
-          setEditText(buildVoiceEditText(userMsgBefore.content, userMsgBefore.voiceAttachment));
-          setEditModalVisible(true);
-        }
+      case 3: // 正面 reaction
+        if (isLastAssistant) setReactionPicker('positive');
         break;
-      case 4: // 删除用户消息
-        if (userMsgBefore) {
-          Alert.alert('删除', '确定删除该用户消息？', [
-            { text: '取消', style: 'cancel' },
-            { text: '删除', style: 'destructive', onPress: () => removeMessage(userMsgBefore.id) },
-          ]);
-        }
+      case 4: // 负面 reaction
+        if (isLastAssistant) setReactionPicker('negative');
         break;
       case 5: // 重新生成
         if (isLastAssistant) regenerate();
@@ -1619,7 +1668,12 @@ export const ChatBubble = React.memo(function ChatBubble({
         {expandedTools[invocationIndex] && (
           <View
             style={styles.toolDetailBox}
-            onTouchStart={(event) => event.stopPropagation()}
+            onTouchStart={(event) => {
+              event.stopPropagation();
+              onToolDetailScrollActiveChange?.(true);
+            }}
+            onTouchEnd={() => onToolDetailScrollActiveChange?.(false)}
+            onTouchCancel={() => onToolDetailScrollActiveChange?.(false)}
           >
             <NativeViewGestureHandler shouldActivateOnStart disallowInterruption>
               <GestureScrollView
@@ -2027,8 +2081,27 @@ export const ChatBubble = React.memo(function ChatBubble({
               ]}
             >
               {chatIcons.map((icon, i) => (
-                <Pressable key={i} style={styles.actionButton} onPress={() => handleAction(i)}>
-                  <Image source={icon} style={[styles.actionImage, { tintColor: assistantFooterColor }]} resizeMode="contain" />
+                <Pressable
+                  key={i}
+                  style={[styles.actionButton, (i === 3 || i === 4) && !isLastAssistant && styles.reactionActionDisabled]}
+                  onPress={() => handleAction(i)}
+                  disabled={(i === 3 || i === 4) && !isLastAssistant}
+                >
+                  {userReaction && (
+                    (i === 3 && POSITIVE_REACTIONS.includes(userReaction.emoji)) ||
+                    (i === 4 && NEGATIVE_REACTIONS.includes(userReaction.emoji))
+                  ) ? (
+                    <Text style={styles.reactionActionEmoji}>{userReaction.emoji}</Text>
+                  ) : (
+                    <Image
+                      source={icon}
+                      style={[
+                        styles.actionImage,
+                        { tintColor: i === 1 && isFavorite ? colors.primary : assistantFooterColor },
+                      ]}
+                      resizeMode="contain"
+                    />
+                  )}
                 </Pressable>
               ))}
             </View>
@@ -2046,6 +2119,7 @@ export const ChatBubble = React.memo(function ChatBubble({
 
       {editModal}
       {imagePreviewModal}
+      {reactionPickerModal}
     </View>
   );
 });
@@ -2855,6 +2929,58 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   actionImage: {
     width: 16,
     height: 16,
+  },
+  reactionActionEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  reactionActionDisabled: {
+    opacity: 0.28,
+  },
+  reactionPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reactionPicker: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    elevation: 8,
+  },
+  reactionPickerButton: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reactionPickerEmoji: {
+    fontSize: 28,
+  },
+  userReactionBadge: {
+    position: 'absolute',
+    zIndex: 20,
+    right: -9,
+    top: -9,
+    minWidth: 27,
+    height: 27,
+    paddingHorizontal: 4,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    elevation: 4,
+  },
+  reactionBadgeEmoji: {
+    fontSize: 17,
+    lineHeight: 21,
   },
   logoRow: {
     flexDirection: 'row',

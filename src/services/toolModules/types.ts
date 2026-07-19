@@ -44,6 +44,7 @@ export interface ToolDefinitionConfig {
 
 export interface ToolExecutionContext {
   conversationId?: string;
+  messageId?: string;
   memoryVaultConfig: MemoryVaultConfig;
   webSearchConfig: WebSearchConfig;
   webInteractionConfig: WebInteractionConfig;

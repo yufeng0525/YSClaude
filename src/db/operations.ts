@@ -84,6 +84,51 @@ export interface ChatSearchResult {
   createdAt: number;
 }
 
+export interface FavoriteMessageResult extends ChatSearchResult {}
+
+export async function isMessageFavorite(messageId: string): Promise<boolean> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ is_favorite: number }>(
+    'SELECT is_favorite FROM messages WHERE id = ?',
+    [messageId]
+  );
+  return row?.is_favorite === 1;
+}
+
+export async function setMessageFavorite(messageId: string, favorite: boolean): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('UPDATE messages SET is_favorite = ? WHERE id = ?', [
+    favorite ? 1 : 0,
+    messageId,
+  ]);
+}
+
+export async function getFavoriteMessages(keyword = ''): Promise<FavoriteMessageResult[]> {
+  const db = await getDatabase();
+  const normalized = keyword.trim();
+  const params = normalized ? [`%${normalized}%`, `%${normalized}%`] : [];
+  const rows = await db.getAllAsync<{
+    message_id: string; conversation_id: string; conversation_title: string;
+    role: Message['role']; content: string; created_at: number;
+  }>(
+    `SELECT m.id AS message_id, m.conversation_id, c.title AS conversation_title,
+            m.role, m.content, m.created_at
+       FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.role = 'assistant' AND m.is_favorite = 1
+        ${normalized ? 'AND (m.content LIKE ? OR c.title LIKE ?)' : ''}
+      ORDER BY m.created_at DESC`,
+    params
+  );
+  return rows.map((row) => ({
+    messageId: row.message_id,
+    conversationId: row.conversation_id,
+    conversationTitle: row.conversation_title,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+  }));
+}
+
 export interface ConversationGlobalSearchResult {
   messageId: string;
   conversationId: string;

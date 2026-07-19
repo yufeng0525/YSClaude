@@ -52,6 +52,13 @@ import {
 import { collectPinnedMcpResourceContexts } from '../services/toolModules/mcpRemote';
 import { consumePendingAndroidAccessibilityContext } from '../services/androidAccessibilitySession';
 import {
+  buildReactionSystemContent,
+  getReactionContextContent,
+  getLatestUserMessageGroup,
+  isReactionSystemMessage,
+  type MessageReactionActor,
+} from '../services/messageReactions';
+import {
   formatArtifactToken,
   listConversationArtifacts,
   pickConversationArtifactFile,
@@ -662,6 +669,11 @@ interface ChatState {
   addSharedLinkToLatestConversation: (url: string) => Promise<string>;
   addDailyPaperToLatestConversation: (paper: DailyPaper) => Promise<string>;
   addSystemMessage: (content: string) => Promise<Message | null>;
+  setMessageReaction: (
+    targetMessageId: string,
+    reactor: MessageReactionActor,
+    emoji: string
+  ) => Promise<Message | null>;
   addCallTranscriptMessages: (items: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -1589,6 +1601,10 @@ async function buildPromptCacheKeepaliveRequest(
   const filtered: Message[] = [];
   let floorNumber = 0;
   for (const message of allMessages) {
+    if (isReactionSystemMessage(message)) {
+      filtered.push(message);
+      continue;
+    }
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     floorNumber += 1;
     if (hiddenMessageIds.has(message.id)) continue;
@@ -1608,7 +1624,9 @@ async function buildPromptCacheKeepaliveRequest(
     }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
-    let msgContent = formatMessageContentForAi(m);
+    let msgContent = isReactionSystemMessage(m)
+      ? getReactionContextContent(m)
+      : formatMessageContentForAi(m);
     if (settings.stripThinking) {
       msgContent = msgContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
     }
@@ -1834,6 +1852,7 @@ async function runToolLoop(
       }
       const result = await executeTool(tc.function.name, args, {
         conversationId: options?.conversationId,
+        messageId: options?.messageId,
         memoryVaultConfig: settings.memoryVaultConfig,
         webSearchConfig: settings.webSearchConfig,
         webInteractionConfig: {
@@ -1952,6 +1971,10 @@ async function streamAssistantResponse(
   const filtered: Message[] = [];
   let floorNumber = 0;
   for (const message of historyMessages) {
+    if (isReactionSystemMessage(message)) {
+      filtered.push(message);
+      continue;
+    }
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     floorNumber += 1;
     if (hiddenMessageIds.has(message.id)) continue;
@@ -1981,7 +2004,9 @@ async function streamAssistantResponse(
     }
     const prev = index > 0 ? filtered[index - 1] : null;
     const needMarker = !prev || m.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
-    let msgContent = formatMessageContentForAi(m);
+    let msgContent = isReactionSystemMessage(m)
+      ? getReactionContextContent(m)
+      : formatMessageContentForAi(m);
     if (settings.stripThinking) {
       msgContent = msgContent.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
     }
@@ -2010,6 +2035,15 @@ async function streamAssistantResponse(
   const historyApiMessages = apiMessages.slice(0, pendingInputStartIndex);
 
   const runtimeSections: string[] = [];
+  const latestUserReactionTargets = getLatestUserMessageGroup(visibleHistoryMessages);
+  if (latestUserReactionTargets.length > 0) {
+    runtimeSections.push([
+      '你可以选择给以下最新用户消息贴 emoji。只有自然、有情绪价值时才调用 react_to_latest_user_message，不能用它代替文字回复：',
+      ...latestUserReactionTargets.map(
+        (message, index) => `U${index + 1}: ${formatMessageContentForAi(message)}`
+      ),
+    ].join('\n'));
+  }
   if (pendingWebCruise) {
     runtimeSections.push(WEB_CRUISE_SYSTEM_PROMPT);
   }
@@ -2290,6 +2324,16 @@ async function streamAssistantResponse(
         messageId: assistantMessage.id,
       }
     );
+    const persistedAfterTools = await getMessagesByConversation(conversationId);
+    const currentIdsAfterTools = new Set(get().messages.map((message) => message.id));
+    const reactionMessagesAddedByTools = persistedAfterTools.filter(
+      (message) => isReactionSystemMessage(message) && !currentIdsAfterTools.has(message.id)
+    );
+    if (reactionMessagesAddedByTools.length > 0) {
+      set((state) => ({
+        messages: [...state.messages, ...reactionMessagesAddedByTools],
+      }));
+    }
     requestStarted = true;
 
     let responseTotalTokens = toolLoopResult.totalTokens;
@@ -2803,6 +2847,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     await insertMessage(conversationId, systemMessage);
     await updateConversation(conversationId, { updatedAt: Date.now() });
+    return systemMessage;
+  },
+
+  setMessageReaction: async (targetMessageId, reactor, emoji) => {
+    const { conversationId, messages } = get();
+    if (!conversationId) return null;
+
+    const target = messages.find((message) => message.id === targetMessageId);
+    if (!target) return null;
+    if (reactor === 'user') {
+      const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+      if (target.role !== 'assistant' || latestAssistant?.id !== targetMessageId) return null;
+    } else if (target.role !== 'user') {
+      return null;
+    }
+
+    const systemMessage: Message = {
+      id: randomUUID(),
+      role: 'system',
+      content: buildReactionSystemContent({ targetMessageId, reactor, emoji }),
+      createdAt: Date.now(),
+    };
+    await insertMessage(conversationId, systemMessage);
+    await updateConversation(conversationId, { updatedAt: systemMessage.createdAt });
+    set((state) => ({
+      messages: [...state.messages, systemMessage],
+      error: null,
+    }));
     return systemMessage;
   },
 

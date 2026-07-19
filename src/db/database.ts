@@ -73,6 +73,7 @@ async function initTables(database: SQLite.SQLiteDatabase) {
       voice_attachment TEXT,
       location_attachment TEXT,
       image_generation_reference_uris TEXT,
+      is_favorite INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
@@ -807,6 +808,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
 
       PRAGMA user_version = 27;
     `);
+  }
+
+  if (!(await hasColumn(database, 'messages', 'is_favorite'))) {
+    await database.execAsync(
+      `ALTER TABLE messages ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;`
+    );
+  }
+  await database.execAsync(
+    `CREATE INDEX IF NOT EXISTS idx_messages_favorite ON messages(is_favorite, created_at DESC);`
+  );
+  if (version < 28) {
+    await database.execAsync('PRAGMA user_version = 28;');
   }
 }
 

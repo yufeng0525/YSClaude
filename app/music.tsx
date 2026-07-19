@@ -7,17 +7,38 @@ import {
   FlatList,
   Image,
   ImageBackground,
+  KeyboardAvoidingView,
   LayoutChangeEvent,
   Modal,
   Pressable,
+  Platform,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Directory, File, Paths } from 'expo-file-system';
+import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Captions,
+  ChevronDown,
+  ListMusic,
+  MessageCircle,
+  Pause,
+  Play,
+  Radio as RadioIcon,
+  Repeat1,
+  Settings,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  X,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { fonts } from '../src/theme/fonts';
 import { LyricLine, MusicTrack, PlayOrder, useMusicStore } from '../src/stores/music';
 import { useRadioStore } from '../src/stores/radio';
@@ -25,6 +46,7 @@ import { useChatStore } from '../src/stores/chat';
 import { getAllConversations } from '../src/db/operations';
 import { canDrawFloatingBall, openFloatingBallPermissionSettings } from '../src/services/floatingBall';
 import { refreshDesktopLyric } from '../src/services/desktopLyrics';
+import { copyFileFromUri } from '../src/utils/fileSystem';
 
 const ORDER_SEQUENCE: PlayOrder[] = ['list', 'repeat-one', 'shuffle'];
 function formatTime(ms: number) {
@@ -32,14 +54,28 @@ function formatTime(ms: number) {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-async function pickImage(aspect?: [number, number]) {
+function imageExtension(asset: ImagePicker.ImagePickerAsset) {
+  const mime = asset.mimeType?.toLowerCase();
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return '.jpg';
+  if (mime === 'image/webp') return '.webp';
+  if (mime === 'image/gif') return '.gif';
+  return '.png';
+}
+
+async function pickImage(prefix: string, aspect?: [number, number]) {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsEditing: true,
     aspect,
     quality: 0.9,
   });
-  return result.canceled ? '' : result.assets[0]?.uri || '';
+  const asset = result.canceled ? undefined : result.assets[0];
+  if (!asset?.uri) return '';
+  const dir = new Directory(Paths.document, 'listen-together-assets');
+  dir.create({ intermediates: true, idempotent: true });
+  const destination = new File(dir, `${prefix}-${randomUUID()}${imageExtension(asset)}`);
+  await copyFileFromUri(asset.uri, destination);
+  return destination.uri;
 }
 
 export default function MusicScreen() {
@@ -48,6 +84,12 @@ export default function MusicScreen() {
   const spin = useRef(new Animated.Value(0)).current;
   const spinAnimation = useRef<Animated.CompositeAnimation | null>(null);
   const lyricListRef = useRef<FlatList<LyricLine>>(null);
+  const userBubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiBubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const awaitingMusicReply = useRef(false);
+  const lastMusicAssistantId = useRef<string | null>(
+    [...useChatStore.getState().messages].reverse().find(message => message.role === 'assistant')?.id ?? null
+  );
   const [progressWidth, setProgressWidth] = useState(1);
   const [queueVisible, setQueueVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -56,10 +98,6 @@ export default function MusicScreen() {
   const [userBubble, setUserBubble] = useState('');
   const [aiBubbles, setAiBubbles] = useState<string[]>([]);
   const [lyricsVisible, setLyricsVisible] = useState(false);
-  const [backgroundUri, setBackgroundUri] = useState('');
-  const [userAvatarUri, setUserAvatarUri] = useState('');
-  const [aiAvatarUri, setAiAvatarUri] = useState('');
-  const [ringUri, setRingUri] = useState('');
   const [listenSeconds, setListenSeconds] = useState(0);
 
   const radio = useRadioStore();
@@ -69,12 +107,17 @@ export default function MusicScreen() {
   const chatIsStreaming = useChatStore(state => state.isStreaming);
   const chatError = useChatStore(state => state.error);
   const loadConversation = useChatStore(state => state.loadConversation);
-  const sendChatMessage = useChatStore(state => state.sendMessage);
+  const addChatUserMessage = useChatStore(state => state.addUserMessage);
+  const triggerChatResponse = useChatStore(state => state.triggerResponse);
   const {
     tracks, currentIndex, order, isPlaying, isBuffering, desktopLyricsEnabled,
-    desktopLyricBackgroundUri, currentTimeMs, durationMs, currentLyricIndex, error,
+    desktopLyricBackgroundUri, togetherBackgroundUri, togetherUserAvatarUri,
+    togetherAiAvatarUri, togetherRingUri, togetherRingEnabled, togetherRecordBorderEnabled,
+    togetherBackgroundOverlayEnabled, currentTimeMs, durationMs, currentLyricIndex, error,
     openPlayer, minimizePlayer, closePlayer, togglePlayPause, previous, next,
     playTrackAt, seekTo, setOrder, setDesktopLyricsEnabled, setDesktopLyricBackgroundUri,
+    setTogetherBackgroundUri, setTogetherUserAvatarUri, setTogetherAiAvatarUri, setTogetherRingUri,
+    setTogetherRingEnabled, setTogetherRecordBorderEnabled, setTogetherBackgroundOverlayEnabled,
   } = music;
   const track = tracks[currentIndex];
   const progress = durationMs > 0 ? Math.min(1, currentTimeMs / durationMs) : 0;
@@ -87,33 +130,51 @@ export default function MusicScreen() {
   useEffect(() => {
     spinAnimation.current?.stop();
     if (!isPlaying) return;
-    spinAnimation.current = Animated.loop(Animated.timing(spin, {
-      toValue: 1,
-      duration: 12000,
-      easing: Easing.linear,
-      useNativeDriver: true,
-    }));
+    spin.setValue(0);
+    spinAnimation.current = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 12000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+      { resetBeforeIteration: true }
+    );
     spinAnimation.current.start();
     return () => spinAnimation.current?.stop();
-  }, [isPlaying, spin]);
+  }, [isPlaying, spin, track?.id]);
   useEffect(() => {
     if (!lyricsVisible || currentLyricIndex < 0) return;
     lyricListRef.current?.scrollToIndex({ index: currentLyricIndex, animated: true, viewPosition: 0.45 });
   }, [currentLyricIndex, lyricsVisible]);
   useEffect(() => {
     const latestAssistant = [...chatMessages].reverse().find(message => message.role === 'assistant');
-    if (!latestAssistant?.content) return;
+    if (!awaitingMusicReply.current || !latestAssistant?.content) return;
+    if (latestAssistant.id === lastMusicAssistantId.current) return;
+    lastMusicAssistantId.current = latestAssistant.id;
     const parts = latestAssistant.content.split(/\n+/).map(line => line.trim()).filter(Boolean);
     setAiBubbles(parts);
-  }, [chatMessages]);
+    if (aiBubbleTimer.current) clearTimeout(aiBubbleTimer.current);
+    if (!chatIsStreaming) {
+      awaitingMusicReply.current = false;
+      aiBubbleTimer.current = setTimeout(() => setAiBubbles([]), 5000);
+    }
+  }, [chatIsStreaming, chatMessages]);
+  useEffect(() => () => {
+    if (userBubbleTimer.current) clearTimeout(userBubbleTimer.current);
+    if (aiBubbleTimer.current) clearTimeout(aiBubbleTimer.current);
+  }, []);
 
   const rotation = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   const handleMinimize = useCallback(() => {
     minimizePlayer();
-    router.replace('/');
+    router.back();
   }, [minimizePlayer, router]);
   const handleClose = useCallback(() => {
-    closePlayer().finally(() => router.replace('/'));
+    router.back();
+    closePlayer().catch((closeError) => {
+      console.warn('关闭音乐播放器失败:', closeError);
+    });
   }, [closePlayer, router]);
   const handleProgressPress = useCallback((event: any) => {
     seekTo(Math.max(0, Math.min(1, event.nativeEvent.locationX / progressWidth)) * durationMs).catch(() => undefined);
@@ -141,36 +202,57 @@ export default function MusicScreen() {
     if (!text || chatIsStreaming) return;
     setUserBubble(text);
     setAiBubbles([]);
+    if (userBubbleTimer.current) clearTimeout(userBubbleTimer.current);
+    userBubbleTimer.current = setTimeout(() => setUserBubble(''), 5000);
     setChatText('');
     const conversations = await getAllConversations();
     const latest = conversations[0];
     if (latest && latest.id !== chatConversationId) {
       await loadConversation(latest.id);
     }
-    await sendChatMessage(text);
-  }, [chatConversationId, chatIsStreaming, chatText, loadConversation, sendChatMessage]);
+    const userMessage = await addChatUserMessage(text);
+    if (!userMessage || useChatStore.getState().error) return;
+    awaitingMusicReply.current = true;
+    await triggerChatResponse({
+      skipStickerInstruction: true,
+      additionalRuntimeSections: [
+        '当前正和用户在一起听歌页面聊天。请使用自然、简短的句子回复；需要表达多句话时用换行分隔，每一行会显示为一个独立气泡。不要使用表情包、Emoji、Markdown 表格或复杂排版。',
+      ],
+    });
+  }, [addChatUserMessage, chatConversationId, chatIsStreaming, chatText, loadConversation, triggerChatResponse]);
   const handleRadio = useCallback(() => {
     const action = radio.phase === 'call_in_waiting'
       ? radio.continueProgram
       : radio.active ? radio.end : radio.start;
     action();
     setAiBubbles([radio.active ? '今天的 AI 电台先陪你到这里。' : '我选了一首相似氛围的歌，下一首一起听吧。']);
+    if (aiBubbleTimer.current) clearTimeout(aiBubbleTimer.current);
+    aiBubbleTimer.current = setTimeout(() => setAiBubbles([]), 5000);
   }, [radio]);
 
   if (!track) {
     return <View style={styles.empty}><Text style={styles.primaryText}>还没有可播放歌曲</Text></View>;
   }
 
-  const source = backgroundUri ? { uri: backgroundUri } : undefined;
+  const source = togetherBackgroundUri ? { uri: togetherBackgroundUri } : undefined;
   const player = (
-    <View style={[styles.page, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 14) }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+      style={[
+      styles.page,
+      source && styles.pageWithBackground,
+      source && togetherBackgroundOverlayEnabled && styles.pageWithOverlay,
+      { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 14) },
+      ]}
+    >
       <View style={styles.header}>
-        <Pressable style={styles.roundButton} onPress={handleMinimize}><Text style={styles.headerIcon}>⌄</Text></Pressable>
+        <Pressable style={styles.roundButton} onPress={handleMinimize}><ChevronDown size={27} color="#d8d8dc" strokeWidth={1.8} /></Pressable>
         <View style={styles.titleBlock}>
           <Text style={styles.songTitle} numberOfLines={1}>{track.title}</Text>
           <Text style={styles.artist} numberOfLines={1}>{track.artist}</Text>
         </View>
-        <Pressable style={styles.roundButton} onPress={handleClose}><Text style={styles.headerIcon}>×</Text></Pressable>
+        <Pressable style={styles.roundButton} onPress={handleClose}><X size={25} color="#d8d8dc" strokeWidth={1.8} /></Pressable>
       </View>
 
       {lyricsVisible ? (
@@ -197,13 +279,16 @@ export default function MusicScreen() {
             <View style={styles.avatarZone}>
               <View style={styles.avatarRow}>
                 <View style={[styles.avatar, styles.userAvatar]}>
-                  {userAvatarUri ? <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>你</Text>}
+                  {togetherUserAvatarUri ? <Image source={{ uri: togetherUserAvatarUri }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>你</Text>}
                 </View>
                 <View style={[styles.avatar, styles.aiAvatar]}>
-                  {aiAvatarUri ? <Image source={{ uri: aiAvatarUri }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>AI</Text>}
+                  {togetherAiAvatarUri ? <Image source={{ uri: togetherAiAvatarUri }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>AI</Text>}
                 </View>
               </View>
-              <Image source={require('../assets/headphones.png')} style={styles.headphones} resizeMode="contain" />
+              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                <Image source={require('../assets/headphone-left.png')} style={styles.headphoneLeft} resizeMode="contain" />
+                <Image source={require('../assets/headphone-right.png')} style={styles.headphoneRight} resizeMode="contain" />
+              </View>
               {!!userBubble && <View style={[styles.bubble, styles.userBubble]}><Text style={styles.bubbleText}>{userBubble}</Text></View>}
               {!!aiBubbles.length && (
                 <View style={styles.aiBubbleStack}>
@@ -215,11 +300,37 @@ export default function MusicScreen() {
           </View>
           <Pressable style={styles.recordStage} onPress={() => setLyricsVisible(true)}>
             <View style={styles.recordHalo} />
-            <View style={styles.ring}>
-              {ringUri ? <Image source={{ uri: ringUri }} style={styles.ringImage} resizeMode="contain" /> : null}
-            </View>
-            <Animated.View pointerEvents="none" style={[styles.vinyl, { transform: [{ rotate: rotation }] }]}>
-              <View style={styles.grooveOne} /><View style={styles.grooveTwo} />
+            {togetherRingEnabled && <View style={styles.ring}>
+              {togetherRingUri ? <Image source={{ uri: togetherRingUri }} style={styles.ringImage} resizeMode="contain" /> : null}
+              {[
+                { size: 298, fill: 'rgba(150,151,157,.012)' },
+                { size: 290, fill: 'rgba(150,151,157,.015)' },
+                { size: 282, fill: 'rgba(150,151,157,.018)' },
+                { size: 274, fill: 'rgba(150,151,157,.022)' },
+                { size: 266, fill: 'rgba(150,151,157,.027)' },
+                { size: 258, fill: 'rgba(150,151,157,.033)' },
+                { size: 250, fill: 'rgba(150,151,157,.04)' },
+                { size: 242, fill: 'rgba(150,151,157,.048)' },
+                { size: 234, fill: 'rgba(150,151,157,.058)' },
+              ].map(({ size, fill }) => (
+                <View
+                  key={size}
+                  pointerEvents="none"
+                  style={[
+                    styles.ringLine,
+                    { width: size, height: size, borderRadius: size / 2, backgroundColor: fill },
+                  ]}
+                />
+              ))}
+            </View>}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.vinyl,
+                !togetherRecordBorderEnabled && styles.vinylWithoutBorder,
+                { transform: [{ rotate: rotation }] },
+              ]}
+            >
               {track.artworkUrl
                 ? <Image source={{ uri: track.artworkUrl }} style={styles.cover} />
                 : <View style={[styles.cover, styles.coverFallback]}><Text style={styles.coverNote}>♪</Text></View>}
@@ -230,10 +341,10 @@ export default function MusicScreen() {
 
       <View style={styles.bottom}>
         <View style={styles.featureRow}>
-          <Feature icon="词" label="桌面歌词" active={desktopLyricsEnabled} onPress={() => toggleDesktopLyrics().catch(() => undefined)} />
-          <Feature icon="◌" label="聊天" active={chatVisible} onPress={() => setChatVisible(value => !value)} />
-          <Feature icon="◉" label="AI 电台" active={radio.active} loading={radio.loading || radio.ending} onPress={handleRadio} />
-          <Feature icon="⚙" label="设置" onPress={() => setSettingsVisible(true)} />
+          <Feature Icon={Captions} label="桌面歌词" active={desktopLyricsEnabled} onPress={() => toggleDesktopLyrics().catch(() => undefined)} />
+          <Feature Icon={MessageCircle} label="聊天" active={chatVisible} onPress={() => setChatVisible(value => !value)} />
+          <Feature Icon={RadioIcon} label="AI 电台" active={radio.active} loading={radio.loading || radio.ending} onPress={handleRadio} />
+          <Feature Icon={Settings} label="设置" onPress={() => setSettingsVisible(true)} />
         </View>
         {chatVisible && (
           <View style={styles.chatRow}>
@@ -263,13 +374,15 @@ export default function MusicScreen() {
           <View style={styles.timeRow}><Text style={styles.time}>{formatTime(currentTimeMs)}</Text><Text style={styles.time}>{formatTime(durationMs)}</Text></View>
         </View>
         <View style={styles.controls}>
-          <Control text={order === 'shuffle' ? '⇄' : order === 'repeat-one' ? '①' : '↻'} onPress={cycleOrder} />
-          <Control text="◀|" onPress={() => previous().catch(() => undefined)} />
+          <Control Icon={order === 'shuffle' ? Shuffle : order === 'repeat-one' ? Repeat1 : ListMusic} onPress={cycleOrder} />
+          <Control Icon={SkipBack} onPress={() => previous().catch(() => undefined)} />
           <Pressable style={styles.playButton} onPress={() => togglePlayPause().catch(() => undefined)}>
-            {isBuffering ? <ActivityIndicator color="#fff" /> : <Text style={styles.playText}>{isPlaying ? 'Ⅱ' : '▶'}</Text>}
+            {isBuffering ? <ActivityIndicator color="#fff" /> : isPlaying
+              ? <Pause size={28} color="#fff" fill="#fff" strokeWidth={1.8} />
+              : <Play size={28} color="#fff" fill="#fff" strokeWidth={1.8} />}
           </Pressable>
-          <Control text="|▶" onPress={() => next().catch(() => undefined)} />
-          <Control text="☷" onPress={() => setQueueVisible(true)} />
+          <Control Icon={SkipForward} onPress={() => next().catch(() => undefined)} />
+          <Control Icon={ListMusic} onPress={() => setQueueVisible(true)} />
         </View>
         {!!error && <Text style={styles.error}>{error}</Text>}
       </View>
@@ -280,16 +393,32 @@ export default function MusicScreen() {
             <View style={styles.sheetHeader}><Text style={styles.sheetTitle}>一起听设置</Text><Pressable onPress={() => setSettingsVisible(false)}><Text style={styles.closeText}>×</Text></Pressable></View>
             <Text style={styles.sectionLabel}>自定义图片</Text>
             <View style={styles.uploadGrid}>
-              <Upload label="背景图" onPress={() => pickImage([9, 16]).then(setBackgroundUri)} />
-              <Upload label="我的头像" onPress={() => pickImage([1, 1]).then(setUserAvatarUri)} />
-              <Upload label="AI 头像" onPress={() => pickImage([1, 1]).then(setAiAvatarUri)} />
-              <Upload label="唱片外圈装饰" onPress={() => pickImage([1, 1]).then(setRingUri)} />
-              <Upload label="桌面歌词背景" onPress={() => pickImage([16, 9]).then(uri => uri && setDesktopLyricBackgroundUri(uri))} />
+              <Upload label="背景图" hasImage={!!togetherBackgroundUri} onClear={() => setTogetherBackgroundUri('')} onPress={() => pickImage('background', [9, 16]).then(uri => uri && setTogetherBackgroundUri(uri))} />
+              <Upload label="我的头像" hasImage={!!togetherUserAvatarUri} onClear={() => setTogetherUserAvatarUri('')} onPress={() => pickImage('user-avatar', [1, 1]).then(uri => uri && setTogetherUserAvatarUri(uri))} />
+              <Upload label="AI 头像" hasImage={!!togetherAiAvatarUri} onClear={() => setTogetherAiAvatarUri('')} onPress={() => pickImage('ai-avatar', [1, 1]).then(uri => uri && setTogetherAiAvatarUri(uri))} />
+              <Upload label="唱片外圈装饰" hasImage={!!togetherRingUri} onClear={() => setTogetherRingUri('')} onPress={() => pickImage('record-ring', [1, 1]).then(uri => uri && setTogetherRingUri(uri))} />
+              <Upload label="桌面歌词背景" hasImage={!!desktopLyricBackgroundUri} onClear={() => setDesktopLyricBackgroundUri('')} onPress={() => pickImage('desktop-lyrics', [16, 9]).then(uri => uri && setDesktopLyricBackgroundUri(uri))} />
+            </View>
+            <View style={styles.toggleGroup}>
+              <SettingToggle
+                label="灰白年轮外圈"
+                value={togetherRingEnabled}
+                onValueChange={setTogetherRingEnabled}
+              />
+              <SettingToggle
+                label="唱片灰白描边"
+                value={togetherRecordBorderEnabled}
+                onValueChange={setTogetherRecordBorderEnabled}
+              />
+              <SettingToggle
+                label="背景图半透明深色遮罩"
+                value={togetherBackgroundOverlayEnabled}
+                onValueChange={setTogetherBackgroundOverlayEnabled}
+              />
             </View>
             <Pressable style={styles.manageButton} onPress={() => { setSettingsVisible(false); router.push('/music-playlists'); }}>
               <Text style={styles.manageText}>歌单管理</Text><Text style={styles.manageArrow}>›</Text>
             </Pressable>
-            {!!desktopLyricBackgroundUri && <Pressable onPress={() => setDesktopLyricBackgroundUri('')}><Text style={styles.clearText}>移除桌面歌词背景</Text></Pressable>}
           </View>
         </Pressable>
       </Modal>
@@ -311,30 +440,52 @@ export default function MusicScreen() {
           </View>
         </Pressable>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 
-  return source ? <ImageBackground source={source} style={styles.background} blurRadius={8}>{player}</ImageBackground> : player;
+  return source ? <ImageBackground source={source} style={styles.background} resizeMode="cover">{player}</ImageBackground> : player;
 }
 
-function Feature({ icon, label, active, loading, onPress }: { icon: string; label: string; active?: boolean; loading?: boolean; onPress: () => void }) {
-  return <Pressable style={styles.feature} onPress={onPress}><View style={[styles.featureIcon, active && styles.featureActive]}>{loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.featureIconText}>{icon}</Text>}</View><Text style={styles.featureLabel}>{label}</Text></Pressable>;
+function Feature({ Icon, label, active, loading, onPress }: { Icon: LucideIcon; label: string; active?: boolean; loading?: boolean; onPress: () => void }) {
+  return <Pressable style={styles.feature} onPress={onPress}><View style={[styles.featureIcon, active && styles.featureActive]}>{loading ? <ActivityIndicator size="small" color="#fff" /> : <Icon size={21} color={active ? '#f1f1f3' : '#c9c9cf'} strokeWidth={1.8} />}</View><Text style={styles.featureLabel}>{label}</Text></Pressable>;
 }
-function Control({ text, onPress }: { text: string; onPress: () => void }) {
-  return <Pressable style={styles.control} onPress={onPress}><Text style={styles.controlText}>{text}</Text></Pressable>;
+function Control({ Icon, onPress }: { Icon: LucideIcon; onPress: () => void }) {
+  return <Pressable style={styles.control} onPress={onPress}><Icon size={24} color="#d2d2d7" strokeWidth={1.8} /></Pressable>;
 }
-function Upload({ label, onPress }: { label: string; onPress: () => void }) {
-  return <Pressable style={styles.upload} onPress={onPress}><Text style={styles.uploadIcon}>＋</Text><Text style={styles.uploadLabel}>{label}</Text></Pressable>;
+function Upload({ label, hasImage, onPress, onClear }: { label: string; hasImage: boolean; onPress: () => void; onClear: () => void }) {
+  return (
+    <View style={styles.upload}>
+      <Pressable style={styles.uploadPicker} onPress={onPress}>
+        <Text style={styles.uploadIcon}>{hasImage ? '↻' : '＋'}</Text>
+        <Text style={styles.uploadLabel}>{label}</Text>
+      </Pressable>
+      {hasImage && <Pressable hitSlop={8} onPress={onClear}><Text style={styles.uploadClear}>清除</Text></Pressable>}
+    </View>
+  );
+}
+function SettingToggle({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (value: boolean) => void }) {
+  return (
+    <View style={styles.toggleRow}>
+      <Text style={styles.toggleLabel}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: '#3d3e44', true: '#777983' }}
+        thumbColor={value ? '#f1f1f3' : '#b4b4ba'}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: '#090a0c' },
-  page: { flex: 1, paddingHorizontal: 20, backgroundColor: 'rgba(6,7,9,.65)' },
+  page: { flex: 1, paddingHorizontal: 20, backgroundColor: '#090a0c' },
+  pageWithBackground: { backgroundColor: 'transparent' },
+  pageWithOverlay: { backgroundColor: 'rgba(6,7,9,.58)' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#090a0c' },
   primaryText: { color: '#fff', fontSize: 17 },
-  header: { height: 52, flexDirection: 'row', alignItems: 'center' },
-  roundButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  headerIcon: { color: '#d8d8dc', fontSize: 27, lineHeight: 29 },
+  header: { height: 52, flexDirection: 'row', alignItems: 'center', zIndex: 20, elevation: 20 },
+  roundButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', zIndex: 21 },
   titleBlock: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
   songTitle: { color: '#f0f0f2', fontFamily: fonts.bold, fontSize: 17 },
   artist: { marginTop: 4, color: '#999aa2', fontSize: 12 },
@@ -346,7 +497,8 @@ const styles = StyleSheet.create({
   aiAvatar: { marginLeft: -10, backgroundColor: '#5c91a9' },
   avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: '#fff', fontFamily: fonts.bold, fontSize: 20 },
-  headphones: { position: 'absolute', zIndex: 3, left: '45%', top: -15, marginLeft: -98, width: 220, height: 128 },
+  headphoneLeft: { position: 'absolute', zIndex: 3, left: -153, top: -122, width: 488, height: 488 },
+  headphoneRight: { position: 'absolute', zIndex: 3, left: -167, top: -122, width: 488, height: 488 },
   bubble: { zIndex: 5, maxWidth: 155, borderRadius: 14, paddingHorizontal: 11, paddingVertical: 8, backgroundColor: 'rgba(20,20,24,.82)', borderWidth: 1, borderColor: 'rgba(255,255,255,.08)' },
   userBubble: { position: 'absolute', top: 76, right: 98, borderTopRightRadius: 4 },
   aiBubbleStack: { position: 'absolute', top: 76, left: 98, zIndex: 5, gap: 5, alignItems: 'flex-start' },
@@ -360,14 +512,23 @@ const styles = StyleSheet.create({
   lyricText: { textAlign: 'center', color: '#777780', fontSize: 15, lineHeight: 22 },
   lyricActive: { color: '#f2f2f4', fontFamily: fonts.bold, fontSize: 20, lineHeight: 28 },
   emptyLyrics: { marginTop: 120, textAlign: 'center', color: '#888891', fontSize: 14 },
-  recordStage: { flex: 1, minHeight: 245, alignItems: 'center', justifyContent: 'center' },
+  recordStage: {
+    flex: 1,
+    minHeight: 245,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [
+      { translateX: 0 }, // 正数向右，负数向左
+      { translateY: -20 }, // 正数向下，负数向上
+    ],
+  },
   recordHalo: { position: 'absolute', width: 330, height: 330, borderRadius: 165, backgroundColor: 'rgba(255,255,255,.035)' },
-  ring: { position: 'absolute', width: 306, height: 306, borderRadius: 153, borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', backgroundColor: 'rgba(120,120,125,.12)', overflow: 'hidden' },
-  ringImage: { width: '100%', height: '100%' },
-  vinyl: { width: 232, height: 232, borderRadius: 116, alignItems: 'center', justifyContent: 'center', backgroundColor: '#101114', borderWidth: 12, borderColor: '#1b1c20', shadowColor: '#000', shadowOpacity: .65, shadowRadius: 22, elevation: 12 },
-  grooveOne: { position: 'absolute', width: 202, height: 202, borderRadius: 101, borderWidth: 1, borderColor: '#33343a' },
-  grooveTwo: { position: 'absolute', width: 184, height: 184, borderRadius: 92, borderWidth: 1, borderColor: '#2b2c31' },
-  cover: { width: 154, height: 154, borderRadius: 77 },
+  ring: { position: 'absolute', width: 306, height: 306, borderRadius: 153, borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', backgroundColor: 'rgba(170,170,175,.015)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  ringImage: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%' },
+  ringLine: { position: 'absolute', borderWidth: 0, borderColor: 'transparent' },
+  vinyl: { width: 232, height: 232, borderRadius: 116, alignItems: 'center', justifyContent: 'center', borderWidth: 6, borderColor: 'rgba(235,235,238,.72)', overflow: 'hidden' },
+  vinylWithoutBorder: { borderWidth: 0 },
+  cover: { width: '100%', height: '100%', borderRadius: 110 },
   coverFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#496174' },
   coverNote: { color: '#fff', fontSize: 34 },
   bottom: { paddingTop: 2 },
@@ -375,7 +536,6 @@ const styles = StyleSheet.create({
   feature: { width: 72, alignItems: 'center' },
   featureIcon: { width: 44, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   featureActive: { backgroundColor: 'rgba(255,255,255,.12)' },
-  featureIconText: { color: '#c9c9cf', fontSize: 21 },
   featureLabel: { marginTop: 1, color: '#96969e', fontSize: 10 },
   chatRow: { height: 44, flexDirection: 'row', gap: 8, marginTop: 8 },
   chatInput: { flex: 1, borderRadius: 22, paddingHorizontal: 16, color: '#fff', backgroundColor: 'rgba(255,255,255,.09)', borderWidth: 1, borderColor: 'rgba(255,255,255,.1)' },
@@ -391,9 +551,7 @@ const styles = StyleSheet.create({
   time: { color: '#85858d', fontSize: 11, fontVariant: ['tabular-nums'] },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginTop: 4 },
   control: { width: 48, height: 52, alignItems: 'center', justifyContent: 'center' },
-  controlText: { color: '#d2d2d7', fontSize: 24 },
   playButton: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.13)' },
-  playText: { color: '#fff', fontSize: 27 },
   error: { color: '#ff9e9e', textAlign: 'center', fontSize: 11 },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,.48)' },
   sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 30, backgroundColor: '#17181c' },
@@ -402,13 +560,17 @@ const styles = StyleSheet.create({
   closeText: { color: '#d9d9dd', fontSize: 28 },
   sectionLabel: { marginTop: 18, marginBottom: 10, color: '#a0a0a7', fontSize: 12 },
   uploadGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  upload: { width: '48%', minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 13, padding: 10, backgroundColor: 'rgba(255,255,255,.06)' },
+  upload: { width: '48%', minHeight: 58, flexDirection: 'row', alignItems: 'center', borderRadius: 13, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,.06)' },
+  uploadPicker: { flex: 1, minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 9 },
   uploadIcon: { color: '#e7e7ea', fontSize: 20 },
-  uploadLabel: { color: '#d5d5da', fontSize: 12 },
+  uploadLabel: { flexShrink: 1, color: '#d5d5da', fontSize: 12 },
+  uploadClear: { color: '#e79b9b', fontSize: 11 },
+  toggleGroup: { marginTop: 14, borderRadius: 13, paddingHorizontal: 14, backgroundColor: 'rgba(255,255,255,.06)' },
+  toggleRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  toggleLabel: { color: '#d5d5da', fontSize: 13 },
   manageButton: { height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, borderRadius: 13, paddingHorizontal: 14, backgroundColor: 'rgba(255,255,255,.06)' },
   manageText: { color: '#e1e1e5', fontSize: 13 },
   manageArrow: { color: '#98989f', fontSize: 24 },
-  clearText: { color: '#e79b9b', textAlign: 'center', marginTop: 16, fontSize: 12 },
   queueSheet: { maxHeight: '70%', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, backgroundColor: '#17181c' },
   queueRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,.07)' },
   queueRowActive: { backgroundColor: 'rgba(255,255,255,.06)' },

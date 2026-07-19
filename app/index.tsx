@@ -1223,6 +1223,14 @@ export default function ChatScreen() {
     [inputBarHeight, messageTopInset]
   );
 
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => !(
+      message.role === 'system' &&
+      message.content.startsWith('[YS_REACTION]')
+    )),
+    [messages]
+  );
+
   const floorMap = useMemo(() => {
     const map = new Map<string, number>();
     let floor = messageFloorOffset;
@@ -1271,10 +1279,14 @@ export default function ChatScreen() {
     };
   });
 
+  const handleToolDetailScrollActiveChange = useCallback((active: boolean) => {
+    flatListRef.current?.setNativeProps({ scrollEnabled: !active });
+  }, []);
+
   const renderMessageItem = useCallback<ListRenderItem<Message>>(
     ({ item, index }) => {
-      const prev = index > 0 ? messages[index - 1] : null;
-      const next = index < messages.length - 1 ? messages[index + 1] : null;
+      const prev = index > 0 ? visibleMessages[index - 1] : null;
+      const next = index < visibleMessages.length - 1 ? visibleMessages[index + 1] : null;
       const isSeparatedByTime =
         !prev || item.createdAt - prev.createdAt >= TIME_GAP_THRESHOLD_MS;
       const isFollowedBySameRole =
@@ -1312,9 +1324,10 @@ export default function ChatScreen() {
               showAvatarHeader={showAvatarHeader}
               showBubbleTail={!isFollowedBySameRole}
               onBubblePress={floor !== undefined ? handleBubblePress : undefined}
+              onToolDetailScrollActiveChange={handleToolDetailScrollActiveChange}
               isLastAssistant={
                 item.role === 'assistant' &&
-                index === messages.length - 1
+                index === visibleMessages.length - 1
               }
               showAssistantFooter={
                 item.role === 'assistant' &&
@@ -1325,7 +1338,7 @@ export default function ChatScreen() {
         </>
       );
     },
-    [dismissedDividers, enteringMessageIds, floorMap, handleBubblePress, hiddenFloorSet, hiddenMessageIdSet, latestAssistantMessageId, messages, visibleFloorMessageId]
+    [dismissedDividers, enteringMessageIds, floorMap, handleBubblePress, handleToolDetailScrollActiveChange, hiddenFloorSet, hiddenMessageIdSet, latestAssistantMessageId, visibleMessages, visibleFloorMessageId]
   );
 
   const renderOlderMessagesHeader = useCallback(() => {
@@ -1415,7 +1428,7 @@ export default function ChatScreen() {
   const messageListNode = (
     <FlatList
       ref={flatListRef}
-      data={messages}
+      data={visibleMessages}
       keyExtractor={(item) => item.id}
       keyboardShouldPersistTaps="handled"
       renderItem={renderMessageItem}
