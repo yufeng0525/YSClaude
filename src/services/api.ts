@@ -302,6 +302,8 @@ async function recordApiUsage({
   status,
   usage,
   errorMessage,
+  requestBody,
+  responsePayload,
 }: {
   request: ChatRequest;
   streaming: boolean;
@@ -310,6 +312,8 @@ async function recordApiUsage({
   status: ApiUsageStatus;
   usage?: ApiTokenUsage;
   errorMessage?: string;
+  requestBody?: Record<string, unknown>;
+  responsePayload?: unknown;
 }): Promise<void> {
   const context = request.usageContext;
   try {
@@ -334,6 +338,10 @@ async function recordApiUsage({
       durationMs: Math.max(0, endedAt - startedAt),
       errorMessage,
       metadataJson: context?.metadata ? JSON.stringify(context.metadata) : undefined,
+      requestJson: requestBody ? JSON.stringify(requestBody, null, 2) : undefined,
+      responseJson: responsePayload !== undefined
+        ? JSON.stringify(responsePayload, null, 2)
+        : undefined,
     });
   } catch (error) {
     console.warn('[API usage] failed to record usage event:', error);
@@ -403,6 +411,8 @@ export async function chatCompletion(
       endedAt: Date.now(),
       status: 'success',
       usage: normalizeUsage(json.usage),
+      requestBody: body,
+      responsePayload: json,
     });
     return json;
   } catch (error: any) {
@@ -576,6 +586,12 @@ export async function streamChatCompletion(
       knownToolNames
     );
     const usage = normalizeUsage(rawUsage);
+    const resultPayload = {
+      content: wrapNativeThinking(nativeThinking, content),
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      finish_reason: finishReason,
+      usage,
+    };
     await recordApiUsage({
       request,
       streaming: true,
@@ -583,14 +599,11 @@ export async function streamChatCompletion(
       endedAt: Date.now(),
       status: 'success',
       usage,
+      requestBody: body,
+      responsePayload: resultPayload,
     });
 
-    return {
-      content: wrapNativeThinking(nativeThinking, content),
-      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-      finish_reason: finishReason,
-      usage,
-    };
+    return resultPayload;
   } catch (error: any) {
     await recordApiUsage({
       request,
@@ -634,6 +647,7 @@ export async function streamChat(
   applyPromptCacheCompatibility(body, promptCache);
 
   let rawUsage: RawApiUsage | undefined;
+  let responseContent = '';
 
   try {
     const response = await expoFetch(url, {
@@ -673,16 +687,20 @@ export async function streamChat(
           if (thinkingDelta) {
             if (!nativeThinkingOpened) {
               nativeThinkingOpened = true;
+              responseContent += '<thinking>';
               onToken('<thinking>');
             }
+            responseContent += thinkingDelta;
             onToken(thinkingDelta);
           }
           const delta = rawDelta.content;
           if (delta) {
             if (nativeThinkingOpened && !nativeThinkingClosed) {
               nativeThinkingClosed = true;
+              responseContent += '</thinking>';
               onToken('</thinking>');
             }
+            responseContent += delta;
             onToken(delta);
           }
       });
@@ -700,21 +718,26 @@ export async function streamChat(
       if (thinkingDelta) {
         if (!nativeThinkingOpened) {
           nativeThinkingOpened = true;
+          responseContent += '<thinking>';
           onToken('<thinking>');
         }
+        responseContent += thinkingDelta;
         onToken(thinkingDelta);
       }
       const delta = rawDelta.content;
       if (delta) {
         if (nativeThinkingOpened && !nativeThinkingClosed) {
           nativeThinkingClosed = true;
+          responseContent += '</thinking>';
           onToken('</thinking>');
         }
+        responseContent += delta;
         onToken(delta);
       }
     });
 
     if (nativeThinkingOpened && !nativeThinkingClosed) {
+      responseContent += '</thinking>';
       onToken('</thinking>');
     }
 
@@ -726,6 +749,11 @@ export async function streamChat(
       endedAt: Date.now(),
       status: 'success',
       usage,
+      requestBody: body,
+      responsePayload: {
+        content: responseContent,
+        usage,
+      },
     });
     return usage;
   } catch (error: any) {

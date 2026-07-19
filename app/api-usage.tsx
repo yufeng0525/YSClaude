@@ -325,6 +325,8 @@ function GroupSection({
 }
 
 function UsageEventRow({ event }: { event: ApiUsageEvent }) {
+  const [showExchange, setShowExchange] = useState(false);
+  const hasExchange = !!event.requestJson || !!event.responseJson;
   return (
     <View style={styles.eventRow}>
       <View style={styles.eventTop}>
@@ -351,6 +353,30 @@ function UsageEventRow({ event }: { event: ApiUsageEvent }) {
         <Text style={styles.idText} numberOfLines={1}>message: {event.messageId}</Text>
       )}
       {event.errorMessage && <Text style={styles.errorInline} numberOfLines={3}>{event.errorMessage}</Text>}
+      {hasExchange && (
+        <>
+          <Pressable
+            style={styles.exchangeToggle}
+            onPress={() => setShowExchange((value) => !value)}
+          >
+            <Text style={styles.exchangeToggleText}>
+              {showExchange ? '收起最新完整请求与回复' : '查看最新完整请求与回复'}
+            </Text>
+          </Pressable>
+          {showExchange && (
+            <View style={styles.exchangePanel}>
+              <Text style={styles.exchangeTitle}>发送给 AI 的完整 Prompt</Text>
+              <Text selectable style={styles.exchangeText}>
+                {event.requestJson || '无'}
+              </Text>
+              <Text style={styles.exchangeTitle}>收到的完整回复</Text>
+              <Text selectable style={styles.exchangeText}>
+                {event.responseJson || '无'}
+              </Text>
+            </View>
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -737,6 +763,35 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: 7,
+  },
+  exchangeToggle: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  exchangeToggleText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  exchangePanel: {
+    marginTop: 4,
+    gap: 8,
+  },
+  exchangeTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  exchangeText: {
+    color: colors.textSecondary,
+    backgroundColor: colors.inputBackground,
+    borderColor: colors.inputBorder,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 11,
+    lineHeight: 16,
   },
   eventTop: {
     flexDirection: 'row',

@@ -282,7 +282,9 @@ async function initTables(database: SQLite.SQLiteDatabase) {
       ended_at INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL DEFAULT 0,
       error_message TEXT,
-      metadata_json TEXT
+      metadata_json TEXT,
+      request_json TEXT,
+      response_json TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_api_usage_started ON api_usage_events(started_at DESC);
@@ -587,7 +589,9 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
         ended_at INTEGER NOT NULL,
         duration_ms INTEGER NOT NULL DEFAULT 0,
         error_message TEXT,
-        metadata_json TEXT
+        metadata_json TEXT,
+        request_json TEXT,
+        response_json TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_api_usage_started ON api_usage_events(started_at DESC);
@@ -820,6 +824,15 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   );
   if (version < 28) {
     await database.execAsync('PRAGMA user_version = 28;');
+  }
+  if (!(await hasColumn(database, 'api_usage_events', 'request_json'))) {
+    await database.execAsync('ALTER TABLE api_usage_events ADD COLUMN request_json TEXT;');
+  }
+  if (!(await hasColumn(database, 'api_usage_events', 'response_json'))) {
+    await database.execAsync('ALTER TABLE api_usage_events ADD COLUMN response_json TEXT;');
+  }
+  if (version < 29) {
+    await database.execAsync('PRAGMA user_version = 29;');
   }
 }
 

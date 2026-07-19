@@ -391,6 +391,8 @@ export interface ApiUsageEvent extends ApiTokenUsage {
   durationMs: number;
   errorMessage?: string;
   metadataJson?: string;
+  requestJson?: string;
+  responseJson?: string;
 }
 
 export interface ApiUsageSummary {

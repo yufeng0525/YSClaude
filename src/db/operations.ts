@@ -3294,6 +3294,8 @@ interface ApiUsageEventRow {
   duration_ms: number;
   error_message: string | null;
   metadata_json: string | null;
+  request_json: string | null;
+  response_json: string | null;
 }
 
 interface ApiUsageSummaryRow {
@@ -3349,6 +3351,8 @@ function mapApiUsageEventRow(row: ApiUsageEventRow): ApiUsageEvent {
     durationMs: row.duration_ms,
     errorMessage: row.error_message || undefined,
     metadataJson: row.metadata_json || undefined,
+    requestJson: row.request_json || undefined,
+    responseJson: row.response_json || undefined,
   };
 }
 
@@ -3391,12 +3395,20 @@ export async function insertApiUsageEvent(event: ApiUsageEvent): Promise<void> {
   if (event.status === 'error' && !hasTokenUsage) return;
 
   const db = await getDatabase();
+  if (event.requestJson !== undefined || event.responseJson !== undefined) {
+    await db.runAsync(
+      `UPDATE api_usage_events
+          SET request_json = NULL,
+              response_json = NULL
+        WHERE request_json IS NOT NULL OR response_json IS NOT NULL`
+    );
+  }
   await db.runAsync(
     `INSERT OR REPLACE INTO api_usage_events
       (id, feature, request_kind, streaming, status, model, base_url, conversation_id, message_id,
        prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, details_json,
-       started_at, ended_at, duration_ms, error_message, metadata_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       started_at, ended_at, duration_ms, error_message, metadata_json, request_json, response_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       event.id,
       event.feature || 'unknown',
@@ -3418,6 +3430,8 @@ export async function insertApiUsageEvent(event: ApiUsageEvent): Promise<void> {
       event.durationMs,
       event.errorMessage || null,
       event.metadataJson || null,
+      event.requestJson ?? null,
+      event.responseJson ?? null,
     ]
   );
 }
