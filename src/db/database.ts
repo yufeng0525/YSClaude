@@ -788,6 +788,26 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (version < 26) {
     await database.execAsync('PRAGMA user_version = 26;');
   }
+
+  if (version < 27) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS bot_channel_messages (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        sender_id TEXT,
+        platform_message_id TEXT,
+        route_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bot_channel_messages_platform_created
+        ON bot_channel_messages(platform, created_at DESC);
+
+      PRAGMA user_version = 27;
+    `);
+  }
 }
 
 async function hasColumn(

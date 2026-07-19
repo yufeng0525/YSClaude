@@ -254,6 +254,24 @@ export interface QQBotConfig {
   wechatBaseUrl: string;
 }
 
+export interface LocalBotToolConfig {
+  enabled: boolean;
+  defaultReadLimit: number;
+  maxReadLimit: number;
+}
+
+export interface QQBotToolConfig extends LocalBotToolConfig {
+  appId: string;
+  appSecret: string;
+  sandbox: boolean;
+}
+
+export interface WechatClawBotToolConfig extends LocalBotToolConfig {
+  botToken: string;
+  baseUrl: string;
+  accountId: string;
+}
+
 export interface NativeToolConfig {
   accountingEnabled?: boolean;
   deviceInfoEnabled: boolean;
@@ -817,6 +835,8 @@ interface SettingsState {
   hotboardConfig: HotboardConfig;
   runCommandConfig: RunCommandConfig;
   qqBotConfig: QQBotConfig;
+  qqBotToolConfig: QQBotToolConfig;
+  wechatClawBotToolConfig: WechatClawBotToolConfig;
   nativeToolConfig: NativeToolConfig;
   calendarAiSyncConfig: CalendarAiSyncConfig;
   todayWidgetConfig: TodayWidgetConfig;
@@ -860,6 +880,8 @@ interface SettingsState {
   setHotboardConfig: (config: Partial<HotboardConfig>) => void;
   setRunCommandConfig: (config: Partial<RunCommandConfig>) => void;
   setQqBotConfig: (config: Partial<QQBotConfig>) => void;
+  setQqBotToolConfig: (config: Partial<QQBotToolConfig>) => void;
+  setWechatClawBotToolConfig: (config: Partial<WechatClawBotToolConfig>) => void;
   setNativeToolConfig: (config: Partial<NativeToolConfig>) => void;
   setCalendarAiSyncConfig: (config: Partial<CalendarAiSyncConfig>) => void;
   setTodayWidgetConfig: (config: Partial<TodayWidgetConfig>) => void;
@@ -1018,6 +1040,22 @@ export const useSettingsStore = create<SettingsState>()(
         wechatAutoConnect: true,
         wechatAccountId: '',
         wechatBaseUrl: '',
+      },
+      qqBotToolConfig: {
+        enabled: false,
+        appId: '',
+        appSecret: '',
+        sandbox: true,
+        defaultReadLimit: 20,
+        maxReadLimit: 100,
+      },
+      wechatClawBotToolConfig: {
+        enabled: false,
+        botToken: '',
+        baseUrl: 'https://ilinkai.weixin.qq.com',
+        accountId: '',
+        defaultReadLimit: 20,
+        maxReadLimit: 100,
       },
       nativeToolConfig: {
         accountingEnabled: false,
@@ -1208,6 +1246,10 @@ export const useSettingsStore = create<SettingsState>()(
         })),
       setQqBotConfig: (config) =>
         set((state) => ({ qqBotConfig: { ...state.qqBotConfig, ...config } })),
+      setQqBotToolConfig: (config) =>
+        set((state) => ({ qqBotToolConfig: { ...state.qqBotToolConfig, ...config } })),
+      setWechatClawBotToolConfig: (config) =>
+        set((state) => ({ wechatClawBotToolConfig: { ...state.wechatClawBotToolConfig, ...config } })),
       setNativeToolConfig: (config) =>
         set((state) => ({ nativeToolConfig: { ...state.nativeToolConfig, ...config } })),
       setCalendarAiSyncConfig: (config) =>
@@ -1590,6 +1632,8 @@ export const useSettingsStore = create<SettingsState>()(
         hotboardConfig: state.hotboardConfig,
         runCommandConfig: state.runCommandConfig,
         qqBotConfig: state.qqBotConfig,
+        qqBotToolConfig: state.qqBotToolConfig,
+        wechatClawBotToolConfig: state.wechatClawBotToolConfig,
         nativeToolConfig: state.nativeToolConfig,
         calendarAiSyncConfig: state.calendarAiSyncConfig,
         todayWidgetConfig: state.todayWidgetConfig,

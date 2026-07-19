@@ -11,6 +11,7 @@ import { sshArtifactTransferTool } from './toolModules/sshArtifactTransfer';
 import { voiceCallTool } from './toolModules/voiceCall';
 import { webSearchTool } from './toolModules/webSearch';
 import { webViewTool } from './toolModules/webView';
+import { botMessagingTool } from './toolModules/botMessaging';
 import {
   ToolDefinition,
   ToolDefinitionConfig,
@@ -36,6 +37,7 @@ const TOOL_MODULES: ToolModule[] = [
   conversationArtifactsTool,
   nativeDeviceTool,
   voiceCallTool,
+  botMessagingTool,
 ];
 
 const TOOL_LABELS: Record<string, string> = TOOL_MODULES.reduce(

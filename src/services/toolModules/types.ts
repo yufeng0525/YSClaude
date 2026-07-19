@@ -7,6 +7,8 @@ import {
   MemoryVaultConfig,
   NativeToolConfig,
   RunCommandConfig,
+  QQBotToolConfig,
+  WechatClawBotToolConfig,
   WebInteractionConfig,
   WebSearchConfig,
 } from '../../stores/settings';
@@ -36,6 +38,8 @@ export interface ToolDefinitionConfig {
   nativeTools?: NativeToolConfig;
   mcpTools?: McpToolConfig;
   voiceCallActive?: boolean;
+  qqBotTools?: boolean;
+  wechatClawBotTools?: boolean;
 }
 
 export interface ToolExecutionContext {
@@ -50,6 +54,8 @@ export interface ToolExecutionContext {
   runCommandConfig: RunCommandConfig;
   nativeToolConfig: NativeToolConfig;
   mcpToolConfig: McpToolConfig;
+  qqBotToolConfig?: QQBotToolConfig;
+  wechatClawBotToolConfig?: WechatClawBotToolConfig;
   webCruiseEnabled?: boolean;
 }
 

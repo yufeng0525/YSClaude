@@ -3484,3 +3484,89 @@ export async function getApiUsageSummaryByModel(): Promise<ApiUsageGroupSummary[
     ...mapApiUsageSummaryRow(row),
   }));
 }
+
+export interface BotChannelMessage {
+  id: string;
+  platform: 'qq' | 'wechat';
+  direction: 'incoming' | 'outgoing';
+  content: string;
+  senderId?: string;
+  platformMessageId?: string;
+  route?: Record<string, any>;
+  createdAt: number;
+}
+
+export async function insertBotChannelMessage(message: BotChannelMessage): Promise<boolean> {
+  const db = await getDatabase();
+  const result = await db.runAsync(
+    `INSERT OR IGNORE INTO bot_channel_messages
+      (id, platform, direction, content, sender_id, platform_message_id, route_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      message.id,
+      message.platform,
+      message.direction,
+      message.content,
+      message.senderId || null,
+      message.platformMessageId || null,
+      message.route ? JSON.stringify(message.route) : null,
+      message.createdAt,
+    ]
+  );
+  return result.changes > 0;
+}
+
+export async function getBotChannelMessages(
+  platform: 'qq' | 'wechat',
+  limit: number
+): Promise<BotChannelMessage[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM bot_channel_messages
+      WHERE platform = ?
+      ORDER BY created_at DESC
+      LIMIT ?`,
+    [platform, Math.max(1, limit)]
+  );
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    platform: row.platform,
+    direction: row.direction,
+    content: row.content,
+    senderId: row.sender_id || undefined,
+    platformMessageId: row.platform_message_id || undefined,
+    route: row.route_json ? JSON.parse(row.route_json) : undefined,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function getLatestBotChannelMessage(
+  platform: 'qq' | 'wechat',
+  direction?: 'incoming' | 'outgoing'
+): Promise<BotChannelMessage | null> {
+  const db = await getDatabase();
+  const row = direction
+    ? await db.getFirstAsync<any>(
+        `SELECT * FROM bot_channel_messages
+          WHERE platform = ? AND direction = ?
+          ORDER BY created_at DESC LIMIT 1`,
+        [platform, direction]
+      )
+    : await db.getFirstAsync<any>(
+        `SELECT * FROM bot_channel_messages
+          WHERE platform = ?
+          ORDER BY created_at DESC LIMIT 1`,
+        [platform]
+      );
+  if (!row) return null;
+  return {
+    id: row.id,
+    platform: row.platform,
+    direction: row.direction,
+    content: row.content,
+    senderId: row.sender_id || undefined,
+    platformMessageId: row.platform_message_id || undefined,
+    route: row.route_json ? JSON.parse(row.route_json) : undefined,
+    createdAt: row.created_at,
+  };
+}

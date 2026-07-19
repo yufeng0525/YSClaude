@@ -1731,6 +1731,8 @@ async function runToolLoop(
     },
     mcpTools: settings.mcpToolConfig,
     voiceCallActive,
+    qqBotTools: !!settings.qqBotToolConfig?.enabled,
+    wechatClawBotTools: !!settings.wechatClawBotToolConfig?.enabled,
   });
   if (tools.length === 0) {
     return { handled: false }; // 无工具 → 走原有流式路径
@@ -1850,6 +1852,8 @@ async function runToolLoop(
         runCommandConfig: settings.runCommandConfig,
         nativeToolConfig: settings.nativeToolConfig,
         mcpToolConfig: settings.mcpToolConfig,
+        qqBotToolConfig: settings.qqBotToolConfig,
+        wechatClawBotToolConfig: settings.wechatClawBotToolConfig,
         webCruiseEnabled,
       });
       const resultText = getToolResultText(result);

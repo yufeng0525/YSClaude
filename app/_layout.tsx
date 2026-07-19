@@ -33,6 +33,7 @@ import { syncTodayWidget } from '../src/services/todayWidget';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
 import { startIncomingCallRingtone, stopIncomingCallRingtone } from '../src/services/incomingCallRingtone';
 import { applyGlobalFont } from '../src/theme/globalFont';
+import { startLocalBotChannels } from '../src/services/localBotChannels';
 
 
 SplashScreen.preventAutoHideAsync();
@@ -158,6 +159,11 @@ export default function RootLayout() {
     const unsub = startPromptCacheRemoteSnapshotFlushListener();
     return unsub;
   }, []);
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    return startLocalBotChannels();
+  }, [settingsHydrated]);
 
   useEffect(() => {
     // 必须等 settings 完成持久化恢复：否则 getRemoteConfig() 拿不到远程服务地址，
