@@ -40,7 +40,13 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { fonts } from '../src/theme/fonts';
-import { LyricLine, MusicTrack, PlayOrder, useMusicStore } from '../src/stores/music';
+import {
+  getTogetherListeningElapsedMs,
+  LyricLine,
+  MusicTrack,
+  PlayOrder,
+  useMusicStore,
+} from '../src/stores/music';
 import { useRadioStore } from '../src/stores/radio';
 import { useChatStore } from '../src/stores/chat';
 import { getAllConversations } from '../src/db/operations';
@@ -98,7 +104,7 @@ export default function MusicScreen() {
   const [userBubble, setUserBubble] = useState('');
   const [aiBubbles, setAiBubbles] = useState<string[]>([]);
   const [lyricsVisible, setLyricsVisible] = useState(false);
-  const [listenSeconds, setListenSeconds] = useState(0);
+  const [listenClockNow, setListenClockNow] = useState(Date.now());
 
   const radio = useRadioStore();
   const music = useMusicStore();
@@ -110,10 +116,11 @@ export default function MusicScreen() {
   const addChatUserMessage = useChatStore(state => state.addUserMessage);
   const triggerChatResponse = useChatStore(state => state.triggerResponse);
   const {
-    tracks, currentIndex, order, isPlaying, isBuffering, desktopLyricsEnabled,
+    _hydrated, tracks, currentIndex, order, isPlaying, isBuffering, desktopLyricsEnabled,
     desktopLyricBackgroundUri, togetherBackgroundUri, togetherUserAvatarUri,
     togetherAiAvatarUri, togetherRingUri, togetherRingEnabled, togetherRecordBorderEnabled,
-    togetherBackgroundOverlayEnabled, currentTimeMs, durationMs, currentLyricIndex, error,
+    togetherBackgroundOverlayEnabled, togetherElapsedMs, togetherStartedAt,
+    currentTimeMs, durationMs, currentLyricIndex, error,
     openPlayer, minimizePlayer, closePlayer, togglePlayPause, previous, next,
     playTrackAt, seekTo, setOrder, setDesktopLyricsEnabled, setDesktopLyricBackgroundUri,
     setTogetherBackgroundUri, setTogetherUserAvatarUri, setTogetherAiAvatarUri, setTogetherRingUri,
@@ -121,10 +128,17 @@ export default function MusicScreen() {
   } = music;
   const track = tracks[currentIndex];
   const progress = durationMs > 0 ? Math.min(1, currentTimeMs / durationMs) : 0;
+  const listenElapsedMs = getTogetherListeningElapsedMs(
+    { togetherElapsedMs, togetherStartedAt },
+    listenClockNow
+  );
 
-  useEffect(() => { openPlayer(); }, [openPlayer]);
   useEffect(() => {
-    const timer = setInterval(() => setListenSeconds(value => value + 1), 1000);
+    if (_hydrated) openPlayer();
+  }, [_hydrated, openPlayer]);
+  useEffect(() => {
+    setListenClockNow(Date.now());
+    const timer = setInterval(() => setListenClockNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -216,7 +230,7 @@ export default function MusicScreen() {
     await triggerChatResponse({
       skipStickerInstruction: true,
       additionalRuntimeSections: [
-        '当前正和用户在一起听歌页面聊天。请使用自然、简短的句子回复；需要表达多句话时用换行分隔，每一行会显示为一个独立气泡。不要使用表情包、Emoji、Markdown 表格或复杂排版。',
+        '当前正和用户在一起听歌页面聊天。不要使用表情包、Markdown 表格或复杂排版。',
       ],
     });
   }, [addChatUserMessage, chatConversationId, chatIsStreaming, chatText, loadConversation, triggerChatResponse]);
@@ -296,7 +310,7 @@ export default function MusicScreen() {
                 </View>
               )}
             </View>
-            <Text style={styles.listenTime}>一起听了 {formatTime(listenSeconds * 1000)}</Text>
+            <Text style={styles.listenTime}>一起听了 {formatTime(listenElapsedMs)}</Text>
           </View>
           <Pressable style={styles.recordStage} onPress={() => setLyricsVisible(true)}>
             <View style={styles.recordHalo} />
@@ -340,29 +354,33 @@ export default function MusicScreen() {
       )}
 
       <View style={styles.bottom}>
-        <View style={styles.featureRow}>
-          <Feature Icon={Captions} label="桌面歌词" active={desktopLyricsEnabled} onPress={() => toggleDesktopLyrics().catch(() => undefined)} />
-          <Feature Icon={MessageCircle} label="聊天" active={chatVisible} onPress={() => setChatVisible(value => !value)} />
-          <Feature Icon={RadioIcon} label="AI 电台" active={radio.active} loading={radio.loading || radio.ending} onPress={handleRadio} />
-          <Feature Icon={Settings} label="设置" onPress={() => setSettingsVisible(true)} />
-        </View>
-        {chatVisible && (
-          <View style={styles.chatRow}>
-            <TextInput
-              value={chatText}
-              onChangeText={setChatText}
-              onSubmitEditing={() => sendMessage().catch(() => undefined)}
-              placeholder="和 AI 聊聊这首歌…"
-              placeholderTextColor="#85858d"
-              style={styles.chatInput}
-              returnKeyType="send"
-            />
-            <Pressable style={[styles.sendButton, chatIsStreaming && styles.sendButtonDisabled]} disabled={chatIsStreaming} onPress={() => sendMessage().catch(() => undefined)}>
-              {chatIsStreaming ? <ActivityIndicator size="small" color="#17171a" /> : <Text style={styles.sendText}>发送</Text>}
-            </Pressable>
+        <View style={styles.featureArea}>
+          {chatVisible && (
+            <View style={styles.chatOverlay}>
+              <View style={styles.chatRow}>
+                <TextInput
+                  value={chatText}
+                  onChangeText={setChatText}
+                  onSubmitEditing={() => sendMessage().catch(() => undefined)}
+                  placeholder="和 AI 聊聊这首歌…"
+                  placeholderTextColor="#85858d"
+                  style={styles.chatInput}
+                  returnKeyType="send"
+                />
+                <Pressable style={[styles.sendButton, chatIsStreaming && styles.sendButtonDisabled]} disabled={chatIsStreaming} onPress={() => sendMessage().catch(() => undefined)}>
+                  {chatIsStreaming ? <ActivityIndicator size="small" color="#17171a" /> : <Text style={styles.sendText}>发送</Text>}
+                </Pressable>
+              </View>
+              {!!chatError && <Text style={styles.chatError}>{chatError}</Text>}
+            </View>
+          )}
+          <View style={styles.featureRow}>
+            <Feature Icon={Captions} label="桌面歌词" active={desktopLyricsEnabled} onPress={() => toggleDesktopLyrics().catch(() => undefined)} />
+            <Feature Icon={MessageCircle} label="聊天" active={chatVisible} onPress={() => setChatVisible(value => !value)} />
+            <Feature Icon={RadioIcon} label="AI 电台" active={radio.active} loading={radio.loading || radio.ending} onPress={handleRadio} />
+            <Feature Icon={Settings} label="设置" onPress={() => setSettingsVisible(true)} />
           </View>
-        )}
-        {!!chatError && <Text style={styles.chatError}>{chatError}</Text>}
+        </View>
         <View style={styles.progressSection}>
           <Pressable
             style={styles.progressHit}
@@ -532,12 +550,14 @@ const styles = StyleSheet.create({
   coverFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#496174' },
   coverNote: { color: '#fff', fontSize: 34 },
   bottom: { paddingTop: 2 },
+  featureArea: { position: 'relative', zIndex: 30 },
   featureRow: { flexDirection: 'row', justifyContent: 'space-around' },
   feature: { width: 72, alignItems: 'center' },
   featureIcon: { width: 44, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   featureActive: { backgroundColor: 'rgba(255,255,255,.12)' },
   featureLabel: { marginTop: 1, color: '#96969e', fontSize: 10 },
-  chatRow: { height: 44, flexDirection: 'row', gap: 8, marginTop: 8 },
+  chatOverlay: { position: 'absolute', left: 0, right: 0, bottom: 54, zIndex: 31 },
+  chatRow: { height: 44, flexDirection: 'row', gap: 8 },
   chatInput: { flex: 1, borderRadius: 22, paddingHorizontal: 16, color: '#fff', backgroundColor: 'rgba(255,255,255,.09)', borderWidth: 1, borderColor: 'rgba(255,255,255,.1)' },
   sendButton: { width: 58, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ececef' },
   sendButtonDisabled: { opacity: .62 },

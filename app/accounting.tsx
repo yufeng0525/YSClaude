@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -74,6 +74,7 @@ export default function AccountingScreen() {
   const router = useRouter();
   const [tab, setTab] = useState(0);
   const [addVisible, setAddVisible] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<AccountingTransaction | null>(null);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top }]}>
@@ -90,13 +91,21 @@ export default function AccountingScreen() {
           </Pressable>
         ))}
       </View>
-      {tab === 0 ? <LedgerTab colors={colors} onAdd={() => setAddVisible(true)} /> : tab === 1 ? <StatisticsTab colors={colors} /> : <BalanceSettingsTab colors={colors} />}
-      <TransactionModal visible={addVisible} colors={colors} onClose={() => setAddVisible(false)} />
+      {tab === 0 ? <LedgerTab colors={colors} onAdd={() => setAddVisible(true)} onEdit={setEditingTransaction} /> : tab === 1 ? <StatisticsTab colors={colors} /> : <BalanceSettingsTab colors={colors} />}
+      <TransactionModal
+        visible={addVisible || editingTransaction !== null}
+        transaction={editingTransaction}
+        colors={colors}
+        onClose={() => {
+          setAddVisible(false);
+          setEditingTransaction(null);
+        }}
+      />
     </View>
   );
 }
 
-function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }) {
+function LedgerTab({ colors, onAdd, onEdit }: { colors: ThemeColors; onAdd: () => void; onEdit: (transaction: AccountingTransaction) => void }) {
   const transactions = useAccountingStore((state) => state.transactions);
   const methods = useAccountingStore((state) => state.paymentMethods);
   const categories = useAccountingStore((state) => state.categories);
@@ -106,6 +115,20 @@ function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }
   const [methodId, setMethodId] = useState('all');
   const today = dateKey(Date.now());
   const yesterday = dateKey(Date.now() - 86400000);
+  const openTransactionActions = (item: AccountingTransaction) => {
+    Alert.alert('流水操作', `请选择对「${item.source}」的操作`, [
+      { text: '编辑', onPress: () => onEdit(item) },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => Alert.alert('删除流水', `确定删除「${item.source}」吗？`, [
+          { text: '取消', style: 'cancel' },
+          { text: '删除', style: 'destructive', onPress: () => removeTransaction(item.id) },
+        ]),
+      },
+      { text: '取消', style: 'cancel' },
+    ]);
+  };
   const filtered = useMemo(() => transactions
     .filter((item) => day === 'all' || dateKey(item.occurredAt) === day)
     .filter((item) => categoryId === 'all' || item.categoryId === categoryId)
@@ -137,7 +160,7 @@ function LedgerTab({ colors, onAdd }: { colors: ThemeColors; onAdd: () => void }
             {items.map((item, index) => {
               const category = categories.find((entry) => entry.id === item.categoryId);
               const method = methods.find((entry) => entry.id === item.paymentMethodId);
-              return <Pressable key={item.id} onLongPress={() => Alert.alert('删除流水', `确定删除「${item.source}」吗？`, [{ text: '取消' }, { text: '删除', style: 'destructive', onPress: () => removeTransaction(item.id) }])} style={[styles.transaction, index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+              return <Pressable key={item.id} onLongPress={() => openTransactionActions(item)} delayLongPress={320} style={[styles.transaction, index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
                 <View style={[styles.transactionIcon, { backgroundColor: `${category?.color || '#999'}22` }]}>{item.type === 'expense' ? <ArrowUpRight size={19} color={category?.color || colors.textSecondary} /> : <ArrowDownLeft size={19} color={colors.success} />}</View>
                 <View style={styles.flex}><Text style={[styles.transactionSource, { color: colors.text }]}>{item.source}</Text><Text style={[styles.transactionMeta, { color: colors.textSecondary }]}>{category?.name || '未分类'} · {method?.name || '未知方式'} · {formatTime(item.occurredAt)}</Text></View>
                 <Text style={[styles.transactionAmount, { color: item.type === 'expense' ? colors.text : colors.success }]}>{item.type === 'expense' ? '-' : '+'}{money(item.amount, item.currency)}</Text>
@@ -225,16 +248,26 @@ function BalanceSettingsTab({ colors }: { colors: ThemeColors }) {
 function SettingsSection({ title, onAdd, children, colors }: { title: string; onAdd?: () => void; children: React.ReactNode; colors: ThemeColors }) { return <View><View style={styles.settingsHeader}><Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>{onAdd && <Pressable onPress={onAdd}><Plus size={21} color={colors.primary} /></Pressable>}</View><View style={[styles.card, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>{children}</View></View>; }
 function MethodIcon({ method }: { method: PaymentMethod }) { return method.iconUri ? <Image source={{ uri: method.iconUri }} style={styles.methodIconImage} /> : <View style={[styles.methodIcon, { backgroundColor: method.color }]}><WalletCards size={18} color="#fff" /></View>; }
 
-function TransactionModal({ visible, colors, onClose }: { visible: boolean; colors: ThemeColors; onClose: () => void }) {
+function TransactionModal({ visible, transaction, colors, onClose }: { visible: boolean; transaction: AccountingTransaction | null; colors: ThemeColors; onClose: () => void }) {
   const addTransaction = useAccountingStore((state) => state.addTransaction);
+  const updateTransaction = useAccountingStore((state) => state.updateTransaction);
   const categories = useAccountingStore((state) => state.categories);
   const methods = useAccountingStore((state) => state.paymentMethods);
   const defaultCurrency = useAccountingStore((state) => state.currency);
   const [type, setType] = useState<TransactionType>('expense'); const [source, setSource] = useState(''); const [amount, setAmount] = useState(''); const [categoryId, setCategoryId] = useState(''); const [methodId, setMethodId] = useState(''); const [currency, setCurrency] = useState(defaultCurrency);
+  useEffect(() => {
+    if (!visible) return;
+    setType(transaction?.type || 'expense');
+    setSource(transaction?.source || '');
+    setAmount(transaction ? String(transaction.amount) : '');
+    setCategoryId(transaction?.categoryId || '');
+    setMethodId(transaction?.paymentMethodId || '');
+    setCurrency(transaction?.currency || defaultCurrency);
+  }, [defaultCurrency, transaction, visible]);
   const availableCategories = categories.filter((item) => item.type === type || item.type === 'both');
   const availableMethods = methods.filter((item) => item.currency === currency);
-  const save = () => { const number = Number(amount); const finalCategory = availableCategories.some((item) => item.id === categoryId) ? categoryId : availableCategories[0]?.id; const finalMethod = availableMethods.some((item) => item.id === methodId) ? methodId : availableMethods[0]?.id; if (!source.trim() || !number || number <= 0 || !finalCategory || !finalMethod) return Alert.alert('信息不完整', '请填写来源和有效金额，并选择币种、分类与付款方式。'); addTransaction({ type, source: source.trim(), amount: number, currency, categoryId: finalCategory, paymentMethodId: finalMethod, occurredAt: Date.now() }); setSource(''); setAmount(''); setMethodId(''); onClose(); };
-  return <EditorModal visible={visible} title="记一笔" colors={colors} onClose={onClose} onSave={save}><View style={[styles.segment, { backgroundColor: colors.surface }]}>{(['expense', 'income'] as const).map((item) => <Pressable key={item} onPress={() => { setType(item); setCategoryId(''); }} style={[styles.segmentItem, type === item && { backgroundColor: colors.inputBackground }]}><Text style={{ color: type === item ? (item === 'expense' ? '#D46753' : colors.success) : colors.textSecondary, fontWeight: '600' }}>{item === 'expense' ? '支出' : '收入'}</Text></Pressable>)}</View><Field label={type === 'expense' ? '消费物品 / 来源' : '收入来源'} value={source} onChangeText={setSource} colors={colors} /><Field label="金额" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" colors={colors} /><PickerChips title="币种" items={CURRENCIES.map((item) => ({ id: item.code, name: `${item.symbol} ${item.code}` }))} value={currency} onChange={(code) => { setCurrency(code); setMethodId(''); }} colors={colors} /><PickerChips title="分类" items={availableCategories} value={categoryId || availableCategories[0]?.id} onChange={setCategoryId} colors={colors} /><PickerChips title="付款方式" items={availableMethods} value={methodId || availableMethods[0]?.id} onChange={setMethodId} colors={colors} />{availableMethods.length === 0 && <Text style={{ color: colors.textSecondary }}>请先添加该币种的付款方式</Text>}</EditorModal>;
+  const save = () => { const number = Number(amount); const finalCategory = availableCategories.some((item) => item.id === categoryId) ? categoryId : availableCategories[0]?.id; const finalMethod = availableMethods.some((item) => item.id === methodId) ? methodId : availableMethods[0]?.id; if (!source.trim() || !number || number <= 0 || !finalCategory || !finalMethod) return Alert.alert('信息不完整', '请填写来源和有效金额，并选择币种、分类与付款方式。'); const values = { type, source: source.trim(), amount: number, currency, categoryId: finalCategory, paymentMethodId: finalMethod, occurredAt: transaction?.occurredAt || Date.now(), note: transaction?.note }; if (transaction) updateTransaction({ ...values, id: transaction.id }); else addTransaction(values); onClose(); };
+  return <EditorModal visible={visible} title={transaction ? '编辑流水' : '记一笔'} colors={colors} onClose={onClose} onSave={save}><View style={[styles.segment, { backgroundColor: colors.surface }]}>{(['expense', 'income'] as const).map((item) => <Pressable key={item} onPress={() => { setType(item); setCategoryId(''); }} style={[styles.segmentItem, type === item && { backgroundColor: colors.inputBackground }]}><Text style={{ color: type === item ? (item === 'expense' ? '#D46753' : colors.success) : colors.textSecondary, fontWeight: '600' }}>{item === 'expense' ? '支出' : '收入'}</Text></Pressable>)}</View><Field label={type === 'expense' ? '消费物品 / 来源' : '收入来源'} value={source} onChangeText={setSource} colors={colors} /><Field label="金额" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" colors={colors} /><PickerChips title="币种" items={CURRENCIES.map((item) => ({ id: item.code, name: `${item.symbol} ${item.code}` }))} value={currency} onChange={(code) => { setCurrency(code); setMethodId(''); }} colors={colors} /><PickerChips title="分类" items={availableCategories} value={categoryId || availableCategories[0]?.id} onChange={setCategoryId} colors={colors} /><PickerChips title="付款方式" items={availableMethods} value={methodId || availableMethods[0]?.id} onChange={setMethodId} colors={colors} />{availableMethods.length === 0 && <Text style={{ color: colors.textSecondary }}>请先添加该币种的付款方式</Text>}</EditorModal>;
 }
 
 function MethodModal({ item, colors, onClose }: { item: PaymentMethod | 'new' | null; colors: ThemeColors; onClose: () => void }) {

@@ -57,6 +57,8 @@ interface MusicState {
   togetherRingEnabled: boolean;
   togetherRecordBorderEnabled: boolean;
   togetherBackgroundOverlayEnabled: boolean;
+  togetherElapsedMs: number;
+  togetherStartedAt: number | null;
   currentTimeMs: number;
   durationMs: number;
   currentLyricIndex: number;
@@ -148,6 +150,15 @@ function formatTime(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function getTogetherListeningElapsedMs(
+  state: Pick<MusicState, 'togetherElapsedMs' | 'togetherStartedAt'>,
+  now = Date.now()
+): number {
+  const accumulated = Math.max(0, state.togetherElapsedMs || 0);
+  if (!state.togetherStartedAt) return accumulated;
+  return accumulated + Math.max(0, now - state.togetherStartedAt);
 }
 
 function getNextIndex(state: MusicState): number {
@@ -313,13 +324,19 @@ export const useMusicStore = create<MusicState>()(
   togetherRingEnabled: true,
   togetherRecordBorderEnabled: true,
   togetherBackgroundOverlayEnabled: false,
+  togetherElapsedMs: 0,
+  togetherStartedAt: null,
   currentTimeMs: 0,
   durationMs: DEMO_TRACKS[0].durationMs ?? 0,
   currentLyricIndex: 0,
   error: null,
 
   openPlayer: () => {
-    set({ isOpen: true, isMinimized: false });
+    set((state) => ({
+      isOpen: true,
+      isMinimized: false,
+      togetherStartedAt: state.togetherStartedAt || Date.now(),
+    }));
   },
 
   minimizePlayer: () => {
@@ -327,6 +344,7 @@ export const useMusicStore = create<MusicState>()(
   },
 
   closePlayer: async () => {
+    const togetherElapsedMs = getTogetherListeningElapsedMs(get());
     releasePlayer();
     await deactivateAudioSession();
     set({
@@ -336,6 +354,8 @@ export const useMusicStore = create<MusicState>()(
       isBuffering: false,
       currentTimeMs: 0,
       currentLyricIndex: getTrackLyricIndex(get().tracks[get().currentIndex], 0),
+      togetherElapsedMs,
+      togetherStartedAt: null,
       error: null,
     });
   },
@@ -557,6 +577,8 @@ export const useMusicStore = create<MusicState>()(
         togetherRingEnabled: state.togetherRingEnabled,
         togetherRecordBorderEnabled: state.togetherRecordBorderEnabled,
         togetherBackgroundOverlayEnabled: state.togetherBackgroundOverlayEnabled,
+        togetherElapsedMs: state.togetherElapsedMs,
+        togetherStartedAt: state.togetherStartedAt,
       }),
       merge: (persisted, current) => {
         const persistedState = persisted as Partial<MusicState> | undefined;
@@ -592,6 +614,11 @@ export const useMusicStore = create<MusicState>()(
             persistedState?.togetherRecordBorderEnabled ?? current.togetherRecordBorderEnabled,
           togetherBackgroundOverlayEnabled:
             persistedState?.togetherBackgroundOverlayEnabled ?? current.togetherBackgroundOverlayEnabled,
+          togetherElapsedMs: Math.max(0, persistedState?.togetherElapsedMs ?? 0),
+          togetherStartedAt:
+            typeof persistedState?.togetherStartedAt === 'number'
+              ? persistedState.togetherStartedAt
+              : null,
           isOpen: false,
           isMinimized: false,
           isPlaying: false,

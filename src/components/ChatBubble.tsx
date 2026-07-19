@@ -28,6 +28,7 @@ import {
   withoutAppearanceGlassProps,
 } from '../utils/appearanceCss';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
+import { LatexMarkdownNode, latexMarkdownIt } from './LatexMarkdown';
 import { isMessageFavorite, setMessageFavorite } from '../db/operations';
 import { buildReactionMap } from '../services/messageReactions';
 import {
@@ -39,6 +40,7 @@ import {
 
 let colors = lightColors;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const IMAGE_MAX_WIDTH = SCREEN_WIDTH * 0.65;
 const LINK_CARD_MAX_WIDTH = SCREEN_WIDTH * 0.68;
 const MESSAGE_AVATAR_SIZE = 36;
@@ -265,6 +267,23 @@ function createMarkdownRules(options?: { messageId?: string }) {
   }
 
   return {
+    latex_inline: (node: any, _children: React.ReactNode, _parent: any, styles: any) => (
+      <LatexMarkdownNode
+        key={node.key}
+        content={node.content || ''}
+        color={styles.text?.color || colors.text}
+        fontSize={styles.text?.fontSize || 16}
+      />
+    ),
+    latex_block: (node: any, _children: React.ReactNode, _parent: any, styles: any) => (
+      <LatexMarkdownNode
+        key={node.key}
+        content={node.content || ''}
+        color={styles.text?.color || colors.text}
+        fontSize={styles.text?.fontSize || 16}
+        block
+      />
+    ),
     text: (node: any, _children: React.ReactNode, parent: any[] = [], styles: any, inheritedStyles: any = {}) => {
       const inStrong = parent.some((parentNode) => parentNode?.type === 'strong');
       const inEm = parent.some((parentNode) => parentNode?.type === 'em');
@@ -423,7 +442,7 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
       </Pressable>
       {expanded && (
         <View style={styles.toolDetailBox}>
-          <Markdown style={thinkingMarkdownStyles} rules={thinkingRules}>{thinking}</Markdown>
+          <Markdown style={thinkingMarkdownStyles} rules={thinkingRules} markdownit={latexMarkdownIt}>{thinking}</Markdown>
         </View>
       )}
     </View>
@@ -1032,6 +1051,7 @@ export const ChatBubble = React.memo(function ChatBubble({
   const [previewImage, setPreviewImage] = useState<{ uri: string; title?: string } | null>(null);
   const [dailyPaperVisible, setDailyPaperVisible] = useState(false);
   const [reactionPicker, setReactionPicker] = useState<'positive' | 'negative' | null>(null);
+  const [reactionPickerAnchor, setReactionPickerAnchor] = useState({ x: 0, y: 0 });
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   // 长按时测量得到的气泡屏幕坐标，用于把菜单锚定到气泡上方
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -1468,6 +1488,7 @@ export const ChatBubble = React.memo(function ChatBubble({
                   variant="user"
                   userTextStyle={userTextStyle}
                   markdownStyle={userMarkdownStyles}
+                  markdownRules={markdownRules}
                   stickers={messageStickers}
                 />
               )}
@@ -2081,7 +2102,7 @@ export const ChatBubble = React.memo(function ChatBubble({
                 <Pressable
                   key={i}
                   style={styles.actionButton}
-                  onPress={() => {
+                  onPress={(event) => {
                     if (i !== 3 && i !== 4) {
                       setReactionPicker(null);
                     } else if (
@@ -2089,6 +2110,11 @@ export const ChatBubble = React.memo(function ChatBubble({
                     ) {
                       setReactionPicker(null);
                       return;
+                    } else {
+                      setReactionPickerAnchor({
+                        x: event.nativeEvent.pageX,
+                        y: event.nativeEvent.pageY,
+                      });
                     }
                     void handleAction(i);
                   }}
@@ -2111,37 +2137,61 @@ export const ChatBubble = React.memo(function ChatBubble({
                   )}
                 </Pressable>
               ))}
-              {reactionPicker !== null && isLastAssistant && (
-                <View
-                  style={[
-                    styles.reactionPicker,
-                    reactionPicker === 'negative'
-                      ? styles.reactionPickerBelowNegative
-                      : styles.reactionPickerBelowPositive,
-                  ]}
-                >
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.reactionPickerContent}
-                  >
-                    {(reactionPicker === 'negative' ? negativeReactions : positiveReactions).map((emoji) => (
-                      <Pressable
-                        key={emoji}
-                        style={styles.reactionPickerButton}
-                        onPress={() => {
-                          setReactionPicker(null);
-                          void setMessageReaction(message.id, 'user', emoji);
-                        }}
-                      >
-                        <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
             </View>
           )}
+          <Modal
+            transparent
+            visible={reactionPicker !== null && isLastAssistant}
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={() => setReactionPicker(null)}
+          >
+            <View style={styles.reactionPickerOverlay}>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => setReactionPicker(null)}
+              />
+              <View
+                style={[
+                  styles.reactionPicker,
+                  {
+                    left: Math.max(12, Math.min(
+                      reactionPickerAnchor.x - 92,
+                      SCREEN_WIDTH - 196,
+                    )),
+                    top: Math.max(12, Math.min(
+                      reactionPickerAnchor.y + 18,
+                      SCREEN_HEIGHT - 54,
+                    )),
+                  },
+                ]}
+              >
+                <ScrollView
+                  horizontal
+                  nestedScrollEnabled
+                  bounces={false}
+                  directionalLockEnabled
+                  alwaysBounceHorizontal={false}
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.reactionPickerScroll}
+                  contentContainerStyle={styles.reactionPickerContent}
+                >
+                  {(reactionPicker === 'negative' ? negativeReactions : positiveReactions).map((emoji) => (
+                    <Pressable
+                      key={emoji}
+                      style={styles.reactionPickerButton}
+                      onPress={() => {
+                        setReactionPicker(null);
+                        void setMessageReaction(message.id, 'user', emoji);
+                      }}
+                    >
+                      <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
           {!assistantFooterHidden && showAssistantFooter && (
             <View style={styles.logoRow}>
               <Image source={require('../../assets/claudelogo.png')} style={styles.logoImage} resizeMode="contain" />
@@ -2973,10 +3023,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   reactionPicker: {
     position: 'absolute',
-    top: 30,
-    width: 236,
-    maxWidth: SCREEN_WIDTH - 32,
-    borderRadius: 18,
+    width: 184,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
@@ -2987,24 +3036,28 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
-  reactionPickerBelowPositive: {
-    left: 62,
+  reactionPickerOverlay: {
+    flex: 1,
   },
-  reactionPickerBelowNegative: {
-    left: 90,
+  reactionPickerScroll: {
+    width: '100%',
+    height: '100%',
   },
   reactionPickerContent: {
-    paddingHorizontal: 7,
-    paddingVertical: 6,
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    paddingHorizontal: 3,
   },
   reactionPickerButton: {
-    width: 38,
-    height: 38,
+    width: 30,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   reactionPickerEmoji: {
-    fontSize: 25,
+    fontSize: 18,
+    lineHeight: 22,
   },
   userReactionBadge: {
     position: 'absolute',

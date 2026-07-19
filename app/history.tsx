@@ -137,7 +137,7 @@ export default function HistoryScreen() {
   const [favorites, setFavorites] = useState<FavoriteMessageResult[]>([]);
   const [favoriteSearch, setFavoriteSearch] = useState('');
   const [favoritesLoading, setFavoritesLoading] = useState(false);
-  const [importingSillyTavern, setImportingSillyTavern] = useState(false);
+  const [importingChats, setImportingChats] = useState(false);
   const [previewLetter, setPreviewLetter] = useState<IncomingLetter | null>(null);
 
   const {
@@ -347,8 +347,8 @@ export default function HistoryScreen() {
   }
 
   async function handleImportSillyTavern() {
-    if (importingSillyTavern) return;
-    setImportingSillyTavern(true);
+    if (importingChats) return;
+    setImportingChats(true);
     try {
       const imported = await pickAndImportSillyTavernChats();
       if (imported.length === 0) return;
@@ -359,9 +359,9 @@ export default function HistoryScreen() {
         `已导入 ${imported.length} 个聊天窗口，共 ${totalMessages} 条消息。`
       );
     } catch (error: any) {
-      Alert.alert('导入失败', error?.message || '无法导入 SillyTavern 聊天记录');
+      Alert.alert('导入失败', error?.message || '无法导入聊天记录');
     } finally {
-      setImportingSillyTavern(false);
+      setImportingChats(false);
     }
   }
 
@@ -663,10 +663,10 @@ export default function HistoryScreen() {
           <Pressable
             style={styles.headerIconButton}
             onPress={handleImportSillyTavern}
-            disabled={importingSillyTavern}
-            accessibilityLabel="导入 SillyTavern 聊天"
+            disabled={importingChats}
+            accessibilityLabel="导入 Claude JSON 或 SillyTavern JSONL 聊天"
           >
-            {importingSillyTavern ? (
+            {importingChats ? (
               <ActivityIndicator size="small" color={colors.primary} />
             ) : (
               <Upload size={22} color={colors.text} strokeWidth={2.1} />

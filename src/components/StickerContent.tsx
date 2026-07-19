@@ -16,6 +16,7 @@ import {
 import { openHtmlArtifact } from '../services/webviewController';
 import type { ConversationArtifact, ConversationArtifactVersion, GeneratedPicture } from '../types';
 import { buildStickerDefinitions, getStickerByName, type StickerDefinition } from '../utils/stickers';
+import { latexMarkdownIt } from './LatexMarkdown';
 
 
 let colors = lightColors;
@@ -59,6 +60,9 @@ function StickerImage({
 
 function hasMarkdownSyntax(text: string): boolean {
   return (
+    /(^|[^\\])\$\$[\s\S]+?\$\$/.test(text) ||
+    /(^|[^\\])\$[^$\r\n]+\$/.test(text) ||
+    /\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/.test(text) ||
     /(^|\n)\s*(```|~~~)/.test(text) ||
     /(^|\n)\s{0,3}(?:[-*_][ \t]*){3,}(?=\r?\n|$)/.test(text) ||
     /(^|\n)\s{0,3}(#{1,6}\s|>\s|[-*+]\s|\d+\.\s)/.test(text) ||
@@ -537,7 +541,7 @@ export function StickerContent({
           if (markdownStyle && hasMarkdownSyntax(chunk.text)) {
             return (
               <View key={`text-${index}`} style={styles.userMarkdownFrame}>
-                <Markdown style={markdownStyle} rules={markdownRules}>
+                <Markdown style={markdownStyle} rules={markdownRules} markdownit={latexMarkdownIt}>
                   {chunk.text}
                 </Markdown>
               </View>
@@ -553,7 +557,7 @@ export function StickerContent({
 
         return (
           <View key={`text-${index}`} style={styles.assistantMarkdownFrame}>
-            <Markdown style={markdownStyle} rules={markdownRules}>
+            <Markdown style={markdownStyle} rules={markdownRules} markdownit={latexMarkdownIt}>
               {chunk.text}
             </Markdown>
           </View>

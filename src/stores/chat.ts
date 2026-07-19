@@ -2302,7 +2302,13 @@ async function streamAssistantResponse(
     message?.id === assistantMessage.id &&
     message.role === 'assistant' &&
     !message.content.trim() &&
-    (!message.toolInvocations || message.toolInvocations.length === 0);
+    (
+      !message.toolInvocations ||
+      message.toolInvocations.length === 0 ||
+      message.toolInvocations.every(
+        (invocation) => invocation.name === 'react_to_latest_user_message'
+      )
+    );
 
   // 流式路径要发送的完整消息：稳定提示词 + 历史对话用于缓存，运行时上下文与最新输入放在后缀。
   const outgoingMessages = buildRequestMessages(
@@ -2381,13 +2387,13 @@ async function streamAssistantResponse(
     }
     flushStreamContent();
     const finalMessages = get().messages;
-    const lastMsg = finalMessages[finalMessages.length - 1];
-    if (isEmptyAssistantMessage(lastMsg)) {
+    const responseMessage = finalMessages.find((message) => message.id === assistantMessage.id);
+    if (isEmptyAssistantMessage(responseMessage)) {
       await deleteTransientResponseMessages();
-    } else if (lastMsg && lastMsg.role === 'assistant') {
-      await updateMessageContent(lastMsg.id, lastMsg.content);
-      await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
-      processPicturesForAssistantMessage(get, set, lastMsg.id, lastMsg.content).catch((error) => {
+    } else if (responseMessage?.role === 'assistant') {
+      await updateMessageContent(responseMessage.id, responseMessage.content);
+      await updateMessageToolInvocations(responseMessage.id, responseMessage.toolInvocations);
+      processPicturesForAssistantMessage(get, set, responseMessage.id, responseMessage.content).catch((error) => {
         console.warn('[Chat] 处理 AI 生图失败:', error);
       });
     }
@@ -2414,13 +2420,13 @@ async function streamAssistantResponse(
       flushStreamContent();
       set({ error: null });
       const finalMessages = get().messages;
-      const lastMsg = finalMessages[finalMessages.length - 1];
+      const responseMessage = finalMessages.find((message) => message.id === assistantMessage.id);
 
-      if (isEmptyAssistantMessage(lastMsg)) {
+      if (isEmptyAssistantMessage(responseMessage)) {
         await deleteTransientResponseMessages();
-      } else if (lastMsg?.id === assistantMessage.id && lastMsg.role === 'assistant') {
-        await updateMessageContent(lastMsg.id, lastMsg.content);
-        await updateMessageToolInvocations(lastMsg.id, lastMsg.toolInvocations);
+      } else if (responseMessage?.role === 'assistant') {
+        await updateMessageContent(responseMessage.id, responseMessage.content);
+        await updateMessageToolInvocations(responseMessage.id, responseMessage.toolInvocations);
       }
     } else {
       floatingStream.error(err.message || '请求失败');

@@ -7,6 +7,7 @@ import {
   pickAndroidConversationFile,
   readAndroidTextFile,
 } from './androidFilePicker';
+import { importClaudeConversations } from './claudeImport';
 
 type SillyTavernRecord = {
   user_name?: unknown;
@@ -150,6 +151,10 @@ export async function pickAndImportSillyTavernChats(): Promise<SillyTavernImport
   if (!file) return [];
   const fileName = androidFile?.name || file.name || 'SillyTavern 聊天.jsonl';
   const text = (await readAndroidTextFile(file.uri)) ?? (await file.text());
+  if (/\.json$/i.test(fileName)) {
+    const imported = await importClaudeConversations(text);
+    return imported.map((item) => ({ ...item, fileName }));
+  }
   const parsed = parseSillyTavernChat(text, fileName);
   await importConversation(parsed.conversation, parsed.messages);
   return [{

@@ -37,6 +37,8 @@ type IssueJumpTarget = {
   issues: string[];
 };
 
+const DETAIL_FLOORS_PER_PAGE = 50;
+
 export default function ChatDiagnosticsScreen() {
   colors = useThemeColors();
   styles = useMemo(() => createStyles(colors), [colors]);
@@ -44,6 +46,7 @@ export default function ChatDiagnosticsScreen() {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [messageQuery, setMessageQuery] = useState('');
+  const [floorPage, setFloorPage] = useState(1);
   const [conversations, setConversations] = useState<ChatDiagnosticsConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ChatDiagnosticsDetail | null>(null);
@@ -144,6 +147,8 @@ export default function ChatDiagnosticsScreen() {
 
   const openConversation = useCallback(
     (conversationId: string) => {
+      setFloorPage(1);
+      setMessageQuery('');
       setSelectedId(conversationId);
       loadDetail(conversationId).catch(() => undefined);
     },
@@ -154,6 +159,7 @@ export default function ChatDiagnosticsScreen() {
     setSelectedId(null);
     setDetail(null);
     setMessageQuery('');
+    setFloorPage(1);
     setHighlightedMessageId(null);
   }, []);
 
@@ -165,6 +171,52 @@ export default function ChatDiagnosticsScreen() {
       buildMessageSearchText(message).includes(keyword)
     );
   }, [detail, messageQuery]);
+
+  const messagePageMap = useMemo(() => {
+    const pageMap = new Map<string, number>();
+    let currentFloor = 0;
+    for (const message of detail?.messages ?? []) {
+      if (message.floorNumber !== null) currentFloor = message.floorNumber;
+      pageMap.set(
+        message.id,
+        Math.max(1, Math.ceil(Math.max(1, currentFloor) / DETAIL_FLOORS_PER_PAGE))
+      );
+    }
+    return pageMap;
+  }, [detail]);
+
+  const floorPageCount = Math.max(
+    1,
+    Math.ceil((detail?.floorMessageCount ?? 0) / DETAIL_FLOORS_PER_PAGE)
+  );
+  const pageFloorFrom = (floorPage - 1) * DETAIL_FLOORS_PER_PAGE + 1;
+  const pageFloorTo = Math.min(
+    Math.max(detail?.floorMessageCount ?? 0, 1),
+    floorPage * DETAIL_FLOORS_PER_PAGE
+  );
+  const pagedMessages = useMemo(
+    () => filteredMessages.filter((message) => messagePageMap.get(message.id) === floorPage),
+    [filteredMessages, floorPage, messagePageMap]
+  );
+
+  useEffect(() => {
+    setFloorPage((page) => Math.min(Math.max(1, page), floorPageCount));
+  }, [floorPageCount]);
+
+  useEffect(() => {
+    if (!messageQuery.trim() || filteredMessages.length === 0) return;
+    const firstMatchPage = messagePageMap.get(filteredMessages[0].id);
+    if (firstMatchPage) setFloorPage(firstMatchPage);
+  }, [filteredMessages, messagePageMap, messageQuery]);
+
+  const changeFloorPage = useCallback((page: number) => {
+    pendingJumpMessageIdRef.current = null;
+    setHighlightedMessageId(null);
+    setFloorPage(Math.min(floorPageCount, Math.max(1, page)));
+    setTimeout(() => {
+      messageListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, 0);
+  }, [floorPageCount]);
 
   const issueJumpTargets = useMemo<IssueJumpTarget[]>(() => {
     return (detail?.messages ?? [])
@@ -178,7 +230,13 @@ export default function ChatDiagnosticsScreen() {
   }, [detail]);
 
   const scrollToMessage = useCallback((messageId: string) => {
-    const index = filteredMessages.findIndex((message) => message.id === messageId);
+    const targetPage = messagePageMap.get(messageId);
+    if (targetPage && targetPage !== floorPage) {
+      pendingJumpMessageIdRef.current = messageId;
+      setFloorPage(targetPage);
+      return;
+    }
+    const index = pagedMessages.findIndex((message) => message.id === messageId);
     if (index < 0) {
       pendingJumpMessageIdRef.current = messageId;
       if (messageQuery.trim()) {
@@ -201,7 +259,7 @@ export default function ChatDiagnosticsScreen() {
       animated: true,
       viewPosition: 0.14,
     });
-  }, [filteredMessages, messageQuery]);
+  }, [floorPage, messagePageMap, messageQuery, pagedMessages]);
 
   useEffect(() => {
     const messageId = pendingJumpMessageIdRef.current;
@@ -211,7 +269,7 @@ export default function ChatDiagnosticsScreen() {
     pendingJumpMessageIdRef.current = null;
     const timer = setTimeout(() => scrollToMessage(messageId), 0);
     return () => clearTimeout(timer);
-  }, [filteredMessages, scrollToMessage]);
+  }, [filteredMessages, pagedMessages, scrollToMessage]);
 
   const jumpToIssue = useCallback((target: IssueJumpTarget) => {
     pendingJumpMessageIdRef.current = target.messageId;
@@ -450,6 +508,12 @@ export default function ChatDiagnosticsScreen() {
       messageQuery={messageQuery}
       onMessageQueryChange={setMessageQuery}
       filteredMessageCount={filteredMessages.length}
+      pageMessageCount={pagedMessages.length}
+      floorPage={floorPage}
+      floorPageCount={floorPageCount}
+      pageFloorFrom={pageFloorFrom}
+      pageFloorTo={pageFloorTo}
+      onFloorPageChange={changeFloorPage}
       issueJumpTargets={issueJumpTargets}
       onJumpToIssue={jumpToIssue}
       clearingEmptyIssues={clearingEmptyIssues}
@@ -514,7 +578,7 @@ export default function ChatDiagnosticsScreen() {
       ) : selectedId ? (
         <FlatList
           ref={messageListRef}
-          data={filteredMessages}
+          data={pagedMessages}
           keyExtractor={(item) => item.id}
           renderItem={renderMessage}
           extraData={highlightedMessageId}
@@ -529,7 +593,7 @@ export default function ChatDiagnosticsScreen() {
               offset: Math.max(0, info.averageItemLength * info.index),
               animated: true,
             });
-            const target = filteredMessages[info.index];
+            const target = pagedMessages[info.index];
             if (target) {
               setTimeout(() => scrollToMessage(target.id), 120);
             }
@@ -593,6 +657,12 @@ function DetailHeader({
   messageQuery,
   onMessageQueryChange,
   filteredMessageCount,
+  pageMessageCount,
+  floorPage,
+  floorPageCount,
+  pageFloorFrom,
+  pageFloorTo,
+  onFloorPageChange,
   issueJumpTargets,
   onJumpToIssue,
   clearingEmptyIssues,
@@ -604,6 +674,12 @@ function DetailHeader({
   messageQuery: string;
   onMessageQueryChange: (value: string) => void;
   filteredMessageCount: number;
+  pageMessageCount: number;
+  floorPage: number;
+  floorPageCount: number;
+  pageFloorFrom: number;
+  pageFloorTo: number;
+  onFloorPageChange: (page: number) => void;
   issueJumpTargets: IssueJumpTarget[];
   onJumpToIssue: (target: IssueJumpTarget) => void;
   clearingEmptyIssues: boolean;
@@ -689,8 +765,42 @@ function DetailHeader({
         placeholderTextColor={colors.textTertiary}
         autoCapitalize="none"
       />
+      <View style={styles.paginationRow}>
+        <Pressable
+          style={[styles.pageButton, floorPage <= 1 && styles.disabledButton]}
+          onPress={() => onFloorPageChange(1)}
+          disabled={floorPage <= 1}
+        >
+          <Text style={styles.pageButtonText}>首页</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.pageButton, floorPage <= 1 && styles.disabledButton]}
+          onPress={() => onFloorPageChange(Math.max(1, floorPage - 1))}
+          disabled={floorPage <= 1}
+        >
+          <Text style={styles.pageButtonText}>上一页</Text>
+        </Pressable>
+        <View style={styles.pageStatus}>
+          <Text style={styles.pageStatusTitle}>{floorPage} / {floorPageCount}</Text>
+          <Text style={styles.pageStatusText}>楼层 {pageFloorFrom}-{pageFloorTo}</Text>
+        </View>
+        <Pressable
+          style={[styles.pageButton, floorPage >= floorPageCount && styles.disabledButton]}
+          onPress={() => onFloorPageChange(Math.min(floorPageCount, floorPage + 1))}
+          disabled={floorPage >= floorPageCount}
+        >
+          <Text style={styles.pageButtonText}>下一页</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.pageButton, floorPage >= floorPageCount && styles.disabledButton]}
+          onPress={() => onFloorPageChange(floorPageCount)}
+          disabled={floorPage >= floorPageCount}
+        >
+          <Text style={styles.pageButtonText}>末页</Text>
+        </Pressable>
+      </View>
       <Text style={styles.metaLine}>
-        showing {filteredMessageCount} / {detail.messages.length} messages
+        当前页显示 {pageMessageCount} 条 · 全部匹配 {filteredMessageCount} / {detail.messages.length} 条
       </Text>
       {detail.duplicateTimestampGroups.length > 0 && (
         <View style={styles.duplicatePanel}>
@@ -922,6 +1032,41 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     marginBottom: 12,
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  pageButton: {
+    minHeight: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pageStatus: {
+    minWidth: 78,
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageStatusTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pageStatusText: {
+    color: colors.textTertiary,
+    fontSize: 11,
   },
   conversationRow: {
     backgroundColor: colors.surface,

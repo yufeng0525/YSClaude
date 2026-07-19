@@ -52,6 +52,7 @@ import {
   RADIO_START_MARKER,
 } from '../utils/radioMarkers';
 import { WEB_CRUISE_NOTICE_TEXT } from '../utils/webCruise';
+import { REACTION_MESSAGE_PREFIX } from '../services/messageReactions';
 
 interface MessageRow {
   id: string;
@@ -2035,6 +2036,12 @@ function getMessageAiVisibility(row: MessageRow): {
 
   if (row.role === 'system') {
     const content = row.content.trim();
+    if (content.startsWith(REACTION_MESSAGE_PREFIX)) {
+      return {
+        status: 'runtime-context',
+        label: 'Emoji reaction event sent to the AI as a system chat message',
+      };
+    }
     if (content === WEB_CRUISE_NOTICE_TEXT) {
       return {
         status: 'runtime-context',

@@ -39,6 +39,7 @@ interface AccountingState {
   categories: AccountingCategory[];
   currency: string;
   addTransaction: (transaction: Omit<AccountingTransaction, 'id'>) => void;
+  updateTransaction: (transaction: AccountingTransaction) => void;
   removeTransaction: (id: string) => void;
   savePaymentMethod: (method: Omit<PaymentMethod, 'id'> & { id?: string }) => void;
   removePaymentMethod: (id: string) => void;
@@ -90,6 +91,25 @@ export const useAccountingStore = create<AccountingState>()(
           transaction.type === 'income' ? transaction.amount : -transaction.amount,
         ),
       })),
+      updateTransaction: (transaction) => set((state) => {
+        const previous = state.transactions.find((item) => item.id === transaction.id);
+        if (!previous) return state;
+        const withoutPrevious = adjustBalance(
+          state.paymentMethods,
+          previous.paymentMethodId,
+          previous.type === 'income' ? -previous.amount : previous.amount,
+        );
+        return {
+          transactions: state.transactions.map((item) =>
+            item.id === transaction.id ? transaction : item
+          ),
+          paymentMethods: adjustBalance(
+            withoutPrevious,
+            transaction.paymentMethodId,
+            transaction.type === 'income' ? transaction.amount : -transaction.amount,
+          ),
+        };
+      }),
       removeTransaction: (id) => set((state) => {
         const transaction = state.transactions.find((item) => item.id === id);
         if (!transaction) return state;
