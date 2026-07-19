@@ -13,6 +13,7 @@ import { webSearchTool } from './toolModules/webSearch';
 import { webViewTool } from './toolModules/webView';
 import { botMessagingTool } from './toolModules/botMessaging';
 import { messageReactionTool } from './toolModules/messageReaction';
+import { askUserTool } from './toolModules/askUser';
 import {
   ToolDefinition,
   ToolDefinitionConfig,
@@ -25,6 +26,7 @@ export type { ToolDefinition, ToolDefinitionConfig, ToolExecutionContext, ToolEx
 export { uploadDiary };
 
 const TOOL_MODULES: ToolModule[] = [
+  askUserTool,
   messageReactionTool,
   conversationWindowsTool,
   accountingTool,

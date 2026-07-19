@@ -6,8 +6,13 @@ import {
   getLatestUserMessageGroup,
 } from '../messageReactions';
 import type { ToolDefinition, ToolModule } from './types';
+import {
+  DEFAULT_AI_REACTION_EMOJIS,
+  normalizeReactionEmojiList,
+} from '../../utils/reactionEmojis';
 
-const REACT_TO_USER_MESSAGE: ToolDefinition = {
+function createReactionDefinition(allowedEmojis: string[]): ToolDefinition {
+  return {
   type: 'function',
   function: {
     name: 'react_to_latest_user_message',
@@ -22,28 +27,39 @@ const REACT_TO_USER_MESSAGE: ToolDefinition = {
         },
         emoji: {
           type: 'string',
-          description: '要贴的单个 emoji。',
+          description: `要贴的 emoji，只能从以下列表选择：${allowedEmojis.join(' ')}`,
+          enum: allowedEmojis,
         },
       },
       required: ['message_index', 'emoji'],
     },
   },
-};
-
-const ALLOWED_EMOJIS = new Set(['❤️', '👍', '😂', '🥰', '🎉', '😕', '👎', '😢', '😠', '💔']);
+  };
+}
 
 export const messageReactionTool: ToolModule = {
   id: 'message-reaction',
   labels: {
     react_to_latest_user_message: '给用户消息贴表情',
   },
-  getDefinitions: () => [REACT_TO_USER_MESSAGE],
+  getDefinitions: (config) => {
+    if (config.nativeTools?.messageReactionEnabled === false) return [];
+    const allowedEmojis = normalizeReactionEmojiList(
+      config.nativeTools?.aiReactionEmojis,
+      DEFAULT_AI_REACTION_EMOJIS
+    );
+    return [createReactionDefinition(allowedEmojis)];
+  },
   execute: async (toolName, args, context) => {
     if (toolName !== 'react_to_latest_user_message') return undefined;
     if (!context.conversationId) return '当前没有可操作的会话。';
 
     const emoji = String(args.emoji || '').trim();
-    if (!ALLOWED_EMOJIS.has(emoji)) return '该 emoji 不在允许列表中。';
+    const allowedEmojis = new Set(normalizeReactionEmojiList(
+      context.nativeToolConfig?.aiReactionEmojis,
+      DEFAULT_AI_REACTION_EMOJIS
+    ));
+    if (!allowedEmojis.has(emoji)) return '该 emoji 不在允许列表中。';
 
     const messages = (await getMessagesByConversation(context.conversationId))
       .filter((message) => message.id !== context.messageId);

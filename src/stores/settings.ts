@@ -274,6 +274,15 @@ export interface WechatClawBotToolConfig extends LocalBotToolConfig {
 
 export interface NativeToolConfig {
   accountingEnabled?: boolean;
+  messageReactionEnabled?: boolean;
+  aiReactionEmojis?: string[];
+  positiveReactionEmojis?: string[];
+  negativeReactionEmojis?: string[];
+  askUserEnabled?: boolean;
+  askUserMinQuestions?: number;
+  askUserMaxQuestions?: number;
+  askUserMinOptions?: number;
+  askUserMaxOptions?: number;
   deviceInfoEnabled: boolean;
   batteryStatusEnabled: boolean;
   appUsageStatsEnabled: boolean;
@@ -1058,6 +1067,15 @@ export const useSettingsStore = create<SettingsState>()(
         maxReadLimit: 100,
       },
       nativeToolConfig: {
+        messageReactionEnabled: true,
+        aiReactionEmojis: ['❤️', '👍', '😂', '🥰', '🎉', '😕', '👎', '😢', '😠', '💔'],
+        positiveReactionEmojis: ['❤️', '👍', '😂', '🥰', '🎉'],
+        negativeReactionEmojis: ['😕', '👎', '😢', '😠', '💔'],
+        askUserEnabled: true,
+        askUserMinQuestions: 1,
+        askUserMaxQuestions: 4,
+        askUserMinOptions: 2,
+        askUserMaxOptions: 4,
         accountingEnabled: false,
         deviceInfoEnabled: false,
         batteryStatusEnabled: false,
@@ -1680,6 +1698,15 @@ export const useSettingsStore = create<SettingsState>()(
             accessToken: state?.liveKitVoiceCallConfig?.accessToken || '',
           },
           nativeToolConfig: {
+            messageReactionEnabled: state?.nativeToolConfig?.messageReactionEnabled ?? true,
+            aiReactionEmojis: state?.nativeToolConfig?.aiReactionEmojis ?? ['❤️', '👍', '😂', '🥰', '🎉', '😕', '👎', '😢', '😠', '💔'],
+            positiveReactionEmojis: state?.nativeToolConfig?.positiveReactionEmojis ?? ['❤️', '👍', '😂', '🥰', '🎉'],
+            negativeReactionEmojis: state?.nativeToolConfig?.negativeReactionEmojis ?? ['😕', '👎', '😢', '😠', '💔'],
+            askUserEnabled: state?.nativeToolConfig?.askUserEnabled ?? true,
+            askUserMinQuestions: state?.nativeToolConfig?.askUserMinQuestions ?? 1,
+            askUserMaxQuestions: state?.nativeToolConfig?.askUserMaxQuestions ?? 4,
+            askUserMinOptions: state?.nativeToolConfig?.askUserMinOptions ?? 2,
+            askUserMaxOptions: state?.nativeToolConfig?.askUserMaxOptions ?? 4,
             accountingEnabled: state?.nativeToolConfig?.accountingEnabled ?? false,
             deviceInfoEnabled: state?.nativeToolConfig?.deviceInfoEnabled ?? false,
             batteryStatusEnabled: state?.nativeToolConfig?.batteryStatusEnabled ?? false,

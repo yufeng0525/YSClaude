@@ -20,6 +20,13 @@ import {
   normalizeHotboardPlatformTypes,
 } from '../../utils/hotboardPlatforms';
 import { normalizeStickerName } from '../../utils/stickers';
+import {
+  DEFAULT_AI_REACTION_EMOJIS,
+  DEFAULT_NEGATIVE_REACTION_EMOJIS,
+  DEFAULT_POSITIVE_REACTION_EMOJIS,
+  formatReactionEmojiList,
+  normalizeReactionEmojiList,
+} from '../../utils/reactionEmojis';
 import { createSettingsStyles } from './styles';
 import {
   BuiltInToolModal,
@@ -396,6 +403,21 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   // 设备原生工具本地 state
   const [accountingEnabled, setAccountingEnabled] = useState(!!nativeToolConfig?.accountingEnabled);
+  const [messageReactionEnabled, setMessageReactionEnabled] = useState(nativeToolConfig?.messageReactionEnabled !== false);
+  const [aiReactionEmojis, setAiReactionEmojis] = useState(formatReactionEmojiList(
+    normalizeReactionEmojiList(nativeToolConfig?.aiReactionEmojis, DEFAULT_AI_REACTION_EMOJIS)
+  ));
+  const [positiveReactionEmojis, setPositiveReactionEmojis] = useState(formatReactionEmojiList(
+    normalizeReactionEmojiList(nativeToolConfig?.positiveReactionEmojis, DEFAULT_POSITIVE_REACTION_EMOJIS)
+  ));
+  const [negativeReactionEmojis, setNegativeReactionEmojis] = useState(formatReactionEmojiList(
+    normalizeReactionEmojiList(nativeToolConfig?.negativeReactionEmojis, DEFAULT_NEGATIVE_REACTION_EMOJIS)
+  ));
+  const [askUserEnabled, setAskUserEnabled] = useState(nativeToolConfig?.askUserEnabled !== false);
+  const [askUserMinQuestions, setAskUserMinQuestions] = useState(String(nativeToolConfig?.askUserMinQuestions ?? 1));
+  const [askUserMaxQuestions, setAskUserMaxQuestions] = useState(String(nativeToolConfig?.askUserMaxQuestions ?? 4));
+  const [askUserMinOptions, setAskUserMinOptions] = useState(String(nativeToolConfig?.askUserMinOptions ?? 2));
+  const [askUserMaxOptions, setAskUserMaxOptions] = useState(String(nativeToolConfig?.askUserMaxOptions ?? 4));
   const [deviceInfoEnabled, setDeviceInfoEnabled] = useState(!!nativeToolConfig?.deviceInfoEnabled);
   const [batteryStatusEnabled, setBatteryStatusEnabled] = useState(!!nativeToolConfig?.batteryStatusEnabled);
   const [appUsageStatsEnabled, setAppUsageStatsEnabled] = useState(!!nativeToolConfig?.appUsageStatsEnabled);
@@ -480,6 +502,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   function handleNativeToolEnabledChange(
     key:
       | 'accountingEnabled'
+      | 'messageReactionEnabled'
+      | 'askUserEnabled'
       | 'deviceInfoEnabled'
       | 'batteryStatusEnabled'
       | 'appUsageStatsEnabled'
@@ -490,6 +514,12 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     value: boolean
   ) {
     switch (key) {
+      case 'messageReactionEnabled':
+        setMessageReactionEnabled(value);
+        break;
+      case 'askUserEnabled':
+        setAskUserEnabled(value);
+        break;
       case 'accountingEnabled':
         setAccountingEnabled(value);
         break;
@@ -1808,7 +1838,30 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   }
 
   function handleSaveNativeTools() {
+    const minQuestions = Math.max(1, Math.min(10, parseInt(askUserMinQuestions, 10) || 1));
+    const maxQuestions = Math.max(minQuestions, Math.min(10, parseInt(askUserMaxQuestions, 10) || 4));
+    const minOptions = Math.max(1, Math.min(8, parseInt(askUserMinOptions, 10) || 2));
+    const maxOptions = Math.max(minOptions, Math.min(8, parseInt(askUserMaxOptions, 10) || 4));
+    const normalizedAiReactionEmojis = normalizeReactionEmojiList(aiReactionEmojis, DEFAULT_AI_REACTION_EMOJIS);
+    const normalizedPositiveReactionEmojis = normalizeReactionEmojiList(positiveReactionEmojis, DEFAULT_POSITIVE_REACTION_EMOJIS);
+    const normalizedNegativeReactionEmojis = normalizeReactionEmojiList(negativeReactionEmojis, DEFAULT_NEGATIVE_REACTION_EMOJIS);
+    setAskUserMinQuestions(String(minQuestions));
+    setAskUserMaxQuestions(String(maxQuestions));
+    setAskUserMinOptions(String(minOptions));
+    setAskUserMaxOptions(String(maxOptions));
+    setAiReactionEmojis(formatReactionEmojiList(normalizedAiReactionEmojis));
+    setPositiveReactionEmojis(formatReactionEmojiList(normalizedPositiveReactionEmojis));
+    setNegativeReactionEmojis(formatReactionEmojiList(normalizedNegativeReactionEmojis));
     setNativeToolConfig({
+      messageReactionEnabled,
+      aiReactionEmojis: normalizedAiReactionEmojis,
+      positiveReactionEmojis: normalizedPositiveReactionEmojis,
+      negativeReactionEmojis: normalizedNegativeReactionEmojis,
+      askUserEnabled,
+      askUserMinQuestions: minQuestions,
+      askUserMaxQuestions: maxQuestions,
+      askUserMinOptions: minOptions,
+      askUserMaxOptions: maxOptions,
       accountingEnabled,
       deviceInfoEnabled,
       batteryStatusEnabled,
@@ -1843,6 +1896,8 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   const otherFeatureCards = [dailyPaperSourcesCard, locationShareCard];
 
   const builtInToolCards = [
+    { key: 'askUser', name: '选项卡追问', intro: '允许 AI 在需要补充信息时展示问题和快捷选项，回答完成后继续对话。', enabled: askUserEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('askUserEnabled', value), meta: `${askUserMinQuestions}-${askUserMaxQuestions} 题 · ${askUserMinOptions}-${askUserMaxOptions} 项` },
+    { key: 'messageReaction', name: '消息表情回应', intro: '允许 AI 给用户消息贴 emoji，并配置用户给 AI 消息回应时的两个表情面板。', enabled: messageReactionEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('messageReactionEnabled', value), meta: `${normalizeReactionEmojiList(aiReactionEmojis, DEFAULT_AI_REACTION_EMOJIS).length} 个 AI 表情` },
     { key: 'shizukuShell', name: 'Shizuku 本机终端', intro: '允许 AI 以 Shizuku 身份在当前 Android 设备执行 Shell 命令。', enabled: shizukuShellEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('shizukuShellEnabled', value), meta: '超时 ' + shellTimeoutMs + ' ms' },
     { key: 'accounting', name: '记账管理', intro: '允许 AI 查看用户今日消费与收入，并新增或删除流水记录。', enabled: accountingEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('accountingEnabled', value), meta: '3 个工具' },
     { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
@@ -1964,8 +2019,14 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
   }
 
   function handleSaveBuiltInTool(toolKey: string) {
-    switch (toolKey) {
-      case 'memoryVault':
+          switch (toolKey) {
+            case 'askUser':
+              handleSaveNativeTools();
+              break;
+            case 'messageReaction':
+              handleSaveNativeTools();
+              break;
+            case 'memoryVault':
         handleSaveMemory();
         break;
       case 'webSearch':
@@ -2016,6 +2077,14 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
         style: 'destructive',
         onPress: () => {
           switch (toolKey) {
+            case 'messageReaction':
+              setMessageReactionEnabled(false);
+              setNativeToolConfig({ messageReactionEnabled: false });
+              break;
+            case 'askUser':
+              setAskUserEnabled(false);
+              setNativeToolConfig({ askUserEnabled: false });
+              break;
             case 'accounting':
               setAccountingEnabled(false);
               setNativeToolConfig({ accountingEnabled: false });
@@ -2129,6 +2198,67 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   function renderBuiltInToolEditor(toolKey: string) {
     switch (toolKey) {
+      case 'askUser':
+        return (
+          <>
+            <Text style={styles.toolModalDescription}>AI 需要用户补充信息时，可以在输入框上方展示一个或多个问题。用户可选择快捷答案，也可输入自己的回答。</Text>
+            <View style={styles.switchRow}>
+              <View style={styles.switchText}>
+                <Text style={styles.label}>启用选项卡追问</Text>
+                <Text style={styles.hint}>关闭后不会向模型提供 ask_user 工具。</Text>
+              </View>
+              <Switch value={askUserEnabled} onValueChange={(value) => handleNativeToolEnabledChange('askUserEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} />
+            </View>
+            <View style={styles.toolNumberRow}>
+              <View style={styles.toolNumberField}>
+                <Text style={styles.label}>最少问题数</Text>
+                <TextInput style={styles.input} value={askUserMinQuestions} onChangeText={setAskUserMinQuestions} keyboardType="number-pad" placeholder="1" placeholderTextColor={colors.textTertiary} />
+              </View>
+              <View style={styles.toolNumberField}>
+                <Text style={styles.label}>最多问题数</Text>
+                <TextInput style={styles.input} value={askUserMaxQuestions} onChangeText={setAskUserMaxQuestions} keyboardType="number-pad" placeholder="4" placeholderTextColor={colors.textTertiary} />
+              </View>
+            </View>
+            <View style={styles.toolNumberRow}>
+              <View style={styles.toolNumberField}>
+                <Text style={styles.label}>每题最少选项</Text>
+                <TextInput style={styles.input} value={askUserMinOptions} onChangeText={setAskUserMinOptions} keyboardType="number-pad" placeholder="2" placeholderTextColor={colors.textTertiary} />
+              </View>
+              <View style={styles.toolNumberField}>
+                <Text style={styles.label}>每题最多选项</Text>
+                <TextInput style={styles.input} value={askUserMaxOptions} onChangeText={setAskUserMaxOptions} keyboardType="number-pad" placeholder="4" placeholderTextColor={colors.textTertiary} />
+              </View>
+            </View>
+            <Text style={styles.hint}>问题数可设为 1–10，选项数可设为 1–8；保存时会自动修正无效范围。</Text>
+          </>
+        );
+      case 'messageReaction':
+        return (
+          <>
+            <Text style={styles.toolModalDescription}>AI 可以给用户消息贴 emoji；用户也可以通过 AI 消息下方的两个回应按键选择 emoji。三个列表可分别配置。</Text>
+            <View style={styles.switchRow}>
+              <View style={styles.switchText}>
+                <Text style={styles.label}>允许 AI 给消息贴表情</Text>
+                <Text style={styles.hint}>关闭后不向模型提供工具，用户的两个回应面板仍可使用。</Text>
+              </View>
+              <Switch value={messageReactionEnabled} onValueChange={(value) => handleNativeToolEnabledChange('messageReactionEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>AI 可使用的 emoji</Text>
+              <TextInput style={styles.input} value={aiReactionEmojis} onChangeText={setAiReactionEmojis} placeholder="❤️ 👍 😂 🥰 🎉" placeholderTextColor={colors.textTertiary} />
+              <Text style={styles.hint}>AI 工具只能从这个列表选择。</Text>
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>第一个按键的 emoji 面板</Text>
+              <TextInput style={styles.input} value={positiveReactionEmojis} onChangeText={setPositiveReactionEmojis} placeholder="❤️ 👍 😂 🥰 🎉" placeholderTextColor={colors.textTertiary} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>第二个按键的 emoji 面板</Text>
+              <TextInput style={styles.input} value={negativeReactionEmojis} onChangeText={setNegativeReactionEmojis} placeholder="😕 👎 😢 😠 💔" placeholderTextColor={colors.textTertiary} />
+            </View>
+            <Text style={styles.hint}>使用空格、逗号或换行分隔，自动去重；每组最多保存 24 个。</Text>
+          </>
+        );
       case 'shizukuShell':
         return (<><Text style={styles.toolModalDescription}>AI 可通过 Shizuku 在本机执行 /system/bin/sh 命令。终端入口始终由用户手动使用，此开关只控制 AI 工具。</Text><Text style={styles.hint}>连接状态：{shizukuStatusText}</Text><View style={styles.platformActions}><Pressable style={styles.platformActionButton} onPress={handleOpenShizukuPairing}><Text style={styles.platformActionText}>打开 Shizuku 配对/启动</Text></Pressable><Pressable style={[styles.platformActionButton, shizukuTesting && styles.importButtonDisabled]} onPress={handleTestShizuku} disabled={shizukuTesting}>{shizukuTesting ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.platformActionText}>测试连接</Text>}</Pressable></View><View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>允许 AI 执行本机 Shell</Text><Text style={styles.hint}>实际身份取决于 Shizuku 以 ADB shell 还是 Root 模式启动。</Text></View><Switch value={shizukuShellEnabled} onValueChange={(value) => handleNativeToolEnabledChange('shizukuShellEnabled', value)} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View><View style={styles.field}><Text style={styles.label}>超时时间（毫秒）</Text><TextInput style={styles.input} value={shellTimeoutMs} onChangeText={setShellTimeoutMs} keyboardType="number-pad" placeholder="30000" placeholderTextColor={colors.textTertiary}/></View><View style={styles.field}><Text style={styles.label}>输出上限（字符）</Text><TextInput style={styles.input} value={shellMaxOutputChars} onChangeText={setShellMaxOutputChars} keyboardType="number-pad" placeholder="20000" placeholderTextColor={colors.textTertiary}/></View><View style={styles.field}><Text style={styles.label}>每轮最大调用次数</Text><TextInput style={styles.input} value={shellMaxToolCalls} onChangeText={setShellMaxToolCalls} keyboardType="number-pad" placeholder="10" placeholderTextColor={colors.textTertiary}/></View></>);
       case 'accounting':

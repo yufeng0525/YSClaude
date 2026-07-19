@@ -19,6 +19,7 @@ import {
 } from '../services/promptCacheKeepalive';
 import { useSettingsStore, type PromptCacheCompatibility, type PromptCacheTtl, type RunCommandConfig, type ThinkingCompatibility, type ThinkingEffort } from './settings';
 import { getToolDefinitions, executeTool, getToolLabel, ToolExecutionResult } from '../services/tools';
+import { ASK_USER_TOOL_NAME } from '../services/toolModules/askUser';
 import { observeActiveWebView } from '../services/webviewController';
 import { formatWebViewObservation } from '../services/toolModules/webView';
 import { enqueueFloatingBallMessageSequence, showFloatingBallMessage } from '../services/floatingBall';
@@ -1850,6 +1851,17 @@ async function runToolLoop(
       } catch {
         args = {};
       }
+      if (tc.function.name === ASK_USER_TOOL_NAME) {
+        onToolInvocation?.({
+          callId: tc.id,
+          name: tc.function.name,
+          args: tc.function.arguments || '',
+          result: '等待用户回答',
+          status: 'done',
+          contentOffset: streamedContent.length,
+        });
+        return { handled: true, totalTokens };
+      }
       const result = await executeTool(tc.function.name, args, {
         conversationId: options?.conversationId,
         messageId: options?.messageId,
@@ -2036,7 +2048,10 @@ async function streamAssistantResponse(
 
   const runtimeSections: string[] = [];
   const latestUserReactionTargets = getLatestUserMessageGroup(visibleHistoryMessages);
-  if (latestUserReactionTargets.length > 0) {
+  if (
+    settings.nativeToolConfig?.messageReactionEnabled !== false &&
+    latestUserReactionTargets.length > 0
+  ) {
     runtimeSections.push([
       '你可以选择给以下最新用户消息贴 emoji。只有自然、有情绪价值时才调用 react_to_latest_user_message，不能用它代替文字回复：',
       ...latestUserReactionTargets.map(

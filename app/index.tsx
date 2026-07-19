@@ -41,6 +41,7 @@ import { usePeriodStore } from '../src/stores/period';
 import { useSettingsStore } from '../src/stores/settings';
 import { ChatBubble } from '../src/components/ChatBubble';
 import { ChatInput } from '../src/components/ChatInput';
+import { AskUserCard } from '../src/components/AskUserCard';
 import { ModelSelector } from '../src/components/ModelSelector';
 import { TimeDivider } from '../src/components/TimeDivider';
 import { IOSToast } from '../src/components/IOSToast';
@@ -68,6 +69,7 @@ import {
   type PromptCacheRemoteSnapshotStatus,
 } from '../src/services/promptCacheKeepalive';
 import { isAndroidVoiceCallAvailable, type VoiceCallSnapshot } from '../src/services/voiceCallSession';
+import { getPendingAskUserRequest } from '../src/utils/askUser';
 import { useVoiceCallStore } from '../src/stores/voiceCall';
 import type { VoiceCallMode } from '../src/stores/voiceCall';
 
@@ -431,8 +433,15 @@ export default function ChatScreen() {
   const [remoteSnapshotStatus, setRemoteSnapshotStatus] = useState(() => getPromptCacheRemoteSnapshotStatus());
   const [refreshingRemoteServerStatus, setRefreshingRemoteServerStatus] = useState(false);
   const [callTypeSheetVisible, setCallTypeSheetVisible] = useState(false);
+  const [dismissedAskUserMessageId, setDismissedAskUserMessageId] = useState<string | null>(null);
   const voiceCallSnapshot = useVoiceCallStore((state) => state.snapshot);
   const startVoiceCall = useVoiceCallStore((state) => state.startCall);
+  const pendingAskUserRequest = useMemo(
+    () => getPendingAskUserRequest(messages),
+    [messages]
+  );
+  const visibleAskUserRequest =
+    pendingAskUserRequest?.messageId === dismissedAskUserMessageId ? null : pendingAskUserRequest;
 
   function resolveTopBarIconStyle(iconKey: TopBarIconKey) {
     const rawStyle = cssStyle('.top-bar-icon', `.top-bar-${iconKey}-icon`);
@@ -1698,6 +1707,18 @@ export default function ChatScreen() {
               </Text>
             </Pressable>
           </View>
+        )}
+        {visibleAskUserRequest && (
+          <AskUserCard
+            request={visibleAskUserRequest}
+            disabled={isStreaming}
+            onDismiss={() => setDismissedAskUserMessageId(visibleAskUserRequest.messageId)}
+            onSubmit={async (content) => {
+              await addUserMessage(content);
+              if (useChatStore.getState().error) return;
+              await triggerResponse();
+            }}
+          />
         )}
         <ChatInput
           onSend={async (text, imageUri, imageGenerationReferenceUris) => {

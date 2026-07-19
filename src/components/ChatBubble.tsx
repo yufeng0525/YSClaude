@@ -30,6 +30,11 @@ import {
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { isMessageFavorite, setMessageFavorite } from '../db/operations';
 import { buildReactionMap } from '../services/messageReactions';
+import {
+  DEFAULT_NEGATIVE_REACTION_EMOJIS,
+  DEFAULT_POSITIVE_REACTION_EMOJIS,
+  normalizeReactionEmojiList,
+} from '../utils/reactionEmojis';
 
 
 let colors = lightColors;
@@ -329,9 +334,6 @@ const chatIcons = [
   require('../../assets/chat5.png'),
   require('../../assets/chat6.png'),
 ];
-const POSITIVE_REACTIONS = ['❤️', '👍', '😂', '🥰', '🎉'];
-const NEGATIVE_REACTIONS = ['😕', '👎', '😢', '😠', '💔'];
-
 interface Props {
   message: Message;
   previousUserMessage?: Message | null;
@@ -1004,6 +1006,15 @@ export const ChatBubble = React.memo(function ChatBubble({
   const setMessageHidden = useChatStore((state) => state.setMessageHidden);
   const allMessages = useChatStore((state) => state.messages);
   const setMessageReaction = useChatStore((state) => state.setMessageReaction);
+  const nativeToolConfig = useSettingsStore((state) => state.nativeToolConfig);
+  const positiveReactions = normalizeReactionEmojiList(
+    nativeToolConfig?.positiveReactionEmojis,
+    DEFAULT_POSITIVE_REACTION_EMOJIS
+  );
+  const negativeReactions = normalizeReactionEmojiList(
+    nativeToolConfig?.negativeReactionEmojis,
+    DEFAULT_NEGATIVE_REACTION_EMOJIS
+  );
   const reactionMap = useMemo(() => buildReactionMap(allMessages), [allMessages]);
   const userReaction = reactionMap.get(`${message.id}:user`);
   const assistantReaction = reactionMap.get(`${message.id}:assistant`);
@@ -1292,7 +1303,7 @@ export const ChatBubble = React.memo(function ChatBubble({
     >
       <Pressable style={styles.reactionPickerOverlay} onPress={() => setReactionPicker(null)}>
         <View style={styles.reactionPicker} onStartShouldSetResponder={() => true}>
-          {(reactionPicker === 'negative' ? NEGATIVE_REACTIONS : POSITIVE_REACTIONS).map((emoji) => (
+          {(reactionPicker === 'negative' ? negativeReactions : positiveReactions).map((emoji) => (
             <Pressable
               key={emoji}
               style={styles.reactionPickerButton}
@@ -2088,8 +2099,8 @@ export const ChatBubble = React.memo(function ChatBubble({
                   disabled={(i === 3 || i === 4) && !isLastAssistant}
                 >
                   {userReaction && (
-                    (i === 3 && POSITIVE_REACTIONS.includes(userReaction.emoji)) ||
-                    (i === 4 && NEGATIVE_REACTIONS.includes(userReaction.emoji))
+                    (i === 3 && positiveReactions.includes(userReaction.emoji)) ||
+                    (i === 4 && negativeReactions.includes(userReaction.emoji))
                   ) ? (
                     <Text style={styles.reactionActionEmoji}>{userReaction.emoji}</Text>
                   ) : (
