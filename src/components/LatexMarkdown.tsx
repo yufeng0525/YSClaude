@@ -2,14 +2,19 @@ import { StyleSheet, View } from 'react-native';
 import { MarkdownIt } from '@ronradtke/react-native-markdown-display';
 import { MathJaxSvg } from 'react-native-mathjax-html-to-svg';
 
-function findClosingDelimiter(source: string, start: number, close: string): number {
+function findClosingDelimiter(
+  source: string,
+  start: number,
+  close: string,
+  isValidClose?: (index: number) => boolean
+): number {
   let cursor = start;
   while (cursor < source.length) {
     const index = source.indexOf(close, cursor);
     if (index < 0) return -1;
     let slashCount = 0;
     for (let i = index - 1; i >= 0 && source[i] === '\\'; i -= 1) slashCount += 1;
-    if (slashCount % 2 === 0) return index;
+    if (slashCount % 2 === 0 && (!isValidClose || isValidClose(index))) return index;
     cursor = index + close.length;
   }
   return -1;
@@ -36,9 +41,20 @@ function latexPlugin(md: any) {
       return false;
     }
 
-    const end = findClosingDelimiter(source, start + open.length, close);
+    const end = findClosingDelimiter(
+      source,
+      start + open.length,
+      close,
+      open === '$'
+        ? (index) => {
+            // Pandoc inline-math rule: the closing delimiter must have a
+            // non-space character on its left and must not be followed by a
+            // digit. This keeps currency such as "$20 and $30" as plain text.
+            return !/\s/.test(source[index - 1] || '') && !/\d/.test(source[index + 1] || '');
+          }
+        : undefined
+    );
     if (end < 0 || end === start + open.length) return false;
-    if (open === '$' && /\s/.test(source[end - 1] || '')) return false;
 
     if (!silent) {
       const token = state.push('latex_inline', 'math', 0);
