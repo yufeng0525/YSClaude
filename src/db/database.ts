@@ -115,6 +115,22 @@ async function initTables(database: SQLite.SQLiteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_diaries_updated ON diaries(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_diaries_favorite ON diaries(is_favorite);
 
+    CREATE TABLE IF NOT EXISTS memory_items (
+      id TEXT PRIMARY KEY,
+      summary TEXT NOT NULL DEFAULT '',
+      original TEXT NOT NULL DEFAULT '',
+      date TEXT NOT NULL DEFAULT '',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      embedding_json TEXT,
+      embedding_model TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_items_active_date
+      ON memory_items(active, date DESC);
+
     CREATE TABLE IF NOT EXISTS period_records (
       id TEXT PRIMARY KEY,
       start_date TEXT NOT NULL,
@@ -833,6 +849,25 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   }
   if (version < 29) {
     await database.execAsync('PRAGMA user_version = 29;');
+  }
+  if (version < 30) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS memory_items (
+        id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL DEFAULT '',
+        original TEXT NOT NULL DEFAULT '',
+        date TEXT NOT NULL DEFAULT '',
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        embedding_json TEXT,
+        embedding_model TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_items_active_date
+        ON memory_items(active, date DESC);
+      PRAGMA user_version = 30;
+    `);
   }
 }
 

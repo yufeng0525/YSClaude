@@ -20,7 +20,7 @@ import { useKeyboardHeight } from '../src/hooks/useKeyboardHeight';
 
 
 let colors = settingsPageColors;
-const TABS = ['对话设置', '生图配置', '语音配置', '工具设置', '日记', '来信', '悬浮球', '表情包', '欢迎页', '美化'] as const;
+const TABS = ['对话设置', '生图配置', '语音配置', '工具设置', '记忆管理', '来信', '悬浮球', '表情包', '欢迎页', '美化'] as const;
 
 const SETTINGS_TABS = [...TABS.slice(0, 7), '小组件', ...TABS.slice(7)] as const;
 

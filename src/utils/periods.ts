@@ -42,7 +42,7 @@ export function addDaysToDateKey(key: string, days: number): string {
   return localDateKeyFromDate(date);
 }
 
-function daysBetweenDateKeys(startKey: string, endKey: string): number {
+export function daysBetweenDateKeys(startKey: string, endKey: string): number {
   const start = parseLocalDateKey(startKey);
   const end = parseLocalDateKey(endKey);
   if (!start || !end) return 0;
@@ -175,11 +175,13 @@ export function buildPeriodSystemPrompt(records: PeriodRecord[]): string | null 
   }
 
   if (inPredictedPeriod) {
-    const dayIndex = inclusiveDaysBetweenDateKeys(prediction.startDate, today);
+    const completedRecords = sortedValidRecords(records);
+    const lastRecord = completedRecords[completedRecords.length - 1];
+    const daysSinceLastStart = daysBetweenDateKeys(lastRecord.startDate, today);
     return [
       '用户已开启生理期状态提醒。',
-      `根据用户本地记录推算，今天 ${today} 处于预测经期第 ${dayIndex} 天，预测区间为 ${prediction.startDate} 至 ${prediction.endDate}，预计 ${prediction.durationDays} 天。`,
-      '这是预测信息，不是确定事实。请在相关对话中保持体贴和克制；不要主动展开医疗建议，除非用户明确询问。',
+      `用户上一次记录的生理期为 ${lastRecord.startDate} 至 ${lastRecord.endDate}，距上次开始已经过了 ${daysSinceLastStart} 天；目前没有新的生理期记录，根据周期推算，生理期可能在近日开始。`,
+      '请勿将预测日期描述为用户已经处于生理期。这只是基于历史记录的推测，不是确定事实。请在相关对话中保持体贴和克制；不要主动展开医疗建议，除非用户明确询问。',
     ].join('\n');
   }
 

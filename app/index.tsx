@@ -1454,7 +1454,7 @@ export default function ChatScreen() {
       maxToRenderPerBatch={8}
       updateCellsBatchingPeriod={32}
       windowSize={9}
-      removeClippedSubviews
+      removeClippedSubviews={false}
       maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
       onScrollToIndexFailed={({ index, averageItemLength }) => {
         if (!pendingScrollMessageIdRef.current) return;

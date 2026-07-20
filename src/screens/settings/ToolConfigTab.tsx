@@ -233,11 +233,18 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
 
   // 记忆库本地 state
   const [mvEnabled, setMvEnabled] = useState(memoryVaultConfig.enabled);
-  const [mvBaseUrl, setMvBaseUrl] = useState(memoryVaultConfig.baseUrl);
+  const [mvBaseUrl] = useState(memoryVaultConfig.baseUrl);
   const [mvTopK, setMvTopK] = useState(String(memoryVaultConfig.topK));
   const [mvTokenBudget, setMvTokenBudget] = useState(String(memoryVaultConfig.tokenBudget));
   const [mvMaxCalls, setMvMaxCalls] = useState(String(memoryVaultConfig.maxToolCalls));
-  const [mvAdminToken, setMvAdminToken] = useState(memoryVaultConfig.adminToken);
+  const [mvAdminToken] = useState(memoryVaultConfig.adminToken);
+  const [mvEmbeddingProvider, setMvEmbeddingProvider] = useState<'openai' | 'google'>(memoryVaultConfig.embeddingProvider || 'openai');
+  const [mvEmbeddingBaseUrl, setMvEmbeddingBaseUrl] = useState(memoryVaultConfig.embeddingBaseUrl || 'https://api.openai.com/v1');
+  const [mvEmbeddingApiKey, setMvEmbeddingApiKey] = useState(memoryVaultConfig.embeddingApiKey || '');
+  const [mvEmbeddingModel, setMvEmbeddingModel] = useState(memoryVaultConfig.embeddingModel || 'text-embedding-3-small');
+  const [mvSplitBaseUrl, setMvSplitBaseUrl] = useState(memoryVaultConfig.splitBaseUrl || 'https://api.openai.com/v1');
+  const [mvSplitApiKey, setMvSplitApiKey] = useState(memoryVaultConfig.splitApiKey || '');
+  const [mvSplitModel, setMvSplitModel] = useState(memoryVaultConfig.splitModel || 'gpt-4o-mini');
   const [mvTesting, setMvTesting] = useState(false);
 
   // 联网搜索本地 state
@@ -592,10 +599,6 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     const topK = parseInt(mvTopK, 10);
     const tokenBudget = parseInt(mvTokenBudget, 10);
     const maxToolCalls = parseInt(mvMaxCalls, 10);
-    if (mvEnabled && !mvBaseUrl.trim()) {
-      Alert.alert('提示', '启用记忆库时请填写记忆库地址');
-      return;
-    }
     setMemoryVaultConfig({
       enabled: mvEnabled,
       baseUrl: mvBaseUrl.trim(),
@@ -603,21 +606,31 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       topK: isNaN(topK) || topK <= 0 ? 5 : topK,
       tokenBudget: isNaN(tokenBudget) || tokenBudget <= 0 ? 2000 : tokenBudget,
       maxToolCalls: isNaN(maxToolCalls) || maxToolCalls <= 0 ? 3 : maxToolCalls,
+      embeddingProvider: mvEmbeddingProvider,
+      embeddingBaseUrl: mvEmbeddingBaseUrl.trim(),
+      embeddingApiKey: mvEmbeddingApiKey.trim(),
+      embeddingModel: mvEmbeddingModel.trim(),
+      splitBaseUrl: mvSplitBaseUrl.trim(),
+      splitApiKey: mvSplitApiKey.trim(),
+      splitModel: mvSplitModel.trim(),
     });
     showToast('记忆库配置已保存');
   }
 
   async function handleTestMemory() {
-    if (!mvBaseUrl.trim()) {
-      Alert.alert('提示', '请先填写记忆库地址');
-      return;
-    }
     setMvTesting(true);
     try {
-      const url = `${mvBaseUrl.trim().replace(/\/$/, '')}/health`;
-      const resp = await fetch(url, { method: 'GET' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      showToast('记忆库服务正常');
+      const { generateMemoryEmbedding } = await import('../../services/localMemoryVault');
+      const config = {
+        ...memoryVaultConfig,
+        embeddingProvider: mvEmbeddingProvider,
+        embeddingBaseUrl: mvEmbeddingBaseUrl.trim(),
+        embeddingApiKey: mvEmbeddingApiKey.trim(),
+        embeddingModel: mvEmbeddingModel.trim(),
+      };
+      const embedding = await generateMemoryEmbedding('记忆库连接测试', config);
+      if (!embedding?.length) throw new Error('请填写 Embedding API Key');
+      showToast(`向量 API 正常（${embedding.length} 维）`);
     } catch (e: any) {
       Alert.alert('连接失败', e.message);
     } finally {
@@ -1900,7 +1913,6 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
     { key: 'messageReaction', name: '消息表情回应', intro: '允许 AI 给用户消息贴 emoji，并配置用户给 AI 消息回应时的两个表情面板。', enabled: messageReactionEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('messageReactionEnabled', value), meta: `${normalizeReactionEmojiList(aiReactionEmojis, DEFAULT_AI_REACTION_EMOJIS).length} 个 AI 表情` },
     { key: 'shizukuShell', name: 'Shizuku 本机终端', intro: '允许 AI 以 Shizuku 身份在当前 Android 设备执行 Shell 命令。', enabled: shizukuShellEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('shizukuShellEnabled', value), meta: '超时 ' + shellTimeoutMs + ' ms' },
     { key: 'accounting', name: '记账管理', intro: '允许 AI 查看用户今日消费与收入，并新增或删除流水记录。', enabled: accountingEnabled, onValueChange: (value: boolean) => handleNativeToolEnabledChange('accountingEnabled', value), meta: '3 个工具' },
-    { key: 'memoryVault', name: '记忆库', intro: '语义/关键词搜索长期记忆，并按日期查询日记内容。', enabled: mvEnabled, onValueChange: handleMemoryVaultEnabledChange, meta: '3 个工具' },
     { key: 'webSearch', name: '联网搜索', intro: '通过 Tavily 搜索互联网，补充实时信息。', enabled: wsEnabled, onValueChange: handleWebSearchEnabledChange, meta: '1 个工具' },
     { key: 'hotboard', name: '热榜查询', intro: '从已选择的平台列表中查询热门话题。', enabled: hbEnabled, onValueChange: handleHotboardEnabledChange, meta: hbPlatformTypes.length + ' 个平台' },
     { key: 'runCommand', name: '远程命令', intro: '通过 SSH 连接专用 AI 服务器执行 shell 命令。与「对话文件」同时开启时，自动激活对话文件与服务器互传工具。', enabled: rcEnabled, onValueChange: handleRunCommandEnabledChange, meta: '最多 ' + (rcMaxCalls || '20') + ' 次' },
@@ -2266,13 +2278,22 @@ export function ToolConfigTab({ showToast, keyboardBottomInset }: SettingsTabPro
       case 'memoryVault':
         return (
           <>
-            <Text style={styles.toolModalDescription}>AI 可以搜索记忆库并查询日记内容。</Text>
+            <Text style={styles.toolModalDescription}>AI 可以搜索、写入设备本地记忆，并直接查询本地日记。无需运行额外服务。</Text>
             <View style={styles.switchRow}><Text style={styles.label}>启用记忆库</Text><Switch value={mvEnabled} onValueChange={handleMemoryVaultEnabledChange} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
-            <View style={styles.field}><Text style={styles.label}>记忆库地址</Text><TextInput style={styles.input} value={mvBaseUrl} onChangeText={setMvBaseUrl} placeholder="https://your-memory-vault.com" placeholderTextColor={colors.textTertiary} autoCapitalize="none" /></View>
-            <View style={styles.field}><Text style={styles.label}>管理员令牌</Text><TextInput style={styles.input} value={mvAdminToken} onChangeText={setMvAdminToken} placeholder="ADMIN_TOKEN" placeholderTextColor={colors.textTertiary} secureTextEntry autoCapitalize="none" /></View>
+            <View style={styles.switchRow}><View style={styles.switchText}><Text style={styles.label}>Google Embedding 格式</Text><Text style={styles.hint}>关闭时使用 OpenAI 兼容格式</Text></View><Switch value={mvEmbeddingProvider === 'google'} onValueChange={(value) => {
+              setMvEmbeddingProvider(value ? 'google' : 'openai');
+              setMvEmbeddingBaseUrl(value ? 'https://generativelanguage.googleapis.com' : 'https://api.openai.com/v1');
+              setMvEmbeddingModel(value ? 'gemini-embedding-001' : 'text-embedding-3-small');
+            }} trackColor={{ false: colors.inputBorder, true: colors.primary }} /></View>
+            <View style={styles.field}><Text style={styles.label}>向量 API 地址</Text><TextInput style={styles.input} value={mvEmbeddingBaseUrl} onChangeText={setMvEmbeddingBaseUrl} placeholder={mvEmbeddingProvider === 'google' ? 'https://generativelanguage.googleapis.com' : 'https://api.openai.com/v1'} placeholderTextColor={colors.textTertiary} autoCapitalize="none" /></View>
+            <View style={styles.field}><Text style={styles.label}>向量 API Key</Text><TextInput style={styles.input} value={mvEmbeddingApiKey} onChangeText={setMvEmbeddingApiKey} secureTextEntry autoCapitalize="none" placeholder="API Key" placeholderTextColor={colors.textTertiary} /></View>
+            <View style={styles.field}><Text style={styles.label}>向量模型</Text><TextInput style={styles.input} value={mvEmbeddingModel} onChangeText={setMvEmbeddingModel} autoCapitalize="none" placeholder={mvEmbeddingProvider === 'google' ? 'gemini-embedding-001' : 'text-embedding-3-small'} placeholderTextColor={colors.textTertiary} /></View>
+            <View style={styles.field}><Text style={styles.label}>日记拆分 API 地址（OpenAI 格式）</Text><TextInput style={styles.input} value={mvSplitBaseUrl} onChangeText={setMvSplitBaseUrl} autoCapitalize="none" placeholder="https://api.openai.com/v1" placeholderTextColor={colors.textTertiary} /></View>
+            <View style={styles.field}><Text style={styles.label}>日记拆分 API Key</Text><TextInput style={styles.input} value={mvSplitApiKey} onChangeText={setMvSplitApiKey} secureTextEntry autoCapitalize="none" placeholder="API Key" placeholderTextColor={colors.textTertiary} /></View>
+            <View style={styles.field}><Text style={styles.label}>日记拆分模型</Text><TextInput style={styles.input} value={mvSplitModel} onChangeText={setMvSplitModel} autoCapitalize="none" placeholder="gpt-4o-mini" placeholderTextColor={colors.textTertiary} /></View>
             <View style={styles.toolNumberRow}><View style={styles.toolNumberField}><Text style={styles.label}>返回条数</Text><TextInput style={styles.input} value={mvTopK} onChangeText={setMvTopK} keyboardType="number-pad" placeholder="5" placeholderTextColor={colors.textTertiary} /></View><View style={styles.toolNumberField}><Text style={styles.label}>令牌预算</Text><TextInput style={styles.input} value={mvTokenBudget} onChangeText={setMvTokenBudget} keyboardType="number-pad" placeholder="2000" placeholderTextColor={colors.textTertiary} /></View></View>
             <View style={styles.field}><Text style={styles.label}>每轮最大调用次数</Text><TextInput style={styles.input} value={mvMaxCalls} onChangeText={setMvMaxCalls} keyboardType="number-pad" placeholder="3" placeholderTextColor={colors.textTertiary} /></View>
-            <Pressable style={styles.testButton} onPress={handleTestMemory} disabled={mvTesting}>{mvTesting ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.testButtonText}>测试连接</Text>}</Pressable>
+            <Pressable style={styles.testButton} onPress={handleTestMemory} disabled={mvTesting}>{mvTesting ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.testButtonText}>测试向量 API</Text>}</Pressable>
           </>
         );
       case 'webSearch':

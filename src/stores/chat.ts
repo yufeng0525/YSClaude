@@ -1715,7 +1715,7 @@ async function runToolLoop(
 ): Promise<{ handled: boolean; totalTokens?: number }> {
   const settings = useSettingsStore.getState();
   const webCruiseEnabled = !!options?.webCruiseEnabled;
-  const memoryEnabled = settings.memoryVaultConfig.enabled && !!settings.memoryVaultConfig.baseUrl;
+  const memoryEnabled = settings.memoryVaultConfig.enabled;
   const webEnabled = settings.webSearchConfig.enabled && !!settings.webSearchConfig.tavilyApiKey;
   const webInteractionEnabled =
     webCruiseEnabled ||
@@ -1780,7 +1780,6 @@ async function runToolLoop(
     ...message,
     content: cloneContent(message.content),
   }));
-
   let toolCallCount = 0;
   let streamedContent = '';
   let totalTokens = 0;
@@ -3464,18 +3463,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const hasUser = messages.some((m) => m.role === 'user');
     if (!hasUser) return;
 
-    // 删除末尾的 assistant 消息（如果有），然后基于剩余历史重新生成
-    const lastAssistant = messages[messages.length - 1];
-    if (lastAssistant && lastAssistant.role === 'assistant') {
-      await deleteMessageGeneratedPictureFiles(lastAssistant);
-      await deleteMessageVoiceFile(lastAssistant);
-      await deleteMessage(lastAssistant.id);
-      set((state) => ({
-        messages: state.messages.filter((m) => m.id !== lastAssistant.id),
-      }));
-    }
-
+    // 先占用流式锁，避免快速重复点击在旧回复删除完成前同时启动两次生成。
     set({ isStreaming: true, error: null });
-    await streamAssistantResponse(get, set, conversationId);
+    try {
+      // 末尾可能有 reaction 等 system 消息，不能只检查数组最后一项。
+      const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+      if (lastAssistant) {
+        await deleteMessageGeneratedPictureFiles(lastAssistant);
+        await deleteMessageVoiceFile(lastAssistant);
+        await deleteMessage(lastAssistant.id);
+        set((state) => ({
+          messages: state.messages.filter((message) => message.id !== lastAssistant.id),
+        }));
+      }
+
+      await streamAssistantResponse(get, set, conversationId);
+    } catch (error: any) {
+      set({
+        isStreaming: false,
+        error: error?.message || '重新生成失败',
+      });
+    }
   },
 }));

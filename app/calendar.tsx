@@ -50,6 +50,7 @@ import {
   addDaysToDateKey,
   buildPeriodDateSet,
   calculatePeriodPrediction,
+  daysBetweenDateKeys,
   findPeriodRecordForDate,
   getDateKeysInRange,
 } from '../src/utils/periods';
@@ -190,7 +191,12 @@ function buildPeriodPreview(records: PeriodRecord[], todayKey: string): string {
   const prediction = calculatePeriodPrediction(records, todayKey);
   if (!prediction) return '暂无可用的生理期记录或预测。';
   if (todayKey >= prediction.startDate && todayKey <= prediction.endDate) {
-    return `今天会发送：预测当前处于生理期，区间为 ${prediction.startDate} 至 ${prediction.endDate}，预计持续 ${prediction.durationDays} 天。`;
+    const completedRecords = records
+      .filter((record): record is PeriodRecord & { endDate: string } => !!record.endDate)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    const lastRecord = completedRecords[completedRecords.length - 1];
+    const daysSinceLastStart = daysBetweenDateKeys(lastRecord.startDate, todayKey);
+    return `今天会发送：上一次生理期为 ${lastRecord.startDate} 至 ${lastRecord.endDate}，距上次开始已经过了 ${daysSinceLastStart} 天，目前没有新的记录，预计可能近日开始。`;
   }
   const notifyStartDate = addDaysToDateKey(prediction.startDate, -2);
   if (todayKey >= notifyStartDate && todayKey < prediction.startDate) {

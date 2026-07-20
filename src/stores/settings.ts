@@ -144,6 +144,13 @@ export interface MemoryVaultConfig {
   topK: number;
   tokenBudget: number;
   maxToolCalls: number;
+  embeddingProvider: 'openai' | 'google';
+  embeddingBaseUrl: string;
+  embeddingApiKey: string;
+  embeddingModel: string;
+  splitBaseUrl: string;
+  splitApiKey: string;
+  splitModel: string;
 }
 
 export interface WebSearchConfig {
@@ -961,6 +968,13 @@ export const useSettingsStore = create<SettingsState>()(
         topK: 5,
         tokenBudget: 2000,
         maxToolCalls: 3,
+        embeddingProvider: 'openai',
+        embeddingBaseUrl: 'https://api.openai.com/v1',
+        embeddingApiKey: '',
+        embeddingModel: 'text-embedding-3-small',
+        splitBaseUrl: 'https://api.openai.com/v1',
+        splitApiKey: '',
+        splitModel: 'gpt-4o-mini',
       },
       webSearchConfig: {
         enabled: false,
@@ -1621,6 +1635,7 @@ export const useSettingsStore = create<SettingsState>()(
           voiceCallSTTProvider: saved.voiceCallSTTProvider || saved.sttConfig?.provider || currentState.voiceCallSTTProvider,
           voiceCallEngine: saved.voiceCallEngine || currentState.voiceCallEngine,
           liveKitVoiceCallConfig: { ...currentState.liveKitVoiceCallConfig, ...saved.liveKitVoiceCallConfig },
+          memoryVaultConfig: { ...currentState.memoryVaultConfig, ...saved.memoryVaultConfig },
           systemPromptBlocks: migratedBlocks,
         };
       },
