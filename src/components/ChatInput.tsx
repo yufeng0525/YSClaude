@@ -1258,6 +1258,7 @@ export function ChatInput({
                   style={[
                     styles.inputPlaceholder,
                     styles.compactInputPlaceholder,
+                    inputPlaceholderStyle,
                     { color: inputPlaceholderTextColor },
                   ]}
                 >
@@ -1321,7 +1322,11 @@ export function ChatInput({
                 <Text
                   accessible={false}
                   pointerEvents="none"
-                  style={[styles.inputPlaceholder, { color: inputPlaceholderTextColor }]}
+                  style={[
+                    styles.inputPlaceholder,
+                    inputPlaceholderStyle,
+                    { color: inputPlaceholderTextColor },
+                  ]}
                 >
                   Reply to Claude...
                 </Text>
