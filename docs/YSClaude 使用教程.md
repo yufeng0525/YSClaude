@@ -144,6 +144,14 @@ android\app\build\outputs\apk\release\app-release.apk
 
 ![2](2.png)
 
+## 可导入官克数据
+
+导入conversation.js
+
+![5](E:\Desktop\YSClaude-project\YSClaude\docs\5.png)
+
+
+
 ## 提示词结构
 
 主聊天中发送给AI的提示词结构，【】内容是说明。若开启内置缓存功能，缓存标记上方内容保持不变才能命中缓存。
