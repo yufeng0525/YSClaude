@@ -1,4 +1,7 @@
 {
+  "overrides": {
+    "@livekit/react-native-webrtc": "137.0.3"
+  },
   "name": "ysclaude",
   "version": "1.0.2",
   "main": "index.js",
