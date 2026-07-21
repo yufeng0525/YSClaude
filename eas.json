@@ -20,10 +20,11 @@
     "production": {
       "autoIncrement": true,
       "android": {
-    "buildType": "apk"
+        "buildType": "apk"
+      }
+    },
+    "submit": {
+      "production": {}
     }
-  },
-  "submit": {
-    "production": {}
   }
 }
