@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Claude",
-    "slug": "Claude",
+    "name": "claude",
+    "slug": "claude",
     "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
