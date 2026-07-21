@@ -22,9 +22,9 @@
       "android": {
         "buildType": "apk"
       }
-    },
-    "submit": {
-      "production": {}
     }
+  },
+  "submit": {  // ✅ submit 挪到外面，和 build、cli 平级
+    "production": {}
   }
 }
