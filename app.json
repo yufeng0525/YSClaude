@@ -17,6 +17,9 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "gradleProperties": {
+  "mavenRepoUrls": "https://repo1.maven.org/maven2"
+},
       "permissions": [
         "android.permission.PACKAGE_USAGE_STATS",
         "android.permission.FOREGROUND_SERVICE",
