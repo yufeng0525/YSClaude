@@ -98,9 +98,11 @@
         }
       ]
     ],
-  "extra": {
-  "router": {},
-  "eas": {
-    "projectId": "6e8e83ac-edf3-4db1-9f0e-819e987858c9"
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6e8e83ac-edf3-4db1-9f0e-819e987858c9"
+      }
+    }
   }
 }
